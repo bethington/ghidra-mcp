@@ -25,12 +25,10 @@ public class FunctionServiceClearFlowAndRepairTest extends TestCase {
     }
 
     public void testRejectsMissingStartAddress() {
-        Response r = functions.clearFlowAndRepair(null, "", programStub);
+        Response r = functions.clearFlowAndRepair(null, null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("start_address parameter required"));
 
-        r = functions.clearFlowAndRepair("", "", programStub);
-        assertTrue(r instanceof Response.Err);
     }
 
 }

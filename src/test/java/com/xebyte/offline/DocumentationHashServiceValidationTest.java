@@ -28,7 +28,7 @@ public class DocumentationHashServiceValidationTest extends TestCase {
     // --- validate-first branches (run before the program lookup) ---
 
     public void testFindUndocumentedByStringRequiresAddress() {
-        Response r = docs.findUndocumentedByString("", programStub);
+        Response r = docs.findUndocumentedByString(null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("String address is required"));
     }

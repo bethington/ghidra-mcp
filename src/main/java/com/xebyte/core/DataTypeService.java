@@ -847,7 +847,7 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Type to apply at the address. Any name the resolver understands: a "
                                + "built-in (uint, char *), an existing struct/enum/typedef name, a pointer "
@@ -865,7 +865,8 @@ public class DataTypeService {
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        if (addressStr == null || addressStr.isEmpty()) {
+
+        if (addr == null) {
             return Response.err("Address is required");
         }
 
@@ -874,11 +875,6 @@ public class DataTypeService {
         }
 
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
-            Address address = ServiceUtils.parseAddress(program, addressStr);
-            if (address == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dataType = ServiceUtils.resolveDataType(dtm, typeName);
 
@@ -892,8 +888,8 @@ public class DataTypeService {
             List<String> enforcementWarnings = new ArrayList<>();
 
             // Check if address is in a valid memory block
-            if (!program.getMemory().contains(address)) {
-                return Response.err("Address is not in program memory: " + addressStr);
+            if (!program.getMemory().contains(addr)) {
+                return Response.err("Address is not in program memory: " + addr.toString());
             }
 
             // Hungarian-vs-name cross-check (option A enforcement gate).
@@ -907,7 +903,7 @@ public class DataTypeService {
             // and would be over-zealous to re-check on type writes against
             // grandfathered names.
             SymbolTable preCheckSymTable = program.getSymbolTable();
-            Symbol preCheckSym = preCheckSymTable.getPrimarySymbol(address);
+            Symbol preCheckSym = preCheckSymTable.getPrimarySymbol(addr);
             if (preCheckSym != null) {
                 String existingName = preCheckSym.getName();
                 if (existingName != null && existingName.startsWith("g_")) {
@@ -917,7 +913,7 @@ public class DataTypeService {
                         Map<String, Object> rejection = JsonHelper.mapOf(
                                 "status", "rejected",
                                 "error", "prefix_type_mismatch",
-                                "address", addressStr,
+                                "address", addr.toString(),
                                 "current_name", existingName,
                                 "rejected_type", typeName,
                                 "message", preCheckResult.message,
@@ -943,7 +939,7 @@ public class DataTypeService {
             // collides and nothing is destroyed.
             if (clearExisting) {
                 Response evictionReject = evictionRejection(
-                        program, address, dataType, 0, false, typeName);
+                        program, addr, dataType, 0, false, typeName);
                 if (evictionReject != null) return evictionReject;
             }
 
@@ -967,12 +963,12 @@ public class DataTypeService {
                     // freed the range. clearCodeUnits is a documented no-op over a
                     // range with nothing defined, so this is safe to call unconditionally.
                     if (clearExisting) {
-                        listing.clearCodeUnits(address,
-                            address.add(Math.max(dataType.getLength() - 1, 0)), false);
+                        listing.clearCodeUnits(addr,
+                            addr.add(Math.max(dataType.getLength() - 1, 0)), false);
                     }
 
                     // Apply the data type
-                    Data data = listing.createData(address, dataType);
+                    Data data = listing.createData(addr, dataType);
 
                     // Validate size matches expectation
                     int expectedSize = dataType.getLength();
@@ -980,15 +976,15 @@ public class DataTypeService {
 
                     if (actualSize != expectedSize) {
                         Msg.warn(this, String.format("Size mismatch: expected %d bytes but applied %d bytes at %s",
-                                                     expectedSize, actualSize, addressStr));
+                                                     expectedSize, actualSize, addr.toString()));
                     }
 
                     Map<String, Object> out = new LinkedHashMap<>();
                     out.put("status", "success");
                     out.put("message", "Successfully applied data type '" + typeName + "' at "
-                            + addressStr + " (size: " + actualSize + " bytes)");
+                            + addr.toString() + " (size: " + actualSize + " bytes)");
                     out.put("type_name", typeName);
-                    out.put("address", addressStr);
+                    out.put("address", addr.toString());
                     out.put("size", actualSize);
 
                     // Add value information if available
@@ -1010,16 +1006,9 @@ public class DataTypeService {
         }
     }
 
-    /** Four-arg overload preserving the pre-v5.11.2 signature. */
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting,
-                                   Program program) {
-        return applyDataType(addressStr, typeName, clearExisting, program, null);
-    }
+    
 
-    // Backward compatibility overload
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        return applyDataType(addressStr, typeName, clearExisting, null, null);
-    }
+
 
     /**
      * Delete a data type from the program
@@ -2160,7 +2149,7 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Optional label for the structure being analysed. It does NOT select the "
                                + "type — that comes from the data already applied at `address` — and is only "
@@ -2175,10 +2164,9 @@ public class DataTypeService {
                    " and " + MAX_FUNCTIONS_TO_ANALYZE);
         }
 
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
-        return analyzeStructFieldUsageAt(program, addr, addressStr, structName, maxFunctionsToAnalyze);
+        return analyzeStructFieldUsageAt(program, addr, addr.toString(), structName, maxFunctionsToAnalyze);
     }
 
     private Response analyzeStructFieldUsageAt(Program program, Address addr, String addressStr,
@@ -2292,10 +2280,7 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
-        return analyzeStructFieldUsage(addressStr, structName, maxFunctionsToAnalyze, null);
-    }
+
 
     /**
      * Analyze decompiled code to extract field usage patterns
@@ -2392,7 +2377,7 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String structAddressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Size of the structure in BYTES, or 0 (the default) to take the size "
                                + "from the data already applied at struct_address. Must be 0 to 65536.") int structSize,
@@ -2402,10 +2387,9 @@ public class DataTypeService {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
         }
 
-        Address addr = ServiceUtils.parseAddress(program, structAddressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
-        return suggestFieldNamesAt(program, addr, structAddressStr);
+        return suggestFieldNamesAt(program, addr, addr.toString());
     }
 
     private Response suggestFieldNamesAt(Program program, Address addr, String structAddressStr) {
@@ -2463,10 +2447,7 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response suggestFieldNames(String structAddressStr, int structSize) {
-        return suggestFieldNames(structAddressStr, structSize, null);
-    }
+
 
     /**
      * Generate field name suggestions based on data type and patterns
@@ -3538,15 +3519,13 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response auditGlobal(
             @Param(value = "address", paramType = "address",
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+
+        if (addr == null) {
             return Response.err("address is required");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        return Response.ok(auditGlobalAt(program, addr));
+            return Response.ok(auditGlobalAt(program, addr));
     }
 
     // ------------------------------------------------------------------
@@ -3744,16 +3723,14 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response analyzeGlobalCompleteness(
             @Param(value = "address", paramType = "address",
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (score/effective/band/missing only)") boolean compact,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+
+        if (addr == null) {
             return Response.err("address is required");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Map<String, Object> full = scoreGlobalCompletenessAt(program, addr);
+            Map<String, Object> full = scoreGlobalCompletenessAt(program, addr);
         if (compact) {
             Map<String, Object> slim = new LinkedHashMap<>();
             for (String k : new String[]{"address", "name", "applicable", "score",
@@ -3851,7 +3828,7 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.WRITE)
     public Response setGlobal(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New name. Must follow g_ + Hungarian + descriptor convention (e.g., g_dwActiveQuestState, g_pUnitList).") String newName,
             @Param(value = "type_name", source = ParamSource.BODY,
@@ -3867,9 +3844,8 @@ public class DataTypeService {
             @Param(value = "allow_evict", source = ParamSource.BODY, defaultValue = "false",
                    description = "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.")
                     boolean allowEvict) {
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        if (addr == null) return Response.err("address is required");
+        
 
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
         // Pre-flight validation. Strict naming enforcement preserves the
@@ -3903,7 +3879,7 @@ public class DataTypeService {
                         "error", "name_quality",
                         "issue", quality.issue,
                         "rejected_name", newName,
-                        "address", addressStr,
+                        "address", addr.toString(),
                         "message", quality.message,
                         "suggestion", quality.suggestion
                 );
@@ -4050,7 +4026,7 @@ public class DataTypeService {
         final DataType finalType = resolvedType;
 
         try {
-            List<String> applied = threadingStrategy.executeWrite(program, "set_global at " + addressStr, () -> {
+            List<String> applied = threadingStrategy.executeWrite(program, "set_global at " + addr.toString(), () -> {
                 Listing listing = program.getListing();
                 List<String> appliedLocal = new ArrayList<>();
 

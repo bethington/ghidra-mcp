@@ -1005,24 +1005,20 @@ public class ListingService {
             @Param(value = "address", paramType = "address",
                    description = "Address of the external location, as 0x<hex> (default space) or "
                                + "<space>:<hex> (e.g. mem:1000). This is the selector: matching is done "
-                               + "on the address alone, so a dll_name with no address finds nothing.") String address,
+                               + "on the address alone, so a dll_name with no address finds nothing.") Address addr,
             @Param(value = "dll_name", defaultValue = "",
                    description = "External library name (as list_program_items(kind=imports) or "
                                + "kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the "
                                + "search only — it cannot select an entry by itself.") String dllName,
             @Param(value = "program", defaultValue = "") Program program) {
+
         ExternalManager extMgr = program.getExternalManager();
-        Address addr = null;
-        if (address != null && !address.isBlank()) {
-            addr = ServiceUtils.parseAddress(program, address);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-        }
 
         if (dllName != null && !dllName.isEmpty()) {
             ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
             while (iter.hasNext()) {
                 ExternalLocation extLoc = iter.next();
-                if (matchesExternalLocation(extLoc, addr, null)) {
+                if (matchesExternalLocation(extLoc, addr)) {
                     return Response.ok(externalLocationToMap(extLoc, dllName));
                 }
             }
@@ -1033,18 +1029,16 @@ public class ListingService {
                 ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
-                    if (matchesExternalLocation(extLoc, addr, address)) {
+                    if (matchesExternalLocation(extLoc, addr)) {
                         return Response.ok(externalLocationToMap(extLoc, libName));
                     }
                 }
             }
-            return Response.ok(JsonHelper.mapOf("address", address));
+            return Response.ok(JsonHelper.mapOf("address", addr != null ? addr.toString() : null));
         }
     }
 
-    public Response getExternalLocationDetails(String address, String dllName) {
-        return getExternalLocationDetails(address, dllName, null);
-    }
+
 
     private static Map<String, Object> externalLocationToMap(ExternalLocation extLoc, String libName) {
         Map<String, Object> entry = new LinkedHashMap<>();
@@ -1065,15 +1059,9 @@ public class ListingService {
         return entry;
     }
 
-    private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr, String rawAddress) {
+    private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr) {
         Address extAddr = extLoc.getAddress();
-        if (addr != null) {
-            return extAddr != null && extAddr.equals(addr);
-        }
-        if (rawAddress == null || rawAddress.isBlank()) {
-            return false;
-        }
-        return extAddr != null && extAddr.toString().equalsIgnoreCase(rawAddress.strip());
+        return extAddr != null && extAddr.equals(addr);
     }
 
     // ======================================================================

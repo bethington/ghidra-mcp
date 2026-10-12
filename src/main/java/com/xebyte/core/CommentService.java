@@ -40,17 +40,14 @@ public class CommentService {
     /**
      * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT).
      */
-    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName, Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+    public Response setCommentAtAddress(Address addr, String comment, int commentType, String transactionName, Program program) {
+
+        if (addr == null) {
             return Response.err("Address is required");
         }
         if (comment == null) {
             return Response.err("Comment text is required");
         }
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         try {
             threadingStrategy.executeWrite(program, transactionName, () -> {
@@ -74,16 +71,14 @@ public class CommentService {
             List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
             if (!plateWarnings.isEmpty()) {
                 return Response.ok(JsonHelper.mapOf("status", "success",
-                        "message", "Set plate comment at " + addressStr, "warnings", plateWarnings));
+                        "message", "Set plate comment at " + addr.toString(), "warnings", plateWarnings));
             }
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addressStr));
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addr.toString()));
         }
-        return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addressStr));
+        return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addr.toString()));
     }
 
-    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
-        return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
-    }
+
 
     private static String firstNonEmpty(String... ss) {
         for (String s : ss) {
@@ -105,7 +100,7 @@ public class CommentService {
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Address in the program (single mode). Accepts 0x<hex> (default space) or "
                                + "<space>:<hex>. Works for data addresses, not just functions. Omit when "
-                               + "using addresses.") String addressStr,
+                               + "using addresses.") Address addr,
             @Param(value = "addresses", defaultValue = "",
                    description = "Bulk mode: comma-separated addresses, each 0x<hex> (default space) or "
                                + "<space>:<hex>. When non-empty, address is ignored.") String addressesStr,
@@ -113,17 +108,14 @@ public class CommentService {
                    description = "Bulk mode: omit addresses where has_comment is false, so a sweep "
                                + "response holds only the interesting subset.") boolean onlyWithComments,
             @Param(value = "program", defaultValue = "") Program program) {
+
         if (addressesStr != null && !addressesStr.trim().isEmpty()) {
             return getCommentsBulk(program, addressesStr, onlyWithComments);
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address parameter is required (or pass addresses for bulk)");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-        // Explicit nulls for kinds never set, distinct from "" for kinds explicitly cleared.
+// Explicit nulls for kinds never set, distinct from "" for kinds explicitly cleared.
         // The shared Gson instance drops null map values (see JsonHelper), so the response is
         // serialized with a local Gson configured to keep them, via Response.text -- the
         // sanctioned pre-serialized-JSON escape hatch, not a prose report.
@@ -190,7 +182,7 @@ public class CommentService {
     @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment", access = ToolAccess.WRITE)
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
+                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") Address addr,
             @Param(value = "comment", source = ParamSource.BODY, allowEmpty = true,
                    description = "Comment text. An empty string clears this comment kind at the address.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
@@ -207,7 +199,7 @@ public class CommentService {
             default:
                 return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
         }
-        return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", program);
+        return setCommentAtAddress(addr, comment, ct, "Set " + t + " comment", program);
     }
 
     /**
@@ -220,7 +212,7 @@ public class CommentService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Address functionAddress,
             @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "JSON array of {address, comment} objects setting PRE comments — the "
                                + "lines the decompiler shows above a statement. Every entry carries its "
@@ -237,14 +229,7 @@ public class CommentService {
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
             @Param(value = "program", defaultValue = "") Program program) {
-        // Resolve function address before entering SwingUtilities lambda
-        final Address funcAddr;
-        if (functionAddress != null && !functionAddress.isEmpty()) {
-            funcAddr = ServiceUtils.parseAddress(program, functionAddress);
-            if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
-        } else {
-            funcAddr = null;
-        }
+
 
         // Pre-flight plate-quality gate (option B enforcement). When the
         // target address is a data global (defined data, no function),
@@ -255,13 +240,13 @@ public class CommentService {
         // comments retain the existing (warning-only) flow because
         // function plates have their own structural rules in
         // validatePlateCommentStructure called below.
-        if (funcAddr != null
+        if (functionAddress != null
                 && plateComment != null
                 && !plateComment.equals("null")
                 && !plateComment.isEmpty()) {
-            Function preFunc = program.getFunctionManager().getFunctionAt(funcAddr);
+            Function preFunc = program.getFunctionManager().getFunctionAt(functionAddress);
             if (preFunc == null) {
-                Data preData = program.getListing().getDefinedDataAt(funcAddr);
+                Data preData = program.getListing().getDefinedDataAt(functionAddress);
                 if (preData != null) {
                     String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
                     if (plateIssue != null) {
@@ -293,8 +278,8 @@ public class CommentService {
                     //   (returning success with `plate_comment_set: false`), which is
                     //   exactly what made the globals worker think it had set a plate
                     //   when nothing actually landed.
-                    if (plateComment != null && !plateComment.equals("null") && funcAddr != null) {
-                        Function func = program.getFunctionManager().getFunctionAt(funcAddr);
+                    if (plateComment != null && !plateComment.equals("null") && functionAddress != null) {
+                        Function func = program.getFunctionManager().getFunctionAt(functionAddress);
                         if (func != null) {
                             String existingPlate = func.getComment();
                             if (existingPlate != null && !existingPlate.isEmpty()) {
@@ -304,7 +289,7 @@ public class CommentService {
                             plateSet = true;
                         } else {
                             // Data-global path. Previously gated on
-                            // `getDefinedDataAt(funcAddr) != null` which
+                            // `getDefinedDataAt(functionAddress) != null` which
                             // silently skipped the plate write when the
                             // address had no defined data yet (the most
                             // common pre-documentation state — symbol
@@ -316,12 +301,12 @@ public class CommentService {
                             // so the gate was never necessary.
                             Listing dataListing = program.getListing();
                             String existingPlate = dataListing.getComment(
-                                    CodeUnit.PLATE_COMMENT, funcAddr);
+                                    CodeUnit.PLATE_COMMENT, functionAddress);
                             if (existingPlate != null && !existingPlate.isEmpty()) {
                                 overwrittenCount++;
                             }
                             dataListing.setComment(
-                                    funcAddr,
+                                    functionAddress,
                                     CodeUnit.PLATE_COMMENT,
                                     plateComment.isEmpty() ? null : plateComment);
                             plateSet = true;
@@ -395,10 +380,7 @@ public class CommentService {
         return Response.ok(resultMap);
     }
 
-    public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
-                                     List<Map<String, String>> disassemblyComments, String plateComment) {
-        return batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment, null);
-    }
+
 
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.

@@ -86,7 +86,7 @@ public class XrefCallGraphService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "addresses", defaultValue = "",
                    description = "Comma-separated addresses for the many-at-once form. The result is a "
                                + "map of address to its reference list, and an address that does not "
@@ -103,13 +103,11 @@ public class XrefCallGraphService {
         if (addressesCsv != null && !addressesCsv.isEmpty()) {
             return xrefsToMany(program, addressesCsv);
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address (one) or addresses (comma-separated) is required");
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
@@ -149,7 +147,7 @@ public class XrefCallGraphService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -159,11 +157,9 @@ public class XrefCallGraphService {
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (addr == null) return Response.err("Address is required");
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             Reference[] references = refManager.getReferencesFrom(addr);
@@ -212,9 +208,9 @@ public class XrefCallGraphService {
     public Response addMemoryReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from (the table slot / instruction). "
-                               + "Accepts 0x<hex> or <space>:<hex> (e.g. mem:1000).") String fromAddressStr,
+                               + "Accepts 0x<hex> or <space>:<hex> (e.g. mem:1000).") Address fromAddr,
             @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") Address toAddr,
             @Param(value = "ref_type", source = ParamSource.BODY, defaultValue = "DATA",
                    description = "Reference type (case-insensitive RefType name): DATA, READ, WRITE, READ_WRITE, "
                                + "COMPUTED_CALL, UNCONDITIONAL_CALL, COMPUTED_JUMP, UNCONDITIONAL_JUMP, "
@@ -225,14 +221,9 @@ public class XrefCallGraphService {
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
-        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
 
-        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
-        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
-        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
-        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
-
+        if (fromAddr == null) return Response.err("from_address is required");
+        if (toAddr == null) return Response.err("to_address is required");
         RefType refType = resolveMemoryRefType(refTypeStr);
         if (refType == null) {
             return Response.err("Unknown ref_type '" + refTypeStr + "'. Valid names include: "
@@ -283,21 +274,16 @@ public class XrefCallGraphService {
             category = "xref", access = ToolAccess.DESTRUCTIVE)
     public Response removeReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
+                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") Address fromAddr,
             @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") Address toAddr,
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index to match. -1 (default) = remove references on any operand; "
                                + ">= 0 = remove only the reference on that operand.") int operandIndex,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
-        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
 
-        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
-        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
-        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
-        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
-
+        if (fromAddr == null) return Response.err("from_address is required");
+        if (toAddr == null) return Response.err("to_address is required");
         // Collect the matching references up front, then delete inside the transaction.
         List<Reference> matches = new ArrayList<>();
         for (Reference ref : program.getReferenceManager().getReferencesFrom(fromAddr)) {

@@ -549,23 +549,19 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.WRITE)
     public Response setProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name (list them with list_properties and no map).") String mapName,
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) Address addr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
             @Param(value = "program", defaultValue = "") Program program) {
+
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (addr == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'. Create it with create_property_map.");
         }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
-        if (map instanceof ObjectPropertyMap) {
+if (map instanceof ObjectPropertyMap) {
             return Response.err("Object property maps cannot be written via MCP (they require a registered Saveable type).");
         }
 
@@ -591,13 +587,13 @@ public class ProgramScriptService {
         try {
             threadingStrategy.executeWrite(program, "Set Property", () -> {
                 if (map instanceof IntPropertyMap ip) {
-                    ip.add(address, (Integer) parsed);
+                    ip.add(addr, (Integer) parsed);
                 } else if (map instanceof LongPropertyMap lp) {
-                    lp.add(address, (Long) parsed);
+                    lp.add(addr, (Long) parsed);
                 } else if (map instanceof StringPropertyMap sp) {
-                    sp.add(address, (String) parsed);
+                    sp.add(addr, (String) parsed);
                 } else if (map instanceof VoidPropertyMap vp) {
-                    vp.add(address);
+                    vp.add(addr);
                 }
                 return null;
             });
@@ -608,7 +604,7 @@ public class ProgramScriptService {
         return Response.ok(JsonHelper.mapOf(
             "success", true,
             "map", mapName,
-            "address", address.toString(),
+            "address", addr.toString(),
             "value_type", propertyMapValueType(map),
             "value", parsed,
             "note", "Call save_program to persist this change to the database.",
@@ -625,26 +621,22 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProperty(
             @Param(value = "map", defaultValue = "", description = "Property map name. Omit to list the maps.") String mapName,
-            @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
+
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (addr == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'.");
         }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
         try {
-            boolean hasValue = map.hasProperty(address);
-            Object value = hasValue ? renderPropertyValue(map.get(address)) : null;
+            boolean hasValue = map.hasProperty(addr);
+            Object value = hasValue ? renderPropertyValue(map.get(addr)) : null;
             return Response.ok(JsonHelper.mapOf(
                 "map", mapName,
-                "address", address.toString(),
+                "address", addr.toString(),
                 "has_value", hasValue,
                 "value_type", propertyMapValueType(map),
                 "value", value,
@@ -662,18 +654,14 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) Address address,
             @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (address == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'.");
-        }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
         }
 
         final boolean removed;
@@ -701,11 +689,12 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response listProperties(
             @Param(value = "map", description = "Property map name (list them with list_properties and no map).") String mapName,
-            @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") String startStr,
-            @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
+            @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") Address start,
+            @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") Address end,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
             @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
+
         if (mapName == null || mapName.isEmpty()) return propertyMaps(program);
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
@@ -716,17 +705,13 @@ public class ProgramScriptService {
 
         try {
             AddressIterator it;
-            boolean hasStart = startStr != null && !startStr.isEmpty();
-            boolean hasEnd = endStr != null && !endStr.isEmpty();
+            boolean hasStart = start != null;
+            boolean hasEnd = end != null;
             if (hasStart != hasEnd) {
                 return Response.err("Provide both start and end to filter by range, or neither.");
             }
             if (hasStart) {
-                Address start = ServiceUtils.parseAddress(program, startStr);
-                if (start == null) return Response.err("start: " + ServiceUtils.getLastParseError());
-                Address end = ServiceUtils.parseAddress(program, endStr);
-                if (end == null) return Response.err("end: " + ServiceUtils.getLastParseError());
-                it = map.getPropertyIterator(start, end);
+it = map.getPropertyIterator(start, end);
             } else {
                 it = map.getPropertyIterator();
             }
@@ -2627,15 +2612,10 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
             @Param(value = "program", defaultValue = "") Program program) {
         try {
-            Address address = ServiceUtils.parseAddress(program, addressStr);
-            if (address == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             Memory memory = program.getMemory();
             int MAX_READ_BYTES = 16 * 1024 * 1024; // 16 MB safety limit
             if (length <= 0 || length > MAX_READ_BYTES) {
@@ -2643,7 +2623,7 @@ public class ProgramScriptService {
             }
             byte[] bytes = new byte[length];
 
-            int bytesRead = memory.getBytes(address, bytes);
+            int bytesRead = memory.getBytes(addr, bytes);
 
             List<Integer> dataList = new ArrayList<>();
             StringBuilder hexStr = new StringBuilder();
@@ -2653,7 +2633,7 @@ public class ProgramScriptService {
             }
 
             Map<String, Object> memResult = new LinkedHashMap<>();
-            memResult.putAll(ServiceUtils.addressToJson(address, program));
+            memResult.putAll(ServiceUtils.addressToJson(addr, program));
             memResult.put("length", bytesRead);
             memResult.put("data", dataList);
             memResult.put("hex", hexStr.toString());
@@ -2904,14 +2884,7 @@ public class ProgramScriptService {
         return new SequenceInputStream(head, tail);
     }
 
-    /**
-     * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
-     */
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment) {
-        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
-    }
+    
 
     @McpTool(path = "/set_memory_block", method = "POST",
             description = "Change an existing memory block's permissions or volatility. The one that "
@@ -2926,7 +2899,7 @@ public class ProgramScriptService {
                                + "address.") String blockName,
             @Param(value = "address", paramType = Param.ADDRESS, source = ParamSource.BODY, defaultValue = "",
                    description = "Any address inside the block, 0x<hex> or <space>:<hex>. Give this or "
-                               + "block.") String addressStr,
+                               + "block.") Address addr,
             @Param(value = "read", source = ParamSource.BODY, defaultValue = "",
                    description = "New read permission; omit to leave it as it is.") Boolean read,
             @Param(value = "write", source = ParamSource.BODY, defaultValue = "",
@@ -2942,10 +2915,11 @@ public class ProgramScriptService {
             return Response.err("nothing to change: give read, write, execute or volatile");
         }
         boolean byName = blockName != null && !blockName.isBlank();
-        boolean byAddress = addressStr != null && !addressStr.isBlank();
+        boolean byAddress = addr != null;
         if (byName == byAddress) {
             return Response.err("give exactly one of block or address");
         }
+
         MemoryBlock block;
         if (byName) {
             block = program.getMemory().getBlock(blockName.trim());
@@ -2953,13 +2927,9 @@ public class ProgramScriptService {
                 return Response.err("No memory block named '" + blockName + "'");
             }
         } else {
-            Address at = ServiceUtils.parseAddress(program, addressStr);
-            if (at == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-            block = program.getMemory().getBlock(at);
+            block = program.getMemory().getBlock(addr);
             if (block == null) {
-                return Response.err("No memory block contains " + addressStr);
+                return Response.err("No memory block contains " + addr.toString());
             }
         }
         String before = blockPermissions(block);
@@ -2991,17 +2961,6 @@ public class ProgramScriptService {
             + (block.isExecute() ? "x" : "-") + (block.isVolatile() ? "v" : "-");
     }
 
-    /**
-     * Backward-compatible entry point predating byte contents: creates an
-     * uninitialized, non-overlay block.
-     */
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment, Program program) {
-        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile,
-                comment, "", "", false, 0, false, program);
-    }
-
     @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response createMemoryBlock(
             @Param(value = "name", source = ParamSource.BODY,
@@ -3012,7 +2971,7 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Block length in bytes. Omit (or 0) when byte content is supplied to "
                                + "size the block to the content exactly. If larger than the content, "
@@ -3065,10 +3024,11 @@ public class ProgramScriptService {
                                + "shadowing); the overlap check is skipped and the response "
                                + "reports the generated overlay space in address_space.") boolean overlay,
             @Param(value = "program", defaultValue = "") Program program) {
+
         if (name == null || name.isEmpty()) {
             return Response.err("name parameter required");
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address parameter required");
         }
 
@@ -3080,12 +3040,6 @@ public class ProgramScriptService {
             plan = planBlockContent(content, initialized, size, fillByte);
         } catch (IllegalArgumentException e) {
             return Response.err(e.getMessage());
-        }
-
-        // Resolve address before entering the write
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
         }
 
         try {
@@ -3154,13 +3108,12 @@ public class ProgramScriptService {
     // Bookmark Operations
     // ========================================================================
 
+    
+
     /**
      * Set a bookmark at an address with category and comment.
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
-    public Response setBookmark(String addressStr, String category, String comment) {
-        return setBookmark(addressStr, category, comment, null);
-    }
 
     @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response setBookmark(
@@ -3169,7 +3122,7 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
                    description = "Bookmark category, free text; empty or omitted becomes the literal "
                                + "`Note`. An existing bookmark at this address in the SAME category is "
@@ -3179,7 +3132,8 @@ public class ProgramScriptService {
                    description = "Bookmark text. Empty is allowed and stores an empty "
                                + "comment.") String comment,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+
+        if (addr == null) {
             return Response.err("Address is required");
         }
         if (category == null || category.isEmpty()) {
@@ -3190,17 +3144,12 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             BookmarkManager bookmarkManager = program.getBookmarkManager();
             final String finalCategory = category;
             final String finalComment = comment;
 
             try {
-                return threadingStrategy.executeWrite(program, "Set bookmark at " + addressStr, () -> {
+                return threadingStrategy.executeWrite(program, "Set bookmark at " + addr.toString(), () -> {
                     Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
                     if (existing != null) {
                         bookmarkManager.removeBookmark(existing);
@@ -3223,12 +3172,11 @@ public class ProgramScriptService {
         }
     }
 
+    
+
     /**
      * List bookmarks, optionally filtered by category and/or address.
      */
-    public Response listBookmarks(String category, String addressStr) {
-        return listBookmarks(category, addressStr, null);
-    }
 
     @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listBookmarks(
@@ -3238,19 +3186,15 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
+
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
 
             // If specific address provided, get bookmarks at that address
-            if (addressStr != null && !addressStr.isEmpty()) {
-                Address addr = ServiceUtils.parseAddress(program, addressStr);
-                if (addr == null) {
-                    return Response.err(ServiceUtils.getLastParseError());
-                }
-
+            if (addr != null) {
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
                 for (Bookmark bm : bms) {
                     if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
@@ -3292,12 +3236,11 @@ public class ProgramScriptService {
         }
     }
 
+    
+
     /**
      * Delete a bookmark at an address with optional category filter.
      */
-    public Response deleteBookmark(String addressStr, String category) {
-        return deleteBookmark(addressStr, category, null);
-    }
 
     @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deleteBookmark(
@@ -3306,26 +3249,22 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
                    description = "Delete only bookmarks in this category. Empty (the default) deletes "
                                + "EVERY bookmark at the address whatever its category; `deleted` in the "
                                + "response counts how many went.") String category,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+
+        if (addr == null) {
             return Response.err("Address is required");
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             BookmarkManager bookmarkManager = program.getBookmarkManager();
 
             try {
-                return threadingStrategy.executeWrite(program, "Delete bookmark at " + addressStr, () -> {
+                return threadingStrategy.executeWrite(program, "Delete bookmark at " + addr.toString(), () -> {
                     int deleted = 0;
                     Bookmark[] bms = bookmarkManager.getBookmarks(addr);
 

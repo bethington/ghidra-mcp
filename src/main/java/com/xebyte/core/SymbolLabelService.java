@@ -879,9 +879,7 @@ public class SymbolLabelService {
     // Address Inspection Methods
     // -----------------------------------------------------------------------
 
-    public Response canRenameAtAddress(String addressStr) {
-        return canRenameAtAddress(addressStr, null);
-    }
+
 
     @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response canRenameAtAddress(
@@ -890,10 +888,9 @@ public class SymbolLabelService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         try {
             return Response.ok(renameInfoAtAddress(program, addr));

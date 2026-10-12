@@ -248,7 +248,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401003L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("PUSH EBP", "MOV EBP,ESP", "RET"), texts(body));
         assertEquals(3, body.get("count"));
@@ -271,7 +271,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("RET"), texts(body));
         assertEquals(List.of("instructions", "count"), new ArrayList<>(body.keySet()));
@@ -294,7 +294,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);   // degenerate
         f.function(0x401010L, 0x401010L, 0x401011L);   // next function
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,[0x0040cf30]", "ADD EAX,0x4", "RET"), texts(body));
         assertEquals(3, body.get("count"));
@@ -320,7 +320,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,0x1", "RET"), texts(body));
         assertEquals(2, body.get("count"));
@@ -341,7 +341,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,0x1", "NOP", "RET"), texts(body));
     }
@@ -357,7 +357,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(1, body.get("count"));
         assertEquals(List.of("NOP dword ptr [EAX + EAX*0x1]"), texts(body));
@@ -373,7 +373,7 @@ public class FunctionServiceDegenerateBodyTest {
                 .instruction(0x402000L, "PUSH EBP", 1);
         f.function(0x401000L, 0x401000L, 0x401000L);   // the only function
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,[0x0040cf30]", "ADD EAX,0x4"), texts(body));
         assertEquals("memory_block", body.get("bounded_by"));
@@ -396,7 +396,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x402000L, 0x402000L, 0x402000L);   // next function, other block
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,[0x0040cf30]", "ADD EAX,0x4"), texts(body));
         assertEquals("memory_block", body.get("bounded_by"));
@@ -418,7 +418,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(f.otherSpaceAddr(0x10L),
                 new AddressSet(f.otherSpaceAddr(0x10L), f.otherSpaceAddr(0x10L)));
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,[0x0040cf30]", "RET"), texts(body));
         assertEquals("memory_block", body.get("bounded_by"));
@@ -432,7 +432,7 @@ public class FunctionServiceDegenerateBodyTest {
                 .instruction(0x401005L, "RET", 1);
         f.function(0x401000L, 0x401000L, 0x401000L);   // no next function, no block
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(1, body.get("count"));
         assertEquals("function_body", body.get("bounded_by"));
@@ -452,7 +452,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.functionWithEmptyBody(0x401000L);
         f.function(0x401010L, 0x401010L, 0x401011L);
 
-        Response r = f.service().disassembleFunction("0x401000", f.program());
+        Response r = f.service().disassembleFunction(f.addr(0x401000), f.program());
         Map<String, Object> body = okBody(r);
 
         assertEquals(List.of("MOV EAX,0x1", "RET"), texts(body));
@@ -472,7 +472,7 @@ public class FunctionServiceDegenerateBodyTest {
         f.function(0x401000L, 0x401000L, 0x401000L);
         f.function(0x401006L, 0x401006L, 0x401006L);   // starts immediately after
 
-        Map<String, Object> body = okBody(f.service().disassembleFunction("0x401000", f.program()));
+        Map<String, Object> body = okBody(f.service().disassembleFunction(f.addr(0x401000), f.program()));
 
         assertEquals(List.of("MOV EAX,0x1", "RET"), texts(body));
         assertEquals("next_function", body.get("bounded_by"));

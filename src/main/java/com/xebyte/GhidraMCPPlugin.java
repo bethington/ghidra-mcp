@@ -745,14 +745,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         sendResponse(exchange, response.toJson());
     }
 
-
-    /**
-     * Apply a specific data type at the given memory address
-     */
-    public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        return dataTypeService.applyDataType(addressStr, typeName, clearExisting).toJson();
-    }
-
     // ----------------------------------------------------------------------------------
     // Data Type Analysis and Management Methods
     // ----------------------------------------------------------------------------------
