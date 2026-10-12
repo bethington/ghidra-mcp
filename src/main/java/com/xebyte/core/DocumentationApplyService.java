@@ -126,16 +126,10 @@ public class DocumentationApplyService {
             @Param(value = "program", defaultValue = "",
                    description = "Program every documentation step runs against (single or batch). "
                                + "Omit for the active program; always specify on a headless server "
-                               + "or when several programs are open.") String programName) {
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) {
-            return pe.error();
-        }
-        Program program = pe.program();
+                               + "or when several programs are open.") Program program) {
 
         if (functionEntries != null && !functionEntries.isEmpty()) {
-            return applyMany(program, programName, functionEntries, score);
+            return applyMany(program, functionEntries, score);
         }
         if (address == null || address.trim().isEmpty()) {
             return Response.err("address parameter is required (or pass entries[] for bulk)");
@@ -155,17 +149,17 @@ public class DocumentationApplyService {
         entry.put("labels", labels);
         entry.put("tags", tags);
         entry.put("tag_comments", tagComments);
-        Map<String, Object> out = applyOne(program, programName, entry, score == null || score);
+        Map<String, Object> out = applyOne(program, entry, score == null || score);
         out.put("program", program.getName());
         return Response.ok(out);
     }
 
-    private Response applyMany(Program program, String programName, List<Map<String, Object>> entries,
+    private Response applyMany(Program program, List<Map<String, Object>> entries,
             Boolean score) {
         List<Map<String, Object>> results = new ArrayList<>();
         int failed = 0;
         for (Map<String, Object> entry : entries) {
-            Map<String, Object> result = applyOne(program, programName, entry,
+            Map<String, Object> result = applyOne(program, entry,
                 entry.get("score") instanceof Boolean own ? own : score != null && score);
             if (!((List<?>) result.get("errors")).isEmpty()) {
                 failed++;
@@ -182,7 +176,7 @@ public class DocumentationApplyService {
     }
 
     /** One function's documentation: {@code entry} uses the same keys as the tool's top level. */
-    private Map<String, Object> applyOne(Program program, String programName, Map<String, Object> entry,
+    private Map<String, Object> applyOne(Program program, Map<String, Object> entry,
             boolean score) {
         String address = text(entry, "address");
         Map<String, Object> steps = new LinkedHashMap<>();
@@ -214,29 +208,29 @@ public class DocumentationApplyService {
         }
         if (name != null) {
             steps.put("rename", step("rename",
-                functions.renameFunctionByAddress(address, name, programName), errors));
+                functions.renameFunctionByAddress(address, name, program, null), errors));
         }
-        applySignature(program, target, address, programName, entry, steps, errors);
+        applySignature(program, target, address, program, entry, steps, errors);
 
         Map<String, String> types = new LinkedHashMap<>(stringMap(entry.get("variable_types")));
         Map<String, String> renames = new LinkedHashMap<>(stringMap(entry.get("variable_renames")));
         addParameterChanges(target, list(entry.containsKey("params") ? entry.get("params") : entry.get("parameters")),
             types, renames);
         if (!types.isEmpty()) {
-            steps.put("variable_types", applyVariableTypes(address, types, programName, errors));
+            steps.put("variable_types", applyVariableTypes(address, types, program, errors));
         }
         if (!renames.isEmpty()) {
-            Response renamed = functions.batchRenameVariables(address, renames, true, programName);
+            Response renamed = functions.batchRenameVariables(address, renames, true, program);
             steps.put("variable_renames", counted("variable_renames", renamed, errors,
                 Map.of("variables_renamed", "renamed", "variables_failed", "failed")));
         }
-        applyComments(program, target, address, programName, entry, steps, errors);
-        applyLabels(program, target, programName, list(entry.get("labels")), steps, errors);
-        applyTags(address, programName, entry, steps, errors);
+        applyComments(program, target, address, program, entry, steps, errors);
+        applyLabels(program, target, program, list(entry.get("labels")), steps, errors);
+        applyTags(address, program, entry, steps, errors);
 
         if (score) {
             // Compact: the caller already has the workflow guidance in its prompt.
-            Response scored = analysis.analyzeFunctionCompleteness(address, true, programName);
+            Response scored = analysis.analyzeFunctionCompleteness(address, true, "", program);
             out.put("completeness", scored instanceof Response.Err e
                 ? Map.of("error", e.message()) : scored.asEmbeddable());
         }
@@ -245,7 +239,7 @@ public class DocumentationApplyService {
 
     // ---------------------------------------------------------------- steps
 
-    private void applySignature(Program program, Function target, String address, String programName,
+    private void applySignature(Program program, Function target, String address, Program programArg,
             Map<String, Object> entry, Map<String, Object> steps, List<String> errors) {
         String prototype = text(entry, "prototype");
         // An export of an undocumented function says "undefined": nothing to apply.
@@ -260,7 +254,7 @@ public class DocumentationApplyService {
         }
         if (prototype != null) {
             FunctionService.PrototypeResult result =
-                functions.setFunctionPrototype(address, prototype, convention, programName);
+                functions.setFunctionPrototype(address, prototype, convention, programArg);
             Map<String, Object> outcome = new LinkedHashMap<>();
             outcome.put("success", result.isSuccess());
             if (!result.isSuccess()) {
@@ -328,7 +322,7 @@ public class DocumentationApplyService {
         }
     }
 
-    private void applyComments(Program program, Function target, String address, String programName,
+    private void applyComments(Program program, Function target, String address, Program programArg,
             Map<String, Object> entry, Map<String, Object> steps, List<String> errors) {
         List<Map<String, String>> pre = new ArrayList<>();
         List<Map<String, String>> eol = new ArrayList<>();
@@ -349,7 +343,7 @@ public class DocumentationApplyService {
         if (plate == null && pre.isEmpty() && eol.isEmpty()) {
             return;
         }
-        Response written = comments.batchSetComments(address, pre, eol, plate, programName);
+        Response written = comments.batchSetComments(address, pre, eol, plate, programArg);
         Map<String, Object> result = counted("comments", written, errors, Map.of(
             "decompiler_comments_set", "pre", "disassembly_comments_set", "eol"));
         if (data(written).get("plate_comment_set") == Boolean.TRUE) {
@@ -358,7 +352,7 @@ public class DocumentationApplyService {
         steps.put("comments", result);
     }
 
-    private void applyLabels(Program program, Function target, String programName,
+    private void applyLabels(Program program, Function target, Program programArg,
             List<Map<String, Object>> labels, Map<String, Object> steps, List<String> errors) {
         List<Map<String, String>> wanted = new ArrayList<>();
         int unchanged = 0;
@@ -380,14 +374,14 @@ public class DocumentationApplyService {
             return;
         }
         Response created = wanted.isEmpty() ? Response.ok(Map.of())
-            : symbols.batchCreateLabels(wanted, programName);
+            : symbols.batchCreateLabels(wanted, programArg);
         Map<String, Object> result = step("labels", created, errors);
         result.put("created", wanted.size());
         result.put("unchanged", unchanged);
         steps.put("labels", result);
     }
 
-    private void applyTags(String address, String programName, Map<String, Object> entry,
+    private void applyTags(String address, Program programArg, Map<String, Object> entry,
             Map<String, Object> steps, List<String> errors) {
         String names = entry.get("tags") instanceof List<?> list
             ? list.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","))
@@ -396,7 +390,7 @@ public class DocumentationApplyService {
             return;
         }
         Response attached = functions.addFunctionTag(address, names, stringMap(entry.get("tag_comments")),
-            List.of(), programName);
+            List.of(), programArg);
         steps.put("tags", counted("tags", attached, errors, Map.of(
             "added", "added", "already_present", "already_present", "created", "created")));
     }
@@ -443,11 +437,11 @@ public class DocumentationApplyService {
     // ---------------------------------------------------------------- steps
 
     private Map<String, Object> applyVariableTypes(String address, Map<String, String> types,
-            String programName, List<String> errors) {
+            Program programArg, List<String> errors) {
         int set = 0;
         List<String> failures = new ArrayList<>();
         for (Map.Entry<String, String> e : types.entrySet()) {
-            String failed = failure(functions.setLocalVariableType(address, e.getKey(), e.getValue(), programName));
+            String failed = failure(functions.setLocalVariableType(address, e.getKey(), e.getValue(), programArg));
             if (failed == null) {
                 set++;
             } else {

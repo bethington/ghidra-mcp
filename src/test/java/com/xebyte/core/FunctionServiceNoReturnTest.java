@@ -210,7 +210,7 @@ public class FunctionServiceNoReturnTest {
         when(provider.getCurrentProgram()).thenReturn(program);
 
         FunctionService service = new FunctionService(provider, new InlineThreadingStrategy());
-        Response response = service.setFunctionNoReturn("0x1000", false, "");
+        Response response = service.setFunctionNoReturn("0x1000", false, program);
 
         assertTrue(response instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) response).data();

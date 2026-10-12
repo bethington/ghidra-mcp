@@ -16,8 +16,8 @@ import static org.mockito.Mockito.*;
 
 /**
  * Coverage for ListingService (previously no behavioral tests). convert_number is a pure
- * utility (no program needed) and is exercised functionally; the program-scoped listers are
- * checked for graceful "No program loaded" degradation.
+ * utility (no program needed) and is exercised functionally. A missing program is the
+ * scanner's to refuse ({@code EveryProgramToolRefusesWithoutAProgramTest}).
  */
 public class ListingServiceValidationTest extends TestCase {
 
@@ -52,31 +52,6 @@ public class ListingServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("No number provided"));
     }
 
-    // --- program-scoped listers degrade gracefully with no program ---
-
-    private static void assertNoProgram(Response r) {
-        assertNotNull(r);
-        assertTrue("expected 'No program loaded', got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
-
-    public void testGetFunctionCountDegradesGracefully() {
-        assertNoProgram(listing.getFunctionCount(""));
-    }
-
-    public void testSearchStringsDegradesGracefully() {
-        assertNoProgram(listing.searchStrings("pattern", 4, "", 0, 100, ""));
-    }
-
-    public void testFindFunctionsDegradesGracefully() {
-        assertNoProgram(listing.findFunctions("Foo", false, null, null, "", null, null, null,
-                                              "", "address", 0, 100, ""));
-    }
-
-    public void testListProgramItemsDegradesGracefully() {
-        assertNoProgram(listing.listProgramItems("imports", 0, 100, ""));
-    }
-
     @SuppressWarnings("unchecked")
     public void testExternalLocationsNullAddressViaKind() {
         Program program = mock(Program.class);
@@ -85,7 +60,6 @@ public class ListingServiceValidationTest extends TestCase {
         ExternalLocationIterator iter = mock(ExternalLocationIterator.class);
         ProgramProvider provider = mock(ProgramProvider.class);
 
-        when(provider.getCurrentProgram()).thenReturn(program);
         when(program.getExternalManager()).thenReturn(extMgr);
         when(extMgr.getExternalLibraryNames()).thenReturn(new String[]{"liblog.so"});
         when(extMgr.getExternalLocations("liblog.so")).thenReturn(iter);
@@ -96,7 +70,7 @@ public class ListingServiceValidationTest extends TestCase {
         when(loc.getOriginalImportedName()).thenReturn("__android_log_write");
 
         ListingService svc = new ListingService(provider);
-        Response r = svc.listProgramItems("external_locations", 0, 10, "");
+        Response r = svc.listProgramItems("external_locations", 0, 10, program);
 
         assertTrue(r instanceof Response.Ok);
         Map<String, Object> data = okData(r);

@@ -114,10 +114,8 @@ public class DataTypeService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        DataTypeManager dtm = pe.program().getDataTypeManager();
+            @Param(value = "program", defaultValue = "") Program program) {
+        DataTypeManager dtm = program.getDataTypeManager();
         String needle = pattern == null ? "" : pattern.toLowerCase();
 
         if (categories) {
@@ -204,10 +202,7 @@ public class DataTypeService {
     @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getTypeSize(
             @Param(value = "type_name", description = "Data type name") String typeName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -225,21 +220,13 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getTypeSize(String typeName) {
-        return getTypeSize(typeName, null);
-    }
-
     /**
      * Get the layout of a structure
      */
     @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getStructLayout(
             @Param(value = "struct_name", description = "Structure name") String structName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Struct name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -272,21 +259,13 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getStructLayout(String structName) {
-        return getStructLayout(structName, null);
-    }
-
     /**
      * Get all values in an enumeration
      */
     @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getEnumValues(
             @Param(value = "enum_name", description = "Enum name") String enumName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (enumName == null || enumName.isEmpty()) return Response.err("Enum name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -317,22 +296,13 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getEnumValues(String enumName) {
-        return getEnumValues(enumName, null);
-    }
-
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
     @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getValidDataTypes(
             @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         return buildValidDataTypesResponse();
     }
 
@@ -363,11 +333,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response getValidDataTypes(String category) {
-        return getValidDataTypes(category, null);
-    }
-
     // -----------------------------------------------------------------------
     // Data Type Creation Methods
     // -----------------------------------------------------------------------
@@ -383,7 +348,7 @@ public class DataTypeService {
                    description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]") String fieldsJson,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
                    description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) {
             return Response.err("Structure name is required");
         }
@@ -403,10 +368,6 @@ public class DataTypeService {
                             + fieldsTrimmed.substring(0, Math.min(60, fieldsTrimmed.length()))
                             + "...)"));
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         int createdSize = 0;
 
@@ -518,15 +479,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response createStruct(String name, String fieldsJson) {
-        return createStruct(name, fieldsJson, false, null);
-    }
-
-    public Response createStruct(String name, String fieldsJson, String programName) {
-        return createStruct(name, fieldsJson, false, programName);
-    }
-
     /**
      * Create a new enumeration data type with name-value pairs
      */
@@ -544,11 +496,7 @@ public class DataTypeService {
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "4",
                    description = "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). "
                                + "Anything else is rejected.") int size,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) {
             return Response.err("Enumeration name is required");
         }
@@ -618,11 +566,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response createEnum(String name, String valuesJson, int size) {
-        return createEnum(name, valuesJson, size, null);
-    }
-
     /**
      * Create a union data type (legacy method)
      */
@@ -639,10 +582,7 @@ public class DataTypeService {
                                + "cannot be resolved is skipped and reported under fields_skipped instead "
                                + "of failing the call. Names get the project's Hungarian prefix applied "
                                + "automatically.") String fieldsJson,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("Union name is required");
         if (fieldsJson == null || fieldsJson.isEmpty()) return Response.err("Fields JSON is required");
 
@@ -695,11 +635,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response createUnion(String name, String fieldsJson) {
-        return createUnion(name, fieldsJson, null);
-    }
-
     /**
      * Clone/copy a data type with a new name
      */
@@ -711,10 +646,7 @@ public class DataTypeService {
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "Name for the copy. The clone is independent — later edits to "
                                + "source_type do not follow it.") String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (sourceType == null || sourceType.isEmpty()) return Response.err("Source type is required");
         if (newName == null || newName.isEmpty()) return Response.err("New name is required");
 
@@ -745,11 +677,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response cloneDataType(String sourceType, String newName) {
-        return cloneDataType(sourceType, newName, null);
-    }
-
     /**
      * Create a typedef, an array or a pointer over an existing type.
      */
@@ -773,7 +700,7 @@ public class DataTypeService {
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
                    description = "Array only: number of ELEMENTS, not bytes — total size is length x "
                                + "sizeof(base_type). Must be positive.") int length,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         String derived = kind == null ? "" : kind.trim().toLowerCase();
         if (!List.of("typedef", "array", "pointer").contains(derived)) {
             return Response.err("kind must be typedef, array or pointer");
@@ -782,10 +709,6 @@ public class DataTypeService {
         boolean named = name != null && !name.isEmpty();
         if (derived.equals("typedef") && !named) return Response.err("Typedef name is required");
         if (derived.equals("array") && length <= 0) return Response.err("Array length must be positive");
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         try {
             String createdName = threadingStrategy.executeWrite(program, "Create " + derived + " type", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
@@ -839,10 +762,7 @@ public class DataTypeService {
                                + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
                                + "a type containing a comma or a colon does not survive it, and a parameter "
                                + "whose type cannot be resolved is dropped silently.") String parametersJson,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("Function name is required");
         if (returnType == null || returnType.isEmpty()) return Response.err("Return type is required");
 
@@ -913,11 +833,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response createFunctionSignature(String name, String returnType, String parametersJson) {
-        return createFunctionSignature(name, returnType, parametersJson, null);
-    }
-
     // -----------------------------------------------------------------------
     // Data Type Modification Methods
     // -----------------------------------------------------------------------
@@ -946,14 +861,10 @@ public class DataTypeService {
                                + "then fails with a conflict if anything overlaps. Clearing is also what "
                                + "arms the guard that refuses a write which would destroy named "
                                + "neighbours.") boolean clearExisting,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -1101,8 +1012,8 @@ public class DataTypeService {
 
     /** Four-arg overload preserving the pre-v5.11.2 signature. */
     public Response applyDataType(String addressStr, String typeName, boolean clearExisting,
-                                   String programName) {
-        return applyDataType(addressStr, typeName, clearExisting, programName, null);
+                                   Program program) {
+        return applyDataType(addressStr, typeName, clearExisting, program, null);
     }
 
     // Backward compatibility overload
@@ -1123,12 +1034,8 @@ public class DataTypeService {
                                + "the type.") String typeName,
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         String errorMessage = null;
 
@@ -1162,7 +1069,7 @@ public class DataTypeService {
         }
 
         if (resolveDemanglerDuplicate) {
-            Map<String, Object> resolved = resolveDuplicateTypeData(typeName, true, programName);
+            Map<String, Object> resolved = resolveDuplicateTypeData(typeName, true, program);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("status", "error");
             out.put("type_name", typeName);
@@ -1172,15 +1079,6 @@ public class DataTypeService {
         }
 
         return Response.err(errorMessage);
-    }
-
-    // Backward compatibility overload
-    public Response deleteDataType(String typeName) {
-        return deleteDataType(typeName, false, null);
-    }
-
-    public Response deleteDataType(String typeName, String programName) {
-        return deleteDataType(typeName, false, programName);
     }
 
     /**
@@ -1201,10 +1099,7 @@ public class DataTypeService {
                    description = "Replacement field name. Leave empty to keep the current name and only "
                                + "retype. The project's Hungarian prefix is applied automatically from the "
                                + "field's type, so the stored name can differ from what you send.") String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if ((fieldName == null || fieldName.isEmpty()) && (newName == null || newName.isEmpty())) {
             return Response.err("Field name or offset is required");
@@ -1289,11 +1184,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response modifyStructField(String structName, String fieldName, String newType, String newName) {
-        return modifyStructField(structName, fieldName, newType, newName, null);
-    }
-
     /**
      * Grow or shrink an existing structure without delete+recreate.
      */
@@ -1312,7 +1202,7 @@ public class DataTypeService {
                    description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Allow shrink even when defined fields extend past new_size (clips trailing layout).") boolean force,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1320,10 +1210,6 @@ public class DataTypeService {
         if (newSize <= 0) {
             return Response.err("new_size must be positive");
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         record ResizeStructOutcome(int oldSize, String message) {}
 
@@ -1393,7 +1279,7 @@ public class DataTypeService {
                    description = "Delete a 1-byte placeholder/Demangler stub before recreate (default true).") boolean replacePlaceholder,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Delete an existing full-sized struct before recreate (fails if referenced).") boolean force,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1401,10 +1287,6 @@ public class DataTypeService {
         if (fieldsJson == null || fieldsJson.isEmpty()) {
             return Response.err(badFieldsFormatHint("fields JSON is required"));
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType existing = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
@@ -1448,7 +1330,7 @@ public class DataTypeService {
             }
         }
 
-        Response created = createStruct(name, fieldsJson, false, programName);
+        Response created = createStruct(name, fieldsJson, false, program);
 
         // Verify the create actually landed; if not, restore the original we deleted so the
         // operation is net-zero rather than destructive.
@@ -1482,7 +1364,7 @@ public class DataTypeService {
             return created;
         }
 
-        Response resized = resizeStruct(name, size, true, true, programName);
+        Response resized = resizeStruct(name, size, true, true, program);
 
         if (resized instanceof Response.Err) {
             return Response.err("Created struct but post-create resize failed: "
@@ -1503,16 +1385,13 @@ public class DataTypeService {
                                + "category is searched for that name.") String typeName,
             @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
                    description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (typeName == null || typeName.isEmpty()) {
             return Response.err("type_name is required");
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
-        Map<String, Object> data = resolveDuplicateTypeData(typeName, deleteDemanglerStub, programName);
+        Map<String, Object> data = resolveDuplicateTypeData(typeName, deleteDemanglerStub, program);
         if ("not_found".equals(data.get("situation"))) {
             return Response.err("No data type named '" + typeName + "'");
         }
@@ -1532,14 +1411,7 @@ public class DataTypeService {
      * deletion_failed}.</p>
      */
     private Map<String, Object> resolveDuplicateTypeData(String typeName, boolean deleteDemanglerStub,
-                                                          String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) {
-            return JsonHelper.mapOf("type_name", typeName, "situation", "not_found",
-                    "message", "No data type named '" + typeName + "'");
-        }
-        Program program = pe.program();
-
+                                                          Program program) {
         DataTypeManager dtm = program.getDataTypeManager();
         List<DataType> matches = findAllTypesBySimpleName(dtm, typeName);
         if (matches.isEmpty()) {
@@ -1730,10 +1602,7 @@ public class DataTypeService {
                                + "A non-negative offset OVERWRITES whatever occupies that range rather than "
                                + "shifting later fields, and grows the struct when it lies at or past the "
                                + "current end.") int offset,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
         if (fieldType == null || fieldType.isEmpty()) return Response.err("Field type is required");
@@ -1796,11 +1665,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response addStructField(String structName, String fieldName, String fieldType, int offset) {
-        return addStructField(structName, fieldName, fieldType, offset, null);
-    }
-
     /**
      * Remove a field from an existing structure
      */
@@ -1840,10 +1704,7 @@ public class DataTypeService {
             @Param(value = "field_name", source = ParamSource.BODY,
                    description = "Field to remove. Matched exactly first, then by Hungarian stem, so the "
                                + "name you originally sent still works after auto-prefixing changed it.") String fieldName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
 
@@ -1886,11 +1747,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response removeStructField(String structName, String fieldName) {
-        return removeStructField(structName, fieldName, null);
-    }
-
     /**
      * Move a data type to a different category
      */
@@ -1902,10 +1758,7 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "Destination category as a /-separated path, e.g. /MyTypes/Network. It "
                                + "is created, with any missing parents, if it does not exist.") String categoryPath,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
@@ -1938,11 +1791,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload
-    public Response moveDataTypeToCategory(String typeName, String categoryPath) {
-        return moveDataTypeToCategory(typeName, categoryPath, null);
-    }
-
     /**
      * Rename a data type in place, preserving every existing application of it.
      *
@@ -1959,15 +1807,11 @@ public class DataTypeService {
                    description = "Current type name; may be bare (Foo) or category-qualified (/MyCat/Foo)") String oldName,
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "New type name. Must be unique within the type's category.") String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // Argument guards run before the program lookup so a malformed call
         // reports the actual problem instead of "No program loaded".
         if (oldName == null || oldName.isEmpty()) return Response.err("Old name is required");
         if (newName == null || newName.isEmpty()) return Response.err("New name is required");
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         try {
             threadingStrategy.executeWrite(program, "Rename data type", () -> {
@@ -2033,10 +1877,7 @@ public class DataTypeService {
                                + "applicability at that address (memory range/alignment/conflicts). Accepts "
                                + "0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).") String addressStr,
             @Param(value = "type_name", description = "Data type name (bare names resolve across all categories)") String typeName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -2131,11 +1972,7 @@ public class DataTypeService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "prototype", description = "Function prototype") String prototype,
             @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -2221,10 +2058,7 @@ public class DataTypeService {
                    description = "Accepted but ignored: parsing is always C through Ghidra's CParser "
                                + "whatever you pass. Kept so existing callers that send it keep "
                                + "working.") String format,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (source == null || source.isEmpty()) return Response.err("source is required");
 
         final DataTypeManager dtm = program.getDataTypeManager();
@@ -2260,11 +2094,6 @@ public class DataTypeService {
         }
     }
 
-    // Backward compatibility overload (pre-program-param callers)
-    public Response importDataTypes(String source, String format) {
-        return importDataTypes(source, format, null);
-    }
-
     // -----------------------------------------------------------------------
     // Data Type Category Methods
     // -----------------------------------------------------------------------
@@ -2277,10 +2106,7 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "New category as a /-separated path, e.g. /MyTypes/Network. Missing "
                                + "parent categories are created too.") String categoryPath,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
         try {
@@ -2297,11 +2123,6 @@ public class DataTypeService {
         } catch (Exception e) {
             return Response.err("Error creating category: " + e.getMessage());
         }
-    }
-
-    // Backward compatibility overload
-    public Response createDataTypeCategory(String categoryPath) {
-        return createDataTypeCategory(categoryPath, null);
     }
 
     /**
@@ -2347,16 +2168,12 @@ public class DataTypeService {
             @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10",
                    description = "How many referencing functions to decompile: 1 to 100, default 10. A "
                                + "value outside that range is REJECTED, not clamped.") int maxFunctionsToAnalyze,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return Response.err("maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
                    " and " + MAX_FUNCTIONS_TO_ANALYZE);
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -2579,15 +2396,11 @@ public class DataTypeService {
             @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Size of the structure in BYTES, or 0 (the default) to take the size "
                                + "from the data already applied at struct_address. Must be 0 to 65536.") int structSize,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         Address addr = ServiceUtils.parseAddress(program, structAddressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -2716,11 +2529,7 @@ public class DataTypeService {
                                + "{name, type} objects; ARRAY needs count plus either element_type or "
                                + "element_struct; STRING takes an optional type. It must be an OBJECT — a "
                                + "JSON string is rejected.") Object typeDefinitionObj,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         record ClassificationOutcome(String typeApplied, List<String> operations) {}
 
         try {
@@ -2950,13 +2759,6 @@ public class DataTypeService {
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
-    }
-
-    // Backward compatibility overload
-    public Response applyDataClassification(String addressStr, String classification,
-                                           String name, String comment,
-                                           Object typeDefinitionObj) {
-        return applyDataClassification(addressStr, classification, name, comment, typeDefinitionObj, null);
     }
 
     // -----------------------------------------------------------------------
@@ -3737,11 +3539,7 @@ public class DataTypeService {
     public Response auditGlobal(
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address is required");
         }
@@ -3948,11 +3746,7 @@ public class DataTypeService {
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (score/effective/band/missing only)") boolean compact,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address is required");
         }
@@ -3978,11 +3772,7 @@ public class DataTypeService {
             @Param(value = "function",
                    paramType = Param.FUNCTION_REF,
                    description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("function is required (name or entry-point address)");
         }
@@ -4070,17 +3860,13 @@ public class DataTypeService {
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
                    description = "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.") String plateComment,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg,
             @Param(value = "allow_evict", source = ParamSource.BODY, defaultValue = "false",
                    description = "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.")
                     boolean allowEvict) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());

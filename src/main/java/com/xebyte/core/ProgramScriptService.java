@@ -164,17 +164,9 @@ public class ProgramScriptService {
      * Get metadata about the current program including name, architecture,
      * memory layout, function count, and symbol count.
      */
-    public Response getMetadata() {
-        return getMetadata(null);
-    }
-
     @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program", access = ToolAccess.READ_ONLY)
     public Response getMetadata(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         long totalSize = 0;
         int blockCount = 0;
         for (MemoryBlock block : program.getMemory().getBlocks()) {
@@ -239,11 +231,7 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProgramOptions(
             @Param(value = "group", defaultValue = "", description = "Option group name (e.g. 'Program Information', 'Analyzers'). Omit to list the groups.") String group,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) {
             return optionGroups(program);
         }
@@ -330,11 +318,7 @@ public class ProgramScriptService {
             @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
                    description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (value == null) return Response.err("value is required");
@@ -416,11 +400,7 @@ public class ProgramScriptService {
     public Response removeProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (!program.getOptionsNames().contains(group)) {
@@ -491,11 +471,7 @@ public class ProgramScriptService {
             @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
                    description = "Value type: int, long, string, or void.") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
         final String kind = (type == null || type.isEmpty()) ? "string" : type.trim().toLowerCase();
         if (!Set.of("int", "long", "string", "void").contains(kind)) {
@@ -537,11 +513,7 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deletePropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
         PropertyMapManager mgr = program.getUsrPropertyManager();
         if (mgr.getPropertyMap(name) == null) {
@@ -580,11 +552,7 @@ public class ProgramScriptService {
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
         if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
 
@@ -658,11 +626,7 @@ public class ProgramScriptService {
     public Response getProperty(
             @Param(value = "map", defaultValue = "", description = "Property map name. Omit to list the maps.") String mapName,
             @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
         if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
 
@@ -699,11 +663,7 @@ public class ProgramScriptService {
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
         if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
 
@@ -745,11 +705,7 @@ public class ProgramScriptService {
             @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
             @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return propertyMaps(program);
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
@@ -841,17 +797,9 @@ public class ProgramScriptService {
     /**
      * Save the currently active program to its domain file.
      */
-    public Response saveCurrentProgram() {
-        return saveCurrentProgram(null);
-    }
-
     @McpTool(path = "/save_program", dryRun = false, description = "Save current program", category = "program", access = ToolAccess.WRITE)
     public Response saveCurrentProgram(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             ghidra.framework.model.DomainFile df = program.getDomainFile();
             if (df == null) {
@@ -1096,10 +1044,6 @@ public class ProgramScriptService {
         ));
     }
 
-    public Response getAddressSpaces() {
-        return getAddressSpaces(null);
-    }
-
     /**
      * List the program's address spaces. Returns physical RAM/CODE spaces plus
      * overlay spaces (marked is_overlay). Excludes pseudo-spaces (EXTERNAL, STACK,
@@ -1119,11 +1063,7 @@ public class ProgramScriptService {
                          + "(e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getAddressSpaces(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> spaces = buildAddressSpacesList(program);
         spaces.addAll(buildOverlaySpacesList(program));
         return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
@@ -2070,11 +2010,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/reanalyze", dryRun = false, method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
     public Response reanalyze(
-            @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") Program program) {
         try {
             boolean analyzed = runAutoAnalysisAndPersistFlags(program, true);
             return Response.ok(JsonHelper.mapOf(
@@ -2180,7 +2116,6 @@ public class ProgramScriptService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-
         Workbench workbench = programProvider.workbench();
         ScriptRunOutcome outcome = executeGhidraScriptBody(
             scriptPath, scriptArgs, program, timeoutSeconds, workbench);
@@ -2694,12 +2629,8 @@ public class ProgramScriptService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
-            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-            if (pe.hasError()) return pe.error();
-            Program program = pe.program();
-
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
                 return Response.err(ServiceUtils.getLastParseError());
@@ -3006,7 +2937,7 @@ public class ProgramScriptService {
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "",
                    description = "New volatile flag (contents change outside program flow, e.g. MMIO); "
                                + "omit to leave it as it is.") Boolean isVolatile,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (read == null && write == null && execute == null && isVolatile == null) {
             return Response.err("nothing to change: give read, write, execute or volatile");
         }
@@ -3015,10 +2946,6 @@ public class ProgramScriptService {
         if (byName == byAddress) {
             return Response.err("give exactly one of block or address");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         MemoryBlock block;
         if (byName) {
             block = program.getMemory().getBlock(blockName.trim());
@@ -3070,9 +2997,9 @@ public class ProgramScriptService {
      */
     public Response createMemoryBlock(String name, String addressStr, long size,
                                      boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment, String programName) {
+                                     boolean isVolatile, String comment, Program program) {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile,
-                comment, "", "", false, 0, false, programName);
+                comment, "", "", false, 0, false, program);
     }
 
     @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
@@ -3137,11 +3064,7 @@ public class ProgramScriptService {
                                + "deliberately overlaps existing blocks (bank switching, ROM "
                                + "shadowing); the overlap check is skipped and the response "
                                + "reports the generated overlay space in address_space.") boolean overlay,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) {
             return Response.err("name parameter required");
         }
@@ -3255,11 +3178,7 @@ public class ProgramScriptService {
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
                    description = "Bookmark text. Empty is allowed and stores an empty "
                                + "comment.") String comment,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -3320,11 +3239,7 @@ public class ProgramScriptService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
@@ -3396,11 +3311,7 @@ public class ProgramScriptService {
                    description = "Delete only bookmarks in this category. Empty (the default) deletes "
                                + "EVERY bookmark at the address whatever its category; `deleted` in the "
                                + "response counts how many went.") String category,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -3444,10 +3355,6 @@ public class ProgramScriptService {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
-        return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
-    }
-
     @McpTool(path = "/run_ghidra_script", dryRun = false, method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runGhidraScriptWithCapture(
 @Param(value = "script_name", source = ParamSource.BODY,
@@ -3598,11 +3505,7 @@ public class ProgramScriptService {
     @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program", access = ToolAccess.WRITE)
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address parameter required");
         }

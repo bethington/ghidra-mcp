@@ -40,11 +40,7 @@ public class CommentService {
     /**
      * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT).
      */
-    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName, Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -116,11 +112,7 @@ public class CommentService {
             @Param(value = "only_with_comments", defaultValue = "false",
                    description = "Bulk mode: omit addresses where has_comment is false, so a sweep "
                                + "response holds only the interesting subset.") boolean onlyWithComments,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressesStr != null && !addressesStr.trim().isEmpty()) {
             return getCommentsBulk(program, addressesStr, onlyWithComments);
         }
@@ -203,7 +195,7 @@ public class CommentService {
                    description = "Comment text. An empty string clears this comment kind at the address.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
                    description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         String t = (type == null || type.trim().isEmpty()) ? "plate" : type.trim().toLowerCase();
         int ct;
         switch (t) {
@@ -215,7 +207,7 @@ public class CommentService {
             default:
                 return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
         }
-        return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", programName);
+        return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", program);
     }
 
     /**
@@ -244,11 +236,7 @@ public class CommentService {
                                + "that address's EOL comment.") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         // Resolve function address before entering SwingUtilities lambda
         final Address funcAddr;
         if (functionAddress != null && !functionAddress.isEmpty()) {
@@ -432,11 +420,7 @@ public class CommentService {
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) removes every EOL (disassembly) comment inside the "
                                + "function body. False leaves them alone.") boolean clearEol,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionAddress == null || functionAddress.isEmpty()) {
             return Response.err("function_address parameter is required");
         }

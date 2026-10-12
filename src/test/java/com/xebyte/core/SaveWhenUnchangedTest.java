@@ -46,7 +46,7 @@ public class SaveWhenUnchangedTest {
     public void saveProgramDoesNotWriteAProgramWithNothingToSave() throws Exception {
         Program clean = program("/fw/a", false);
 
-        Response r = scripts(clean).saveCurrentProgram("/fw/a");
+        Response r = scripts(clean).saveCurrentProgram(clean);
 
         Map<String, Object> out = (Map<String, Object>) ((Response.Ok) r).data();
         assertEquals(false, out.get("saved"));

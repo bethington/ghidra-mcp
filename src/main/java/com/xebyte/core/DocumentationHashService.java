@@ -78,11 +78,7 @@ public class DocumentationHashService {
                    description = "Bulk mode: `documented` keeps functions with a real name, "
                                + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
                                + "with `switch`). Omit for all.") String filter,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionAddress == null || functionAddress.trim().isEmpty()) {
             return getFunctionHashes(program, offset, limit, filter);
         }
@@ -312,11 +308,7 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
             if (addr == null) {
@@ -466,17 +458,13 @@ public class DocumentationHashService {
      * Compare documentation status across all open programs.
      * Returns documented/undocumented function counts for each program.
      */
-    public Response compareProgramsDocumentation() {
-        return compareProgramsDocumentation(null);
-    }
 
     @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response compareProgramsDocumentation(
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
-            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-            Program currentProgram = pe.program(); // may be null if no program loaded, that's ok here
+            Program currentProgram = program; // may be null if no program loaded, that's ok here
 
             if (allPrograms == null || allPrograms.length == 0) {
                 return Response.err("No programs are open");
@@ -533,14 +521,10 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String stringAddress,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (stringAddress == null || stringAddress.isEmpty()) {
             return Response.err("String address is required");
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         try {
             Address addr = ServiceUtils.parseAddress(program, stringAddress);
@@ -607,11 +591,7 @@ public class DocumentationHashService {
     @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response batchStringAnchorReport(
             @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Listing listing = program.getListing();
             ReferenceManager refMgr = program.getReferenceManager();
@@ -1382,7 +1362,7 @@ public class DocumentationHashService {
     public Response archiveIngestFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                 description = "Function entry-point address (Ghidra hex form)") String functionAddress,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
@@ -1391,10 +1371,6 @@ public class DocumentationHashService {
         if (!dryRun && getArchiveUrl().isEmpty()) {
             return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
         Function fn = program.getFunctionManager().getFunctionAt(addr);
@@ -1431,7 +1407,7 @@ public class DocumentationHashService {
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestProgram(
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
@@ -1445,10 +1421,6 @@ public class DocumentationHashService {
         if (!dryRun && getArchiveUrl().isEmpty()) {
             return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         String binaryName = program.getName();
         String version = (versionOverride != null && !versionOverride.isEmpty())
             ? versionOverride : extractVersion(program);

@@ -8,6 +8,15 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Changed — the server resolves programs before a tool runs
+
+Tool parameters are typed as what they name. `AnnotationScanner` reads the caller's string as
+before and resolves it per call, so programs opened later are found. A name that resolves to
+nothing is answered with the message tools used to return themselves, and the tool never runs.
+
+- **Programs.** 136 tools take the open `Program` ("No program loaded.", "Program not found: …").
+  About 100 compatibility overloads that took a program name, or none, are gone.
+
 ### Fixed — every program write takes the headless write lock
 
 21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request

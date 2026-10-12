@@ -195,11 +195,7 @@ public class AnalysisService {
 
     @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response listAnalyzers(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
             List<String> names = options.getOptionNames();
@@ -233,14 +229,10 @@ public class AnalysisService {
                    description = "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.") String analyzerName,
             @Param(value = "enabled", source = ParamSource.BODY, defaultValue = "",
                    description = "True enables the analyzer, false disables it. Omitting it leaves the current setting alone and only reports it.") Boolean enabled,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (analyzerName == null || analyzerName.isBlank()) {
             return Response.err("name is required");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
         if (!options.contains(analyzerName)) {
             return Response.err("Analyzer not found: " + analyzerName
@@ -268,11 +260,7 @@ public class AnalysisService {
      */
     @McpTool(path = "/run_analysis", dryRun = false, method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
     public Response runAnalysis(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             long start = System.currentTimeMillis();
             int before = program.getFunctionManager().getFunctionCount();
@@ -334,11 +322,7 @@ public class AnalysisService {
                                + "is not a DAT_ autogen, so the region ends where the next documented global "
                                + "begins. False scans the full max_scan_bytes whatever symbols it "
                                + "crosses.") boolean includeBoundaryDetection,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address startAddr = ServiceUtils.parseAddress(program, startAddressStr);
             if (startAddr == null) {
@@ -505,11 +489,7 @@ public class AnalysisService {
 @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
                    description = "How many BYTES forward from `address` to scan for references while "
                                + "estimating the array's extent (default 2048).") int maxScanRange,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
@@ -575,7 +555,7 @@ public class AnalysisService {
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5",
                    description = "How many referencing sites to report: 1 to 50, default 5. A value "
                                + "outside that range is REJECTED, not clamped.") int numExamples,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -584,15 +564,11 @@ public class AnalysisService {
             return Response.err("numExamples must be between 1 and " + MAX_FIELD_EXAMPLES);
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program resolvedProgram = pe.program();
 
-        Address structAddr = ServiceUtils.parseAddress(resolvedProgram, structAddressStr);
+                Address structAddr = ServiceUtils.parseAddress(program, structAddressStr);
         if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
         try {
-            Program program = resolvedProgram;
 
             // Calculate field address with overflow protection
             Address fieldAddr;
@@ -664,11 +640,7 @@ public class AnalysisService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
@@ -780,16 +752,9 @@ public class AnalysisService {
     /**
      * Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)
      */
-    public Response detectCryptoConstants() {
-        return detectCryptoConstants(null);
-    }
-
     @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware", access = ToolAccess.READ_ONLY)
     public Response detectCryptoConstants(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             // This is a placeholder implementation
             List<Map<String, Object>> results = new ArrayList<>();
@@ -807,19 +772,11 @@ public class AnalysisService {
     /**
      * Search for byte patterns with optional wildcards
      */
-    public Response searchBytePatterns(String pattern, String mask) {
-        return searchBytePatterns(pattern, mask, null);
-    }
-
     @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
             @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (pattern == null || pattern.trim().isEmpty()) {
             return Response.err("Pattern is required");
         }
@@ -928,11 +885,7 @@ public class AnalysisService {
                 description = "Restrict search to this function (by name or entry-point address). Omit to search the whole program.") String functionScope,
             @Param(value = "limit", defaultValue = "500",
                 description = "Maximum matches returned. Walking stops as soon as the cap is hit.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         String wantMnemonic = mnemonic == null ? "" : mnemonic.trim();
         String wantOperand = operandPattern == null ? "" : operandPattern.trim().toLowerCase();
         if (wantMnemonic.isEmpty() && wantOperand.isEmpty()) {
@@ -1052,11 +1005,7 @@ public class AnalysisService {
     public Response findSimilarFunctions(
             @Param(value = "target_function", description = "Function name") String targetFunction,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (targetFunction == null || targetFunction.trim().isEmpty()) {
             return Response.err("Target function name is required");
         }
@@ -1132,11 +1081,7 @@ public class AnalysisService {
     @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeControlFlow(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionName == null || functionName.trim().isEmpty()) {
             return Response.err("Function name is required");
         }
@@ -1290,17 +1235,10 @@ public class AnalysisService {
     /**
      * Find potentially unreachable code blocks
      */
-    public Response findDeadCode(String functionName) {
-        return findDeadCode(functionName, null);
-    }
-
     @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionName == null || functionName.trim().isEmpty()) {
             return Response.err("Function name is required");
         }
@@ -1322,12 +1260,8 @@ public class AnalysisService {
     /**
      * Analyze function documentation completeness
      */
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact) {
-        return analyzeFunctionCompleteness(functionAddress, compact, null);
-    }
-
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
-        return analyzeFunctionCompleteness(functionAddress, compact, "", programName);
+    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, Program program) {
+        return analyzeFunctionCompleteness(functionAddress, compact, "", program);
     }
 
     /**
@@ -1342,13 +1276,9 @@ public class AnalysisService {
             @Param(value = "compact", defaultValue = "false", description = "Compact output (single mode)") boolean compact,
             @Param(value = "addresses", defaultValue = "",
                    description = "Bulk mode: comma-separated addresses. When set, function_address/compact are ignored.") String addressesCsv,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressesCsv != null && !addressesCsv.trim().isEmpty()) {
-            return batchAnalyzeCompleteness(addressesCsv, programName);
+            return batchAnalyzeCompleteness(addressesCsv, program);
         }
 
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
@@ -1944,7 +1874,7 @@ public class AnalysisService {
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         final List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
@@ -1971,7 +1901,7 @@ public class AnalysisService {
         for (String address : addresses) {
             Response r;
             try {
-                r = analyzeFunctionCompleteness(address, false, programName);
+                r = analyzeFunctionCompleteness(address, false, program);
             } catch (Exception e) {
                 r = Response.err(e.getMessage());
             }
@@ -2000,12 +1930,8 @@ public class AnalysisService {
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final Address startAddr;
+            @Param(value = "program", defaultValue = "") Program program) {
+                final Address startAddr;
         if (startAddress != null && !startAddress.isEmpty()) {
             startAddr = ServiceUtils.parseAddress(program, startAddress);
             if (startAddr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -2083,18 +2009,14 @@ public class AnalysisService {
                    description = "True (the default) adds the function's parameters and locals with their "
                                + "types and storage.") boolean includeVariables,
             @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         return buildAnalyzeFunctionCompleteResult(program, name, includeXrefs, includeCallees,
-                includeCallers, includeDisasm, includeVariables, includeCompleteness, programName);
+                includeCallers, includeDisasm, includeVariables, includeCompleteness);
     }
 
     private Response buildAnalyzeFunctionCompleteResult(Program program, String name, boolean includeXrefs,
             boolean includeCallees, boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-            boolean includeCompleteness, String programName) {
+            boolean includeCompleteness) {
         try {
             ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, name);
             if (lookup.hasError()) {
@@ -2276,7 +2198,7 @@ public class AnalysisService {
             // Include completeness scoring (GitHub #109)
             if (includeCompleteness) {
                 String addrStr = func.getEntryPoint().toString(false);
-                Response completenessResp = analyzeFunctionCompleteness(addrStr, true, programName);
+                Response completenessResp = analyzeFunctionCompleteness(addrStr, true, program);
                 if (completenessResp instanceof Response.Ok ok) {
                     data.put("completeness", ok.data());
                 }
@@ -2288,17 +2210,6 @@ public class AnalysisService {
         }
     }
 
-    // Backward compatibility overloads
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, null);
-    }
-
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-                                          String programName) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, programName);
-    }
 
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
@@ -3983,19 +3894,14 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
+            @Param(value = "program", defaultValue = "") Program program) {
+                Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        return buildAnalyzeForDocumentationResult(program, addr, functionAddress, programName);
+        return buildAnalyzeForDocumentationResult(program, addr, functionAddress);
     }
 
-    private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress,
-            String programName) {
+    private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress) {
         try {
             // Resolve function by address
             Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -4158,7 +4064,7 @@ public class AnalysisService {
             data.put("dat_global_count", datGlobalCount);
 
             // Compact completeness score; pass the same Program through.
-            Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, programName);
+            Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, program);
             if (completenessResponse instanceof Response.Ok ok) {
                 data.put("completeness", ok.data());
             }
@@ -4188,11 +4094,7 @@ public class AnalysisService {
                    description = "Maximum gaps returned in this page (default 100). This endpoint slices "
                                + "directly, so 0 returns an EMPTY page rather than everything — page with "
                                + "offset against the `total` the response reports.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         return findCodeGapsBody(program, minSize, offset, limit);
     }
 
@@ -4307,13 +4209,10 @@ public class AnalysisService {
                    description = "Cap on nodes visited. Default 20, max 200.",
                    defaultValue = "20") int maxSteps,
             @Param(value = "program",
-                   defaultValue = "") String programName) {
+                   defaultValue = "") Program program) {
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program resolvedProgram = pe.program();
 
-        Address anchorAddr = ServiceUtils.parseAddress(resolvedProgram, addressStr);
+        Address anchorAddr = ServiceUtils.parseAddress(program, addressStr);
         if (anchorAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
         boolean backward;
@@ -4327,7 +4226,8 @@ public class AnalysisService {
 
         int stepCap = maxSteps <= 0 ? DATAFLOW_DEFAULT_STEPS : Math.min(maxSteps, DATAFLOW_MAX_STEPS);
 
-        return analyzeDataflowBody(resolvedProgram, anchorAddr, addressStr, variableHint, backward, stepCap);
+
+        return analyzeDataflowBody(program, anchorAddr, addressStr, variableHint, backward, stepCap);
     }
 
     private Response analyzeDataflowBody(Program program, Address anchorAddr, String addressStr,
@@ -4717,11 +4617,7 @@ public class AnalysisService {
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
             @Param(value = "granularity", defaultValue = "high",
                    description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -4797,11 +4693,7 @@ public class AnalysisService {
                    description = "Include the full register list (can be hundreds of entries on x86).") boolean includeRegisters,
             @Param(value = "include_default_symbols", defaultValue = "true",
                    description = "Include the language's default symbol set (entry points, interrupt vectors).") boolean includeDefaultSymbols,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         ghidra.program.model.lang.Language lang = program.getLanguage();
         ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
 

@@ -57,11 +57,7 @@ public class ListingService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (kind == null || kind.isBlank()) {
             return Response.err("kind parameter is required");
         }
@@ -245,11 +241,7 @@ public class ListingService {
                    description = "When undefined items are included, only return addresses with at least this many xrefs. Default 1 suppresses padding/alignment noise; set to 0 for the firehose.") int minXrefs,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned. Pass true to include every memory section.") boolean includeAllSections,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         String fSym = (filter == null || filter.isEmpty()) ? "defined" : filter.toLowerCase();
         String fType = (typeFilter == null || typeFilter.isEmpty()) ? "all" : typeFilter.toLowerCase();
         int xrefMin = Math.max(0, minXrefs);
@@ -322,15 +314,6 @@ public class ListingService {
         return formatDataItems(dataItems, offset, limit);
     }
 
-    /** Backward-compat overload preserving the pre-5.7.x signature (no
-     *  filter axes, no min_xrefs). Defaults exactly match the legacy
-     *  behavior — defined data only, no axis filtering. */
-    public Response listDataItemsByXrefs(int offset, int limit, String format,
-                                         String programName) {
-        return listDataItemsByXrefs(offset, limit, format,
-                "defined", "all", 1, false, programName);
-    }
-
     @McpTool(path = "/find_functions",
         description = "Find functions: every filter is optional, so with none it lists the whole "
             + "program a page at a time. Filter by name (substring or regex=true), xref count, "
@@ -374,11 +357,7 @@ public class ListingService {
                    description = "Page size. 0 means no limit, which on a large binary is a "
                                + "megabytes-long response — the old list_functions had no "
                                + "pagination at all and returned 1.7MB on a stripped `ls`.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         Pattern pattern = null;
         if (regex && namePattern != null && !namePattern.isEmpty()) {
             try {
@@ -478,11 +457,7 @@ public class ListingService {
 
     @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listCallingConventions(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
             ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
@@ -508,11 +483,7 @@ public class ListingService {
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
             @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> strings = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
 
@@ -543,11 +514,7 @@ public class ListingService {
 
     @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getFunctionCount(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         int count = program.getFunctionManager().getFunctionCount();
         return Response.ok(JsonHelper.mapOf(
                 "function_count", count,
@@ -572,11 +539,7 @@ public class ListingService {
                    description = "Maximum matches returned in this page (default 100). `total` in the "
                                + "response reports how many matched before paging. Unlike the paged list "
                                + "endpoints, 0 here returns an EMPTY page rather than everything.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (query == null || query.isEmpty()) return Response.err("search_term parameter is required");
 
         Pattern pat;
@@ -634,11 +597,7 @@ public class ListingService {
                    description = "By default only data sections (.data/.rdata/.bss and similar) are scanned. Pass true to include every memory section (rare — picks up .text gaps which are usually padding).") boolean includeAllSections,
             @Param(value = "name_substring", defaultValue = "",
                    description = "Optional substring match against the symbol's display line (case-insensitive). Empty = no substring filter.") String nameSubstring,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         // Normalize filter axes (case-insensitive, default `all`).
         String fSym = (filter == null || filter.isEmpty()) ? "all" : filter.toLowerCase();
         String fType = (typeFilter == null || typeFilter.isEmpty()) ? "all" : typeFilter.toLowerCase();
@@ -762,11 +721,7 @@ public class ListingService {
                                + "full unpaged count.") int limit,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned, matching list_globals.") boolean includeAllSections,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         SymbolTable symbolTable = program.getSymbolTable();
         Listing listing = program.getListing();
         FunctionManager functionManager = program.getFunctionManager();
@@ -817,21 +772,6 @@ public class ListingService {
         return ServiceUtils.paged("shadowed", out, offset, limit);
     }
 
-    /** Backward-compat overload preserving the pre-5.7.x signature
-     *  (single substring filter only). The legacy `filter` param is now
-     *  the substring matcher; new callers should use the full overload
-     *  to access the defined/undefined axis filters. */
-    public Response listGlobals(int offset, int limit, String filter,
-                                String programName) {
-        return listGlobals(offset, limit,
-                /* filter (axis) */ "all",
-                /* type_filter */ "all",
-                /* min_xrefs */ 1,
-                /* include_all_sections */ false,
-                /* name_substring (legacy filter param) */ filter,
-                programName);
-    }
-
     /** Whether {@code block} is a data section (.data/.rdata/.bss/etc.) — an
      *  initialized non-executable block, or the conventional .bss name. */
     private static boolean isDataBlock(MemoryBlock block) {
@@ -851,11 +791,7 @@ public class ListingService {
 
     @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> entryPoints = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
 
@@ -1074,11 +1010,7 @@ public class ListingService {
                    description = "External library name (as list_program_items(kind=imports) or "
                                + "kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the "
                                + "search only — it cannot select an entry by itself.") String dllName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         ExternalManager extMgr = program.getExternalManager();
         Address addr = null;
         if (address != null && !address.isBlank()) {

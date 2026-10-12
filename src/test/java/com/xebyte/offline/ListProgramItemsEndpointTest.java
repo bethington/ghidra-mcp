@@ -25,9 +25,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import ghidra.program.model.listing.Listing;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -45,12 +48,6 @@ public class ListProgramItemsEndpointTest extends TestCase {
         listing = new ListingService(ServiceFactory.stubProvider());
     }
 
-    private static void assertNoProgram(Response r) {
-        assertNotNull(r);
-        assertTrue("expected 'No program loaded', got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
-
     @SuppressWarnings("unchecked")
     private static Map<String, Object> okData(Response r) {
         assertTrue("expected Ok: " + r, r instanceof Response.Ok);
@@ -62,7 +59,7 @@ public class ListProgramItemsEndpointTest extends TestCase {
         ProgramProvider provider = mock(ProgramProvider.class);
         when(provider.getCurrentProgram()).thenReturn(program);
         ListingService svc = new ListingService(provider);
-        Response r = svc.listProgramItems("", 0, 10, "");
+        Response r = svc.listProgramItems("", 0, 10, program);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("kind parameter is required"));
     }
@@ -72,16 +69,12 @@ public class ListProgramItemsEndpointTest extends TestCase {
         ProgramProvider provider = mock(ProgramProvider.class);
         when(provider.getCurrentProgram()).thenReturn(program);
         ListingService svc = new ListingService(provider);
-        Response r = svc.listProgramItems("libraries", 0, 10, "");
+        Response r = svc.listProgramItems("libraries", 0, 10, program);
         assertTrue(r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
         assertTrue(msg.contains("Unknown kind"));
         assertTrue(msg.contains("classes"));
         assertTrue(msg.contains("external_locations"));
-    }
-
-    public void testDegradesGracefullyWithNoProgram() {
-        assertNoProgram(listing.listProgramItems("segments", 0, 10, ""));
     }
 
     public void testSegmentsShapeAndPagination() {
@@ -107,7 +100,7 @@ public class ListProgramItemsEndpointTest extends TestCase {
         when(block.isInitialized()).thenReturn(true);
 
         ListingService svc = new ListingService(provider);
-        Map<String, Object> page0 = okData(svc.listProgramItems("segments", 0, 1, ""));
+        Map<String, Object> page0 = okData(svc.listProgramItems("segments", 0, 1, program));
         assertEquals("segments", page0.get("kind"));
         assertEquals(1, page0.get("total"));
         assertEquals(1, page0.get("count"));
@@ -118,7 +111,7 @@ public class ListProgramItemsEndpointTest extends TestCase {
         assertTrue(items.get(0).containsKey("readable"));
         assertTrue(items.get(0).containsKey("executable"));
 
-        Map<String, Object> page1 = okData(svc.listProgramItems("segments", 1, 1, ""));
+        Map<String, Object> page1 = okData(svc.listProgramItems("segments", 1, 1, program));
         assertEquals(0, page1.get("count"));
         @SuppressWarnings("unchecked")
         List<?> empty = (List<?>) page1.get("items");
@@ -143,7 +136,7 @@ public class ListProgramItemsEndpointTest extends TestCase {
         when(loc.getOriginalImportedName()).thenReturn("__android_log_write");
 
         ListingService svc = new ListingService(provider);
-        Map<String, Object> data = okData(svc.listProgramItems("external_locations", 0, 10, ""));
+        Map<String, Object> data = okData(svc.listProgramItems("external_locations", 0, 10, program));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) data.get("items");
         assertEquals(1, items.size());
@@ -151,12 +144,38 @@ public class ListProgramItemsEndpointTest extends TestCase {
         assertNull(items.get(0).get("address"));
     }
 
+    private static Program emptyProgramForKinds() {
+        Program program = mock(Program.class);
+        SymbolTable symbolTable = mock(SymbolTable.class);
+        SymbolIterator symbols = mock(SymbolIterator.class);
+        when(symbols.iterator()).thenReturn(Collections.emptyIterator());
+        when(symbolTable.getAllSymbols(true)).thenReturn(symbols);
+        when(symbolTable.getExternalSymbols()).thenReturn(symbols);
+        when(program.getSymbolTable()).thenReturn(symbolTable);
+        FunctionManager functionManager = mock(FunctionManager.class);
+        FunctionIterator functions = mock(FunctionIterator.class);
+        when(functions.iterator()).thenReturn(Collections.emptyIterator());
+        when(functionManager.getFunctions(true)).thenReturn(functions);
+        when(program.getFunctionManager()).thenReturn(functionManager);
+        Memory memory = mock(Memory.class);
+        when(memory.getBlocks()).thenReturn(new MemoryBlock[0]);
+        when(program.getMemory()).thenReturn(memory);
+        ExternalManager externalManager = mock(ExternalManager.class);
+        when(externalManager.getExternalLibraryNames()).thenReturn(new String[0]);
+        when(program.getExternalManager()).thenReturn(externalManager);
+        when(program.getListing()).thenReturn(mock(Listing.class));
+        return program;
+    }
+
     public void testAllDocumentedKindsPassValidation() {
+        Program program = emptyProgramForKinds();
         for (String kind : List.of("classes", "methods", "namespaces", "imports", "exports",
                 "segments", "data_items", "external_locations")) {
-            Response r = listing.listProgramItems(kind, 0, 10, "");
-            // Reaching program resolution (not "Unknown kind") proves the switch accepted it.
-            assertNoProgram(r);
+            Response r = listing.listProgramItems(kind, 0, 10, program);
+            if (r instanceof Response.Err err) {
+                assertFalse("Unknown kind for " + kind + ": " + err.message(),
+                        err.message().contains("Unknown kind"));
+            }
         }
     }
 
