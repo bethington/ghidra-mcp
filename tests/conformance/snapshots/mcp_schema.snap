@@ -374,7 +374,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Composite analysis for RE documentation workflow. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -399,6 +399,14 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/analyze_for_documentation",
@@ -407,7 +415,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -476,6 +484,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3470,7 +3486,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3492,6 +3508,14 @@
           "default": "",
           "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
           "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
+          "name": "variant",
           "required": false,
           "source": "query",
           "type": "string"
@@ -3957,7 +3981,7 @@
     },
     {
       "category": "function",
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, get_function_bundle, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that.",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3986,7 +4010,7 @@
         },
         {
           "default": "",
-          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; asking for refs decompiles). Omit or leave empty for the full bundle.",
+          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
           "name": "fields",
           "required": false,
           "source": "query",
@@ -4034,6 +4058,14 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the call proceeds, any decompiled_code or call_context labelled with whatever actually ran. Supply it and it is CHECKED, in single and bulk mode alike: naming a variant the program is not loaded under is refused rather than answered, because the decompiler decodes with the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/get_functions",
@@ -4042,7 +4074,7 @@
     {
       "category": "program",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+      "description": "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants (each with the decoder it loads) and variant_ambiguous — true when the processor offers more than one SLEIGH decoder at this endian/size (PowerPC vs PowerPC VLE), meaning the loader guessed that column and decompiler output may be confidently wrong. variant_enumeration_failed is true when Ghidra's language table could not be walked at all, in which case variant_ambiguous reports ignorance rather than a single variant. This is where the legal variant= values are enumerated. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
       "destructive": false,
       "method": "GET",
       "params": [
