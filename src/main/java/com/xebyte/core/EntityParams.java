@@ -1,15 +1,15 @@
 package com.xebyte.core;
 
 import ghidra.program.model.address.Address;
-import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
 import java.util.Set;
 
 /**
- * Tool parameters typed as Ghidra entities. A tool declares {@code @Param("program") Program
- * program} or {@code @Param("address") Address address}; the scanner reads the caller's string
+ * Tool parameters typed as Ghidra entities: {@code Program}, {@code Address} and
+ * {@code Function}. A tool declares {@code @Param("program") Program program} or
+ * {@code @Param("address") Address address}; the scanner reads the caller's string
  * as for any parameter and this resolves it before the tool runs, refusing with the message the
  * tool used to produce itself. The program resolves first, since the others are looked up in it.
  *
@@ -19,7 +19,7 @@ import java.util.Set;
 final class EntityParams {
 
     private static final Set<Class<?>> ENTITY_TYPES =
-        Set.of(Program.class, Address.class, Function.class, DataType.class);
+        Set.of(Program.class, Address.class, Function.class);
 
     private EntityParams() {}
 
@@ -27,8 +27,12 @@ final class EntityParams {
         return ENTITY_TYPES.contains(type);
     }
 
-    /** Replace each entity argument's raw string with the entity, or throw a {@link Refusal}. */
-    static void resolve(AnnotationScanner.ParamBinding[] bindings, Object[] args, ProgramProvider provider) {
+    /**
+     * Replace each entity argument's raw string with the entity, or throw a {@link Refusal}.
+     *
+     * @return the function the call acts on when exactly one Function parameter resolved, else null
+     */
+    static Function resolve(AnnotationScanner.ParamBinding[] bindings, Object[] args, ProgramProvider provider) {
         Program program = null;
         boolean needsProgram = false;
         for (int i = 0; i < bindings.length; i++) {
@@ -43,7 +47,7 @@ final class EntityParams {
             }
         }
         if (!needsProgram) {
-            return;
+            return null;
         }
         if (program == null) {
             program = ServiceUtils.requireProgram(provider, null);
@@ -63,6 +67,16 @@ final class EntityParams {
             }
             args[i] = entity(b.javaType(), raw.trim(), program);
         }
+        Function only = null;
+        for (int i = 0; i < bindings.length; i++) {
+            if (bindings[i] != null && bindings[i].javaType() == Function.class && args[i] != null) {
+                if (only != null) {
+                    return null;
+                }
+                only = (Function) args[i];
+            }
+        }
+        return only;
     }
 
     private static Object entity(Class<?> type, String raw, Program program) {
@@ -73,18 +87,11 @@ final class EntityParams {
             }
             return address;
         }
-        if (type == Function.class) {
-            ServiceUtils.FunctionOrError found = ServiceUtils.getFunctionOrError(program, raw);
-            if (found.function() == null) {
-                throw new Refusal(found.message());
-            }
-            return found.function();
+        ServiceUtils.FunctionOrError found = ServiceUtils.getFunctionOrError(program, raw);
+        if (found.function() == null) {
+            throw new Refusal(found.message());
         }
-        DataType dataType = ServiceUtils.resolveDataType(program.getDataTypeManager(), raw);
-        if (dataType == null) {
-            throw new Refusal("Unknown data type '" + raw + "'");
-        }
-        return dataType;
+        return found.function();
     }
 
     private static String text(Object raw) {

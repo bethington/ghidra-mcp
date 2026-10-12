@@ -6,6 +6,7 @@ import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
 
@@ -84,26 +85,29 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
     }
 
     public void testSetFunctionThisTypeRejectsUndefinedType() {
-        Response r = functions.setFunctionThisType("0x401000", "undefined4", programStub);
+        Function func = mock(Function.class);
+        Response r = functions.setFunctionThisType(func, "undefined4", programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("concrete struct/class pointer"));
     }
 
     public void testSetFunctionThisTypeRequiresAddress() {
-        Response r = functions.setFunctionThisType("", "MyStruct *", programStub);
+        Response r = functions.setFunctionThisType(null, "MyStruct *", programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Function address is required"));
     }
 
     public void testSetParameterTypeRoutesThisBeforeProgramCheck() {
-        Response r = functions.setParameterTypeEndpoint("0x401000", "this", "undefined4", programStub);
+        Function func = mock(Function.class);
+        Response r = functions.setParameterTypeEndpoint(func, "this", "undefined4", programStub);
         assertTrue(r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
         assertTrue(msg.contains("concrete struct/class pointer"));
     }
 
     public void testSetDecompilerVariableTypeRoutesThisLikeSetParameterType() {
-        Response r = functions.setDecompilerVariableType("0x401000", "this", "undefined4", programStub);
+        Function func = mock(Function.class);
+        Response r = functions.setDecompilerVariableType(func, "this", "undefined4", programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("concrete struct/class pointer"));
     }

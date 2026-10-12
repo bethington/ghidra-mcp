@@ -202,6 +202,7 @@ public class FunctionServiceNoReturnTest {
 
         FunctionDouble terminal = new FunctionDouble("target", true);
         FunctionDouble thunk = new FunctionDouble("thunk", true).linkTo(terminal);
+        when(thunk.function.getEntryPoint()).thenReturn(address);
 
         when(addressFactory.getAddress("0x1000")).thenReturn(address);
         when(program.getAddressFactory()).thenReturn(addressFactory);
@@ -210,7 +211,7 @@ public class FunctionServiceNoReturnTest {
         when(provider.getCurrentProgram()).thenReturn(program);
 
         FunctionService service = new FunctionService(provider, new InlineThreadingStrategy());
-        Response response = service.setFunctionNoReturn("0x1000", false, program);
+        Response response = service.setFunctionNoReturn(thunk.function, false, program);
 
         assertTrue(response instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) response).data();

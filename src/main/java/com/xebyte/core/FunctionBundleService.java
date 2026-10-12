@@ -75,7 +75,7 @@ public class FunctionBundleService {
     public Response getFunctions(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Single mode: function name or address (0x<hex> or "
-                               + "<space>:<hex>). Ignored when functions= is set.") String functionRef,
+                               + "<space>:<hex>). Ignored when functions= is set.") Function func,
             @Param(value = "functions", defaultValue = "",
                    description = "Bulk mode: comma-separated function references (names or "
                                + "addresses). When set, function= is ignored. Returns a map "
@@ -130,13 +130,9 @@ public class FunctionBundleService {
                 ctxLimit, ctxLines, includeDisasm);
         }
 
-        if (functionRef == null || functionRef.isEmpty()) {
+        if (func == null) {
             return Response.err("function name or address required (or pass functions= for bulk)");
         }
-
-        ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (lookup.hasError()) return lookup.error();
-        Function func = lookup.function();
 
         try {
             return Response.ok(buildBundle(program, func, resolvedFields, includeCallContext,

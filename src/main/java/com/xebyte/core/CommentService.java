@@ -388,11 +388,11 @@ public class CommentService {
     @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.DESTRUCTIVE)
     public Response clearFunctionComments(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) removes the function's plate comment — the block "
                                + "above its entry. False leaves it alone.") boolean clearPlate,
@@ -403,21 +403,14 @@ public class CommentService {
                    description = "True (the default) removes every EOL (disassembly) comment inside the "
                                + "function body. False leaves them alone.") boolean clearEol,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (functionAddress == null || functionAddress.isEmpty()) {
-            return Response.err("function_address parameter is required");
-        }
 
-        // Resolve address before entering SwingUtilities lambda
-        Address resolvedAddr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        if (func == null) {
+            return Response.err("function is required");
+        }
 
         record ClearCommentCounts(boolean plateCleared, int preCleared, int eolCleared) {}
         try {
             ClearCommentCounts cleared = threadingStrategy.executeWrite(program, "Clear Function Comments", () -> {
-                Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
-                if (func == null) {
-                    throw new Refusal("No function at address: " + functionAddress);
-                }
 
                 boolean plateCleared = false;
                 int preCleared = 0;
@@ -466,7 +459,5 @@ public class CommentService {
         }
     }
 
-    public Response clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
-        return clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, null);
-    }
+
 }

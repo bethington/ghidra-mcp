@@ -361,7 +361,7 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -373,14 +373,8 @@ public class XrefCallGraphService {
             @Param(value = "program", defaultValue = "") Program program) {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
-
-        // Find the function by name or address
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        Function function = resolved.function();
-
         Set<Function> callees = new HashSet<>();
-        AddressSetView functionBody = function.getBody();
+        AddressSetView functionBody = func.getBody();
         Listing listing = program.getListing();
         ReferenceManager refManager = program.getReferenceManager();
 
@@ -429,7 +423,7 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -442,11 +436,7 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name or address
-        Function targetFunction = null;
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        targetFunction = resolved.function();
+        Function targetFunction = func;
 
         Set<Function> callers = new HashSet<>();
         ReferenceManager refManager = program.getReferenceManager();
@@ -487,18 +477,15 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
             @Param(value = "program", defaultValue = "") Program program) {
+
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name or address
-        Function rootFunction = null;
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        rootFunction = resolved.function();
+        Function rootFunction = func;
 
         Set<String> visited = new HashSet<>();
         Map<String, Set<String>> callGraph = new HashMap<>();

@@ -8,7 +8,7 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
-### Changed — the server resolves programs and addresses before a tool runs
+### Changed — the server resolves programs, addresses and functions before a tool runs
 
 Tool parameters are typed as what they name. `AnnotationScanner` reads the caller's string as
 before and resolves it per call, so programs opened later are found. A name that resolves to
@@ -18,6 +18,12 @@ nothing is answered with the message tools used to return themselves, and the to
   About 100 compatibility overloads that took a program name, or none, are gone.
 - **Addresses.** Most address parameters take an `Address` parsed against that program; a bad
   one is refused with the parse error.
+- **Functions.** 27 tools take the `Function` a reference names: its name, its entry address or
+  any address inside it ("Function not found: …"). 16 of them (`disassemble_function`,
+  `get_function_hash`, the prototype, variable and no-return setters, among others) used to
+  demand the exact entry address. Only `delete_function` and `create_function` still want an
+  exact entry. Since a caller may pass a name or an interior address, every single-function
+  response carries `resolved_function` `{name, address}`, the function the call acted on.
 
 ### Fixed — every program write takes the headless write lock
 

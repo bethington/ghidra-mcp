@@ -4,6 +4,7 @@ import com.xebyte.core.FunctionBundleService;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.Response;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
 
@@ -38,7 +39,8 @@ public class FunctionBundleFieldsEndpointTest extends TestCase {
         when(provider.getCurrentProgram()).thenReturn(program);
         FunctionBundleService svc = new FunctionBundleService(
                 provider, new NoopThreadingStrategy(), mock(FunctionService.class));
-        Response r = svc.getFunctions("401000", "", "callers,nope", false, 0, 3, false, program);
+        Function func = mock(Function.class);
+        Response r = svc.getFunctions(func, "", "callers,nope", false, 0, 3, false, program);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Unknown field"));
         assertTrue(((Response.Err) r).message().contains("callers"));
