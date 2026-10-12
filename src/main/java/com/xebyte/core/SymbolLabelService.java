@@ -45,11 +45,7 @@ public class SymbolLabelService {
                    description = "Maximum labels returned in this page (default 20). Pass 0 or a negative "
                                + "value for no limit; `total` in the response always reports the full "
                                + "count for the function.") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionName == null || functionName.isEmpty()) {
             return Response.err("name is required (function name or address)");
         }
@@ -80,10 +76,6 @@ public class SymbolLabelService {
         }
 
         return ServiceUtils.paged("labels", labels, offset, limit);
-    }
-
-    public Response renameLabel(String addressStr, String oldName, String newName) {
-        return renameLabel(addressStr, oldName, newName, null);
     }
 
     /**
@@ -138,37 +130,34 @@ public class SymbolLabelService {
                    description = "For kind=label: the current label name at the address given by target. "
                                + "When target is omitted this is used as the target instead, for callers "
                                + "migrated from rename_global_variable(old_name, new_name).") String oldName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Per-call override for the naming-quality gate: 'enforce' rejects a "
                                + "convention miss, 'warn' applies the name and returns the miss as a "
                                + "warning, 'off' skips the check. Omit to use the project/global setting.")
                     String strictModeArg) {
         try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
-            return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, programName);
+            return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, program);
         } catch (Exception e) {
             return Response.err("rename_symbol failed: " + e.getMessage());
         }
     }
 
-    private Response renameSymbolKind(String target, String newName, String kind, String oldName,
-            String programName) {
+    private Response renameSymbolKind(String target, String newName, String kind, String oldName, Program program) {
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
-            case "data":     return renameDataAtAddress(target, newName, programName);
-            case "global":   return renameGlobalVariable(target, newName, programName);
-            case "external": return renameExternalLocation(target, newName, programName);
+            case "data":     return renameDataAtAddress(target, newName, program);
+            case "global":   return renameGlobalVariable(target, newName, program, null);
+            case "external": return renameExternalLocation(target, newName, program);
             case "label":
                 return (oldName == null || oldName.isEmpty())
-                        ? renameOrLabel(target, newName, programName)
-                        : renameLabel(target, oldName, newName, programName);
+                        ? renameOrLabel(target, newName, program, null)
+                        : renameLabel(target, oldName, newName, program);
             default: { // auto: address -> rename-or-create-label; name -> global variable
-                ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-                if (pe.hasError()) return pe.error();
-                Address addr = ServiceUtils.parseAddress(pe.program(), target);
+                Address addr = ServiceUtils.parseAddress(program, target);
                 return (addr != null)
-                        ? renameOrLabel(target, newName, programName)
-                        : renameGlobalVariable(target, newName, programName);
+                        ? renameOrLabel(target, newName, program, null)
+                        : renameGlobalVariable(target, newName, program, null);
             }
         }
     }
@@ -183,11 +172,7 @@ public class SymbolLabelService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
@@ -237,14 +222,6 @@ public class SymbolLabelService {
         }
     }
 
-    public Response createLabel(String addressStr, String labelName) {
-        return createLabel(addressStr, labelName, null, null);
-    }
-
-    public Response createLabel(String addressStr, String labelName, String programName) {
-        return createLabel(addressStr, labelName, null, programName);
-    }
-
     @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.WRITE)
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
@@ -253,13 +230,9 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels != null && !labels.isEmpty()) {
-            return batchCreateLabels(labels, programName);
+            return batchCreateLabels(labels, program);
         }
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required (or pass labels[] for bulk)");
@@ -316,18 +289,10 @@ public class SymbolLabelService {
         }
     }
 
-    public Response batchCreateLabels(List<Map<String, String>> labels) {
-        return batchCreateLabels(labels, null);
-    }
-
     // Bulk helper for create_label(labels=[...]). Merged into create_label in 7.0.0.
     public Response batchCreateLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels == null || labels.isEmpty()) {
             return Response.err("No labels provided");
         }
@@ -421,15 +386,6 @@ public class SymbolLabelService {
         return Response.ok(result);
     }
 
-    /** Three-arg overload preserving the pre-v5.11.2 signature. */
-    public Response renameOrLabel(String addressStr, String newName, String programName) {
-        return renameOrLabel(addressStr, newName, programName, null);
-    }
-
-    public Response renameOrLabel(String addressStr, String newName) {
-        return renameOrLabel(addressStr, newName, null, null);
-    }
-
     // rename_or_label merged into rename_symbol (auto mode for address targets) in 7.0.0; kept as a helper.
     public Response renameOrLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -439,14 +395,10 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -467,7 +419,7 @@ public class SymbolLabelService {
             if (data != null) {
                 // This is defined data (global variable) — validate g_ prefix
                 conventions = NamingConventions.validateGlobalName(newName);
-                Response result = renameDataAtAddress(addressStr, newName, programName);
+                Response result = renameDataAtAddress(addressStr, newName, program);
                 if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
                     @SuppressWarnings("unchecked")
                     java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
@@ -479,7 +431,7 @@ public class SymbolLabelService {
             } else {
                 // This is a label (code address) — validate snake_case
                 conventions = NamingConventions.validateLabelName(newName);
-                Response result = createLabel(addressStr, newName, null, programName);
+                Response result = createLabel(addressStr, newName, null, program);
                 if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
                     @SuppressWarnings("unchecked")
                     java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
@@ -495,14 +447,6 @@ public class SymbolLabelService {
         }
     }
 
-    public Response deleteLabel(String addressStr, String labelName) {
-        return deleteLabel(addressStr, labelName, null, null);
-    }
-
-    public Response deleteLabel(String addressStr, String labelName, String programName) {
-        return deleteLabel(addressStr, labelName, null, programName);
-    }
-
     @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol", access = ToolAccess.DESTRUCTIVE)
     public Response deleteLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
@@ -511,13 +455,9 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels != null && !labels.isEmpty()) {
-            return batchDeleteLabels(labels, programName);
+            return batchDeleteLabels(labels, program);
         }
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required (or pass labels[] for bulk)");
@@ -585,18 +525,10 @@ public class SymbolLabelService {
         }
     }
 
-    public Response batchDeleteLabels(List<Map<String, String>> labels) {
-        return batchDeleteLabels(labels, null);
-    }
-
     // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 7.0.0.
     public Response batchDeleteLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels == null || labels.isEmpty()) {
             return Response.err("No labels provided");
         }
@@ -686,10 +618,6 @@ public class SymbolLabelService {
     // Data Rename Methods
     // -----------------------------------------------------------------------
 
-    public Response renameDataAtAddress(String addressStr, String newName) {
-        return renameDataAtAddress(addressStr, newName, null);
-    }
-
     // rename_data merged into rename_symbol(kind=data) in 7.0.0; kept as a helper.
     public Response renameDataAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -700,11 +628,9 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
+        // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -782,27 +708,14 @@ public class SymbolLabelService {
         }
     }
 
-    /** Three-arg overload preserving the pre-v5.11.2 signature. */
-    public Response renameGlobalVariable(String oldName, String newName, String programName) {
-        return renameGlobalVariable(oldName, newName, programName, null);
-    }
-
-    public Response renameGlobalVariable(String oldName, String newName) {
-        return renameGlobalVariable(oldName, newName, null, null);
-    }
-
     // rename_global_variable merged into rename_symbol(kind=global) in 7.0.0; kept as a helper.
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (oldName == null || oldName.isEmpty()) {
             return Response.err("Old variable name is required");
         }
@@ -910,10 +823,6 @@ public class SymbolLabelService {
     // External Location Methods
     // -----------------------------------------------------------------------
 
-    public Response renameExternalLocation(String address, String newName) {
-        return renameExternalLocation(address, newName, null);
-    }
-
     // rename_external_location merged into rename_symbol(kind=external) in 7.0.0; kept as a helper.
     public Response renameExternalLocation(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -923,11 +832,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String address,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address addr = ServiceUtils.parseAddress(program, address);
             if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -986,11 +891,7 @@ public class SymbolLabelService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 

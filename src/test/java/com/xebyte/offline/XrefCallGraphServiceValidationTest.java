@@ -36,26 +36,6 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
         xref = new XrefCallGraphService(ServiceFactory.stubProvider(), ts);
     }
 
-    private static void assertNoProgram(Response r) {
-        assertNotNull("method returned null instead of an error Response", r);
-        assertTrue("expected a graceful 'No program loaded' error, got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
-
-    public void testGetXrefsToDegradesGracefully() {
-        assertNoProgram(xref.getXrefsTo("0x401000", null, 0, 100, ""));
-    }
-
-    public void testGetXrefsFromDegradesGracefully() {
-        assertNoProgram(xref.getXrefsFrom("0x401000", 0, 100, ""));
-    }
-
-    public void testProgramNotFoundWhenNamedProgramMissing() {
-        Response r = xref.getXrefsTo("0x401000", null, 0, 100, "Nonexistent.dll");
-        assertTrue("expected program-not-found error, got: " + r.toJson(),
-                r.toJson().contains("Program not found: Nonexistent.dll"));
-    }
-
     public void testGetFunctionCallersFallsBackToCallingFunctions() {
         Program program = mock(Program.class);
         ProgramProvider provider = mock(ProgramProvider.class);
@@ -89,7 +69,7 @@ public class XrefCallGraphServiceValidationTest extends TestCase {
         when(caller.getEntryPoint()).thenReturn(entry);
         when(entry.toString()).thenReturn("00100000");
 
-        Response r = service.getFunctionCallers("target", 0, 10, "");
+        Response r = service.getFunctionCallers("target", 0, 10, program);
 
         // 7.0.0 response contract: list-shaped results are JSON with a named
         // plural key plus count/total, not a formatted "name @ addr" listing.

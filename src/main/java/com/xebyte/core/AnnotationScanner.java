@@ -248,6 +248,7 @@ public class AnnotationScanner {
                         args[i] = resolveParam(bindings[i], query, body);
                     }
                 }
+                EntityParams.resolve(bindings, args, programProvider);
 
                 // Dry-run support: wrap POST endpoints in a transaction that always rolls back.
                 // Must check BOTH the query string and the JSON body -- this project's own
@@ -299,8 +300,14 @@ public class AnnotationScanner {
 
                 Response result = injectResolvedProgram((Response) method.invoke(service, args));
                 return isWrite && tool.dryRun() ? warnIfUnsaveable(result) : result;
+            } catch (Refusal refusal) {
+                // A parameter that names nothing (no such program, no function there).
+                return Response.err(refusal.getMessage());
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
+                if (cause instanceof Refusal refusal) {
+                    return Response.err(refusal.getMessage());
+                }
                 String msg = cause != null ? cause.getMessage() : e.getMessage();
                 LOG.log(Level.WARNING, "Error in " + tool.path() + ": " + msg, cause != null ? cause : e);
                 return Response.err("Error in " + tool.path() + ": " + msg);

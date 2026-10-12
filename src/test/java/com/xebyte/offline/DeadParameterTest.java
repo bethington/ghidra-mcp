@@ -88,6 +88,14 @@ public class DeadParameterTest extends TestCase {
         KNOWN_INERT.put("/create_folder#program",
             "Boilerplate 'program' on a project-level operation. Creating a folder does not involve "
                 + "a program; the parameter was copied onto the signature and never used.");
+        KNOWN_INERT.put("/detect_crypto_constants#program",
+            "Placeholder endpoint; program is resolved by EntityParams but the stub implementation "
+                + "does not read it yet.");
+        KNOWN_INERT.put("/find_dead_code#program",
+            "Placeholder endpoint; program is resolved by EntityParams but the stub implementation "
+                + "does not read it yet.");
+        KNOWN_INERT.put("/get_valid_data_types#program",
+            "Returns a static built-in type vocabulary; program is resolved by EntityParams but unused.");
     }
 
     /** One {@code @Param} found on one {@code @McpTool} method. */

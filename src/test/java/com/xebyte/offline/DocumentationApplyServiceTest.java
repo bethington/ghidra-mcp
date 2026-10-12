@@ -74,7 +74,7 @@ public class DocumentationApplyServiceTest {
         when(noFunctions.iterator()).thenReturn(noFunctions);
         when(functionManager.getFunctions(anyBoolean())).thenReturn(noFunctions);
         function = function("f", 0x1000, "param_1");
-        when(analysis.analyzeFunctionCompleteness(anyString(), anyBoolean(), any()))
+        when(analysis.analyzeFunctionCompleteness(anyString(), anyBoolean(), anyString(), any(Program.class)))
             .thenReturn(Response.ok(Map.of("effective_score", 88)));
         okEverything();
     }
@@ -93,9 +93,10 @@ public class DocumentationApplyServiceTest {
     }
 
     private void okEverything() {
-        when(functions.renameFunctionByAddress(anyString(), anyString(), any())).thenReturn(Response.ok(Map.of()));
-        when(functions.setFunctionPrototype(anyString(), anyString(), any(), any()))
-            .thenReturn(new FunctionService.PrototypeResult(true, null));
+        when(functions.renameFunctionByAddress(anyString(), anyString(), any(Program.class), any()))
+            .thenReturn(Response.ok(Map.of()));
+        when(functions.setFunctionPrototype(anyString(), anyString(), any(), any(Program.class)))
+            .thenReturn(new FunctionService.PrototypeResult(true, "ok"));
         when(functions.setLocalVariableType(anyString(), anyString(), anyString(), any()))
             .thenReturn(Response.ok(Map.of()));
         when(functions.batchRenameVariables(anyString(), any(), anyBoolean(), any())).thenReturn(Response.ok(Map.of()));
@@ -117,12 +118,12 @@ public class DocumentationApplyServiceTest {
             list(fields.get("parameters")), stringMap(fields.get("variable_types")),
             stringMap(fields.get("variable_renames")), (String) fields.get("plate_comment"),
             list(fields.get("comments")), list(fields.get("labels")),
-            (String) fields.get("tags"), stringMap(fields.get("tag_comments")), score, PROGRAM);
+            (String) fields.get("tags"), stringMap(fields.get("tag_comments")), score, program);
     }
 
     private Response applyMany(List<Map<String, Object>> entries, Boolean score) {
         return service(null).applyDocumentation("", entries, false, null, null, null, null, null, null, null,
-            null, null, null, null, null, score, PROGRAM);
+            null, null, null, null, null, score, program);
     }
 
     @SuppressWarnings("unchecked")
@@ -151,7 +152,7 @@ public class DocumentationApplyServiceTest {
     @Test
     public void theAddressIsRequired() {
         Response r = service(null).applyDocumentation("  ", null, false, null, null, null, null, null, null,
-            null, null, null, null, null, null, null, PROGRAM);
+            null, null, null, null, null, null, null, program);
         assertTrue(((Response.Err) r).message().contains("address parameter is required"));
     }
 
@@ -161,25 +162,25 @@ public class DocumentationApplyServiceTest {
         assertEquals(1, ((List<?>) out.get("errors")).size());
         assertEquals(Map.of(), out.get("steps"));
         verifyNoInteractions(comments);
-        verify(functions, never()).renameFunctionByAddress(anyString(), anyString(), any());
+        verify(functions, never()).renameFunctionByAddress(anyString(), anyString(), any(Program.class), any());
     }
 
     @Test
     public void theStepsRunInOrderAndTheSignatureComesBeforeTheComments() {
-        when(comments.batchSetComments(anyString(), any(), any(), any(), eq(PROGRAM)))
+        when(comments.batchSetComments(anyString(), any(), any(), any(), eq(program)))
             .thenReturn(Response.ok(Map.of("success", true, "plate_comment_set", true,
                 "decompiler_comments_set", 1, "disassembly_comments_set", 0)));
 
         Map<String, Object> out = ok(applyOne(service(null), Map.of(
             "name", "Decode", "prototype", "int Decode(void)", "plate_comment", "plate",
-            "comments", List.of(Map.of("address", "0x1004", "pre_comment", "c"))), null));
+            "comments", List.of(Map.of("address", "0x1004", "pre_comment", "c"))), true));
 
         InOrder order = inOrder(functions, comments, analysis);
-        order.verify(functions).renameFunctionByAddress("0x1000", "Decode", PROGRAM);
-        order.verify(functions).setFunctionPrototype(eq("0x1000"), eq("int Decode(void)"), any(), eq(PROGRAM));
+        order.verify(functions).renameFunctionByAddress("0x1000", "Decode", program, null);
+        order.verify(functions).setFunctionPrototype(eq("0x1000"), eq("int Decode(void)"), any(), eq(program));
         // setting a prototype wipes the plate comment, so comments must come after it
-        order.verify(comments).batchSetComments(eq("0x1000"), any(), any(), eq("plate"), eq(PROGRAM));
-        order.verify(analysis).analyzeFunctionCompleteness("0x1000", true, PROGRAM);
+        order.verify(comments).batchSetComments(eq("0x1000"), any(), any(), eq("plate"), eq(program));
+        order.verify(analysis).analyzeFunctionCompleteness("0x1000", true, "", program);
         assertEquals(List.of(), out.get("errors"));
         assertEquals("a", out.get("program"));
         assertEquals(Map.of("effective_score", 88), out.get("completeness"));
@@ -190,7 +191,7 @@ public class DocumentationApplyServiceTest {
 
     @Test
     public void aFailedStepIsReportedAndDoesNotStopTheOthers() {
-        when(functions.renameFunctionByAddress(anyString(), anyString(), any()))
+        when(functions.renameFunctionByAddress(anyString(), anyString(), any(Program.class), any()))
             .thenReturn(Response.ok(Map.of("status", "rejected", "message", "name too short")));
 
         Map<String, Object> out = ok(applyOne(service(null), Map.of("name", "x", "plate_comment", "p"), false));
@@ -213,15 +214,15 @@ public class DocumentationApplyServiceTest {
     }
 
     private String renameFailure(Response r) {
-        when(functions.renameFunctionByAddress(anyString(), anyString(), any())).thenReturn(r);
+        when(functions.renameFunctionByAddress(anyString(), anyString(), any(Program.class), any())).thenReturn(r);
         Map<String, Object> out = ok(applyOne(service(null), Map.of("name", "n"), false));
         return (String) step(out, "rename").get("error");
     }
 
     @Test
     public void variableTypesAreAppliedIndividuallyAndCounted() {
-        when(functions.setLocalVariableType("0x1000", "a", "int", PROGRAM)).thenReturn(Response.ok(Map.of("status", "success")));
-        when(functions.setLocalVariableType("0x1000", "b", "nosuch", PROGRAM)).thenReturn(Response.err("type not found"));
+        when(functions.setLocalVariableType("0x1000", "a", "int", program)).thenReturn(Response.ok(Map.of("status", "success")));
+        when(functions.setLocalVariableType("0x1000", "b", "nosuch", program)).thenReturn(Response.err("type not found"));
 
         Map<String, String> types = new LinkedHashMap<>();
         types.put("a", "int");
@@ -237,7 +238,7 @@ public class DocumentationApplyServiceTest {
 
     @Test
     public void variableRenamesLiftTheirCountsFromTheToolsResult() {
-        when(functions.batchRenameVariables("0x1000", Map.of("a", "b"), true, PROGRAM))
+        when(functions.batchRenameVariables("0x1000", Map.of("a", "b"), true, program))
             .thenReturn(Response.ok(Map.of("success", true, "variables_renamed", 1, "variables_failed", 0)));
         Map<String, Object> out = ok(applyOne(service(null), Map.of("variable_renames", Map.of("a", "b")), false));
         Map<String, Object> entry = step(out, "variable_renames");
@@ -267,7 +268,7 @@ public class DocumentationApplyServiceTest {
         Map<String, Object> out = ok(applyOne(service(null), Map.of(), false));
         assertEquals(Map.of(), out.get("steps"));
         verifyNoInteractions(comments, symbols);
-        verify(functions, never()).renameFunctionByAddress(anyString(), anyString(), any());
+        verify(functions, never()).renameFunctionByAddress(anyString(), anyString(), any(Program.class), any());
     }
 
     /** Without the program on every step a headless server, which has no current one, could not run any. */
@@ -277,13 +278,13 @@ public class DocumentationApplyServiceTest {
             "variable_types", Map.of("v", "int"), "variable_renames", Map.of("a", "b"),
             "plate_comment", "plate", "labels", List.of(Map.of("address", "0x1008", "name", "loop_top"))), true);
 
-        verify(functions).renameFunctionByAddress(anyString(), anyString(), eq(PROGRAM));
-        verify(functions).setFunctionPrototype(anyString(), anyString(), any(), eq(PROGRAM));
-        verify(functions).setLocalVariableType(anyString(), anyString(), anyString(), eq(PROGRAM));
-        verify(functions).batchRenameVariables(anyString(), any(), anyBoolean(), eq(PROGRAM));
-        verify(comments).batchSetComments(anyString(), any(), any(), any(), eq(PROGRAM));
-        verify(symbols).batchCreateLabels(any(), eq(PROGRAM));
-        verify(analysis).analyzeFunctionCompleteness(anyString(), anyBoolean(), eq(PROGRAM));
+        verify(functions).renameFunctionByAddress(anyString(), anyString(), eq(program), isNull());
+        verify(functions).setFunctionPrototype(anyString(), anyString(), any(), eq(program));
+        verify(functions).setLocalVariableType(anyString(), anyString(), anyString(), eq(program));
+        verify(functions).batchRenameVariables(anyString(), any(), anyBoolean(), eq(program));
+        verify(comments).batchSetComments(anyString(), any(), any(), any(), eq(program));
+        verify(symbols).batchCreateLabels(any(), eq(program));
+        verify(analysis).analyzeFunctionCompleteness(anyString(), anyBoolean(), eq(""), eq(program));
     }
 
     @Test
@@ -291,7 +292,7 @@ public class DocumentationApplyServiceTest {
         Map<String, Object> out = ok(applyOne(service(null),
             Map.of("prototype", "int f(void)", "return_type", "int"), false));
         assertEquals(List.of("signature: give prototype or return_type, not both"), out.get("errors"));
-        verify(functions, never()).setFunctionPrototype(anyString(), anyString(), any(), any());
+        verify(functions, never()).setFunctionPrototype(anyString(), anyString(), any(), any(Program.class));
     }
 
     // ------------------------------------------------- the get_function_documentation export
@@ -301,8 +302,8 @@ public class DocumentationApplyServiceTest {
         Map<String, Object> out = ok(applyOne(service(null), Map.of("parameters", List.of(
             Map.of("ordinal", 0.0, "name", "pPlayer", "type", "Player *"))), false));
 
-        verify(functions).setLocalVariableType("0x1000", "param_1", "Player *", PROGRAM);
-        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "pPlayer"), true, PROGRAM);
+        verify(functions).setLocalVariableType("0x1000", "param_1", "Player *", program);
+        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "pPlayer"), true, program);
         assertEquals(List.of(), out.get("errors"));
     }
 
@@ -322,7 +323,7 @@ public class DocumentationApplyServiceTest {
             Map.of("return_type", "undefined", "prototype", "int f(void)"), false));
 
         assertEquals(List.of(), out.get("errors"));
-        verify(functions).setFunctionPrototype(eq("0x1000"), eq("int f(void)"), any(), eq(PROGRAM));
+        verify(functions).setFunctionPrototype(eq("0x1000"), eq("int f(void)"), any(), eq(program));
     }
 
     @Test
@@ -331,7 +332,7 @@ public class DocumentationApplyServiceTest {
             "variable_renames", Map.of("param_1", "explicit"),
             "parameters", List.of(Map.of("ordinal", 0.0, "name", "fromExport", "type", "undefined4"))), false);
 
-        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "explicit"), true, PROGRAM);
+        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "explicit"), true, program);
     }
 
     @Test
@@ -341,7 +342,7 @@ public class DocumentationApplyServiceTest {
 
         Map<String, String> pre = Map.of("address", "ram:00001004", "comment", "before");
         Map<String, String> eol = Map.of("address", "ram:00001004", "comment", "after");
-        verify(comments).batchSetComments("0x1000", List.of(pre), List.of(eol), null, PROGRAM);
+        verify(comments).batchSetComments("0x1000", List.of(pre), List.of(eol), null, program);
     }
 
     @Test
@@ -355,7 +356,7 @@ public class DocumentationApplyServiceTest {
             Map.of("relative_offset", 8.0, "name", "loop_top"),
             Map.of("relative_offset", 12.0, "name", "done"))), false));
 
-        verify(symbols).batchCreateLabels(List.of(Map.of("address", "ram:0000100c", "name", "done")), PROGRAM);
+        verify(symbols).batchCreateLabels(List.of(Map.of("address", "ram:0000100c", "name", "done")), program);
         assertEquals(1, step(out, "labels").get("created"));
         assertEquals(1, step(out, "labels").get("unchanged"));
     }
@@ -380,7 +381,7 @@ public class DocumentationApplyServiceTest {
             "tag_comments", Map.of("crypto", "touches key material")), false));
 
         verify(functions).addFunctionTag("0x1000", "crypto,hot", Map.of("crypto", "touches key material"),
-            List.of(), PROGRAM);
+            List.of(), program);
         assertEquals(List.of("crypto", "hot"), step(out, "tags").get("added"));
         assertEquals(List.of("crypto"), step(out, "tags").get("created"));
         assertEquals(List.of(), out.get("errors"));
@@ -390,7 +391,7 @@ public class DocumentationApplyServiceTest {
     public void anEntryMayGiveItsTagsAsAnArray() {
         when(functions.addFunctionTag(anyString(), anyString(), any(), any(), any())).thenReturn(Response.ok(Map.of()));
         applyMany(List.of(Map.of("address", "0x1000", "tags", List.of("a", "b"))), false);
-        verify(functions).addFunctionTag(eq("0x1000"), eq("a,b"), any(), any(), eq(PROGRAM));
+        verify(functions).addFunctionTag(eq("0x1000"), eq("a,b"), any(), any(), eq(program));
     }
 
     @Test
@@ -408,14 +409,14 @@ public class DocumentationApplyServiceTest {
         Map<String, Object> out = ok(applyMany(List.of(
             Map.of("address", "0x1000", "name", "One"),
             Map.of("address", "0x9999", "name", "Missing"),
-            Map.of("address", "0x2000", "function_name", "Two")), null));
+            Map.of("address", "0x2000", "function_name", "Two")), false));
 
         assertEquals(3, out.get("count"));
         assertEquals(2, out.get("succeeded"));
         assertEquals(1, out.get("failed"));
         assertEquals(3, ((List<?>) out.get("results")).size());
-        verify(functions).renameFunctionByAddress("0x1000", "One", PROGRAM);
-        verify(functions).renameFunctionByAddress("0x2000", "Two", PROGRAM);
+        verify(functions).renameFunctionByAddress("0x1000", "One", program, null);
+        verify(functions).renameFunctionByAddress("0x2000", "Two", program, null);
     }
 
     /** An entry in entries[] is an export, whose spelling for params is "parameters". */
@@ -424,25 +425,19 @@ public class DocumentationApplyServiceTest {
         applyMany(List.of(Map.of("address", "0x1000", "parameters", List.of(
             Map.of("ordinal", 0.0, "name", "pPlayer", "type", "Player *")))), false);
 
-        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "pPlayer"), true, PROGRAM);
+        verify(functions).batchRenameVariables("0x1000", Map.of("param_1", "pPlayer"), true, program);
     }
 
     @Test
     public void bulkDoesNotScoreUnlessAsked() {
-        applyMany(List.of(Map.of("address", "0x1000", "name", "One")), null);
+        applyMany(List.of(Map.of("address", "0x1000", "name", "One")), false);
         verifyNoInteractions(analysis);
 
         applyMany(List.of(Map.of("address", "0x1000", "name", "One")), true);
-        verify(analysis).analyzeFunctionCompleteness("0x1000", true, PROGRAM);
+        verify(analysis).analyzeFunctionCompleteness("0x1000", true, "", program);
 
         applyMany(List.of(Map.of("address", "0x1000", "name", "One", "score", true)), false);
-        verify(analysis, times(2)).analyzeFunctionCompleteness("0x1000", true, PROGRAM);
+        verify(analysis, times(2)).analyzeFunctionCompleteness("0x1000", true, "", program);
     }
 
-    @Test
-    public void anUnknownProgramFailsTheWholeCall() {
-        Response r = service(null).applyDocumentation("0x1000", null, false, null, null, null, null, null,
-            null, null, null, null, null, null, null, null, "/fw/none");
-        assertTrue(r instanceof Response.Err);
-    }
 }

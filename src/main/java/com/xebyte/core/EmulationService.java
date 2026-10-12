@@ -104,11 +104,7 @@ public class EmulationService {
                             "emulation sees only the ORIGINAL unmodified bytes, not the emulated " +
                             "result. This reads from the emulator's own state instead.")
                     String readMemoryAfterJson,
-            @Param(value = "program", defaultValue = "") String programName) {
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         Address entryAddr = ServiceUtils.resolveFunctionAddress(program, addressStr);
         if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -346,11 +342,7 @@ public class EmulationService {
                     description = "Additional register values to set before each emulation (JSON object)") String initialRegistersJson,
             @Param(value = "wide_string", source = ParamSource.BODY, defaultValue = "false",
                     description = "Write candidate strings as UTF-16LE (wide) instead of ASCII") boolean wideString,
-            @Param(value = "program", defaultValue = "") String programName) {
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         Address entryAddr = ServiceUtils.parseAddress(program, hashFuncAddr);
         if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());

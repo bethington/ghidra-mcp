@@ -4,7 +4,10 @@ import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.Response;
 import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
+
+import static org.mockito.Mockito.mock;
 
 /**
  * Validation + guard coverage for ProgramScriptService (~2.3K LOC, previously only the
@@ -13,6 +16,8 @@ import junit.framework.TestCase;
  * before any program access, so they run offline.
  */
 public class ProgramScriptServiceValidationTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private ProgramScriptService scripts;
 
@@ -76,14 +81,14 @@ public class ProgramScriptServiceValidationTest extends TestCase {
     }
 
     public void testSetMemoryBlockNeedsSomethingToChange() {
-        Response r = scripts.setMemoryBlock("ram", "", null, null, null, null, "");
+        Response r = scripts.setMemoryBlock("ram", "", null, null, null, null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("nothing to change"));
     }
 
     public void testSetMemoryBlockNeedsExactlyOneOfBlockAndAddress() {
-        Response neither = scripts.setMemoryBlock("", "", null, false, null, null, "");
-        Response both = scripts.setMemoryBlock("ram", "0x08005000", null, false, null, null, "");
+        Response neither = scripts.setMemoryBlock("", "", null, false, null, null, programStub);
+        Response both = scripts.setMemoryBlock("ram", "0x08005000", null, false, null, null, programStub);
         assertTrue(((Response.Err) neither).message().contains("exactly one of block or address"));
         assertTrue(((Response.Err) both).message().contains("exactly one of block or address"));
     }

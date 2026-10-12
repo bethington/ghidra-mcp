@@ -546,6 +546,19 @@ public final class ServiceUtils {
     }
 
     /**
+     * The program a name resolves to ({@link #getProgramOrError}), or a {@link Refusal} with the
+     * same message. Tools take a {@code Program} parameter instead; this is for code that only
+     * has a name.
+     */
+    public static Program requireProgram(ProgramProvider provider, String programName) {
+        ProgramOrError pe = getProgramOrError(provider, programName);
+        if (pe.hasError()) {
+            throw new Refusal(pe.error() instanceof Response.Err err ? err.message() : pe.error().toJson());
+        }
+        return pe.program();
+    }
+
+    /**
      * Which program this HTTP request actually resolved, if any.
      *
      * <p>HTTP threads are pooled. An uncleared value lets request N+1 inherit
