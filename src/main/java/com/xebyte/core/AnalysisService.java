@@ -592,7 +592,6 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program resolvedProgram = pe.program();
 
-        // Resolve address before the analysis body
         Address structAddr = ServiceUtils.parseAddress(resolvedProgram, structAddressStr);
         if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
 
@@ -2011,7 +2010,6 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before the analysis body
         final Address startAddr;
         if (startAddress != null && !startAddress.isEmpty()) {
             startAddr = ServiceUtils.parseAddress(program, startAddress);
@@ -3995,7 +3993,6 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        // Resolve address before the analysis body
         Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
