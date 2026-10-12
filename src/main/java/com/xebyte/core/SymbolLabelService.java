@@ -45,9 +45,7 @@ public class SymbolLabelService {
                    description = "Maximum labels returned in this page (default 20). Pass 0 or a negative "
                                + "value for no limit; `total` in the response always reports the full "
                                + "count for the function.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -140,9 +138,7 @@ public class SymbolLabelService {
                    description = "For kind=label: the current label name at the address given by target. "
                                + "When target is omitted this is used as the target instead, for callers "
                                + "migrated from rename_global_variable(old_name, new_name).") String oldName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Per-call override for the naming-quality gate: 'enforce' rejects a "
                                + "convention miss, 'warn' applies the name and returns the miss as a "
@@ -187,9 +183,7 @@ public class SymbolLabelService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -259,9 +253,7 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -331,9 +323,7 @@ public class SymbolLabelService {
     // Bulk helper for create_label(labels=[...]). Merged into create_label in 7.0.0.
     public Response batchCreateLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -449,9 +439,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
@@ -523,9 +511,7 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -606,9 +592,7 @@ public class SymbolLabelService {
     // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 7.0.0.
     public Response batchDeleteLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -716,9 +700,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -813,9 +795,7 @@ public class SymbolLabelService {
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
@@ -943,9 +923,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String address,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1008,9 +986,7 @@ public class SymbolLabelService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

@@ -228,9 +228,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -331,9 +329,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -578,7 +574,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -622,9 +618,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
             @Param(value = "old_variable_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldVarName,
             @Param(value = "new_variable_name", source = ParamSource.BODY, aliases = {"newName"}) String newVarName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -773,9 +767,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(GetInfo), and a name whose tokens are a strict subset of an existing "
                                + "function's within the same module prefix. strict_mode downgrades those "
                                + "rejections to warnings.") String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' (reject "
                                + "low-quality names), 'warn' (write goes through with warnings), or 'off' "
@@ -1093,7 +1085,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "whatever else list_calling_conventions reports for this program's "
                                + "language. When set it OVERRIDES the convention written into the "
                                + "prototype string; omit to use whatever the prototype says.") String callingConvention,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
         if (result.isSuccess()) {
             List<String> warnings = new ArrayList<>();
@@ -1382,9 +1374,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"variableName"}) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1562,7 +1552,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "parameter_name", source = ParamSource.BODY, aliases = {"parameterName"}) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if ("this".equals(parameterName)) {
             return setFunctionThisType(functionAddress, newType, programName);
         }
@@ -1581,7 +1571,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddrStr,
             @Param(value = "this_type", source = ParamSource.BODY, aliases = {"thisType"},
                    description = "Class type for this, e.g. 'MyWidget *' or 'MyWidget'. The base struct name becomes the function's class.") String thisType,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
             return Response.err("Function address is required");
@@ -1720,9 +1710,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "is REJECTED whatever the current type is — swapping one undefined width "
                                + "for another is a no-op, not documentation. For 'this', a bare struct name "
                                + "is auto-suffixed with ' *'.") String newType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if ("this".equals(variableName)) {
             return setFunctionThisType(functionAddress, newType, programName);
         }
@@ -1756,7 +1744,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Maximum members returned in this page (default 200). It is clamped to a "
                                + "MINIMUM of 1, so 0 returns one member rather than everything — page with "
                                + "offset against total_members instead.") int limit,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if (className == null || className.trim().isEmpty()) {
             return Response.err("class_name is required");
         }
@@ -2001,9 +1989,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing "
                                + "execution continuing past the call. False clears that back to an ordinary "
                                + "returning function. Required — there is no default.") boolean noReturn,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2083,9 +2069,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String instructionAddrStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2177,9 +2161,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Storage specification: a location followed by a size in bytes, e.g. "
                                + "Stack[-0x10]:4, EBP:4, EAX:4. The response echoes it as "
                                + "requested_storage next to the variable's current_storage.") String storageSpec,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2472,9 +2454,7 @@ Map<String, Object> out = new LinkedHashMap<>();
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") int limit,
             @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -2696,9 +2676,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "array (int[4]), resolved like every other tool's type argument. A type "
                                + "that cannot be resolved refuses the whole call before anything is "
                                + "renamed.") String returnType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2803,9 +2781,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2889,9 +2865,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "instruction exists there, which is what lets you create a function over "
                                + "raw undefined bytes. False requires the address to be disassembled "
                                + "already; function creation fails otherwise.") boolean disassembleFirst,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3017,9 +2991,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Return the disassembled instruction list (mnemonic, operands, raw bytes, address) in the response. Disable for byte ranges where you only need the success/byte-count summary.") boolean includeInstructions,
             @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
                    description = "Cap on number of instructions returned when include_instructions is true. Protects against runaway payload for large ranges; if the actual count exceeds this, the response sets truncated=true and instructions_total reports the real count.") int maxInstructions,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3231,9 +3203,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Exclusive seed end (consistent with disassemble_bytes). Must be in the same "
                                + "address space as start_address and strictly greater. Omitted: one-address seed; "
                                + "the command still follows flow from there like clicking one address in the GUI.") String endAddress,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         if (startAddress == null || startAddress.isEmpty()) {
             return Response.err("start_address parameter required");
@@ -3529,9 +3499,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "whole batch. Use it when the batch path fails or renames the wrong symbol; the "
                                + "response carries \"method\": \"individual\".") boolean forceIndividual,
             
-@Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+@Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3761,9 +3729,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "JSON object mapping old variable names to {name, type} objects. "
                                + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
                                + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
-            @Param(value = "program",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4173,9 +4139,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(change one with set_function_tag_comment).") Map<String, String> tagComments,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4246,9 +4210,7 @@ List<String> added = new ArrayList<>();
                    description = "Comma-separated tag names to detach (single mode).") String tagsCsv,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4302,9 +4264,7 @@ Set<String> currentBefore = new HashSet<>();
                                + "the first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "500",
                    description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4334,9 +4294,7 @@ Set<String> currentBefore = new HashSet<>();
     public Response deleteFunctionTag(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name to delete program-wide") String name,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4371,9 +4329,7 @@ Set<String> currentBefore = new HashSet<>();
                    description = "Tag name") String name,
             @Param(value = "comment", source = ParamSource.BODY,
                    description = "New comment text (pass an empty string to clear)") String comment,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4405,9 +4361,7 @@ Set<String> currentBefore = new HashSet<>();
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
             Map<String, String> tagComments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4477,9 +4431,7 @@ Set<String> currentBefore = new HashSet<>();
     public Response batchRemoveFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

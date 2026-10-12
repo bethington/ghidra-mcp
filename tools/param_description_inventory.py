@@ -35,6 +35,10 @@ SRC = REPO / "src" / "main" / "java" / "com" / "xebyte"
 #: their own javadoc, so scanning them would invent parameters that don't exist.
 SKIP_FILES = frozenset({"Param.java", "McpTool.java"})
 
+#: Sentinel standing for AnnotationScanner.PROGRAM_PARAM_DESCRIPTION in reports;
+#: not a byte-identical copy of the Java string.
+SCANNER_PROGRAM_DESCRIPTION = "(the scanner's shared program description)"
+
 
 def strip_comments(text: str) -> str:
     """Blank out // and /* */ comments, preserving offsets and line count.
@@ -276,6 +280,10 @@ def scan_file(path: Path, repo: Path = REPO) -> list[dict]:
             elems = parse_param_anno(piece[p_open + 1: p_close])
             desc_raw = elems.get("description")
             desc = concat_string_literals(desc_raw) if desc_raw else ""
+            param = unquote(elems.get("value")) or "?"
+            # AnnotationScanner gives an undescribed `program` param one shared text.
+            if not desc.strip() and param == "program":
+                desc = SCANNER_PROGRAM_DESCRIPTION
             java_decl = piece[p_close + 1:].strip()
             results.append({
                 "file": _display_path(path, repo),
@@ -283,7 +291,7 @@ def scan_file(path: Path, repo: Path = REPO) -> list[dict]:
                 "tool": tool_name,
                 "path": tool_path,
                 "line": line,
-                "param": unquote(elems.get("value")) or "?",
+                "param": param,
                 "java_type": java_decl.rsplit(" ", 1)[0].strip() if " " in java_decl else java_decl,
                 "source": unquote(elems.get("source")) or "QUERY(default)",
                 "default": unquote(elems.get("defaultValue")),

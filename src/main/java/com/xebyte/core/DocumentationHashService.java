@@ -78,7 +78,7 @@ public class DocumentationHashService {
                    description = "Bulk mode: `documented` keeps functions with a real name, "
                                + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
                                + "with `switch`). Omit for all.") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -312,7 +312,7 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -472,7 +472,7 @@ public class DocumentationHashService {
 
     @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response compareProgramsDocumentation(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
             ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -533,7 +533,7 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String stringAddress,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if (stringAddress == null || stringAddress.isEmpty()) {
             return Response.err("String address is required");
         }
@@ -607,7 +607,7 @@ public class DocumentationHashService {
     @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response batchStringAnchorReport(
             @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1382,8 +1382,7 @@ public class DocumentationHashService {
     public Response archiveIngestFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                 description = "Function entry-point address (Ghidra hex form)") String functionAddress,
-            @Param(value = "program",
-                description = "Target program path/name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
@@ -1432,8 +1431,7 @@ public class DocumentationHashService {
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestProgram(
-            @Param(value = "program",
-                description = "Target program path/name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
