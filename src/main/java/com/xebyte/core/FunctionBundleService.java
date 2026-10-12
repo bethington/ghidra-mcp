@@ -109,9 +109,7 @@ public class FunctionBundleService {
             @Param(value = "include_disasm", defaultValue = "false",
                    description = "Include the raw instruction listing. Off by default: it roughly "
                                + "doubles the payload and agents rarely read it.") boolean includeDisasm,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always "
-                               + "specify when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();

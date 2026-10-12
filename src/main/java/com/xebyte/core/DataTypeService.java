@@ -114,7 +114,7 @@ public class DataTypeService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         DataTypeManager dtm = pe.program().getDataTypeManager();
@@ -204,7 +204,7 @@ public class DataTypeService {
     @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getTypeSize(
             @Param(value = "type_name", description = "Data type name") String typeName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -236,7 +236,7 @@ public class DataTypeService {
     @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getStructLayout(
             @Param(value = "struct_name", description = "Structure name") String structName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -283,7 +283,7 @@ public class DataTypeService {
     @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getEnumValues(
             @Param(value = "enum_name", description = "Enum name") String enumName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -328,7 +328,7 @@ public class DataTypeService {
     @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getValidDataTypes(
             @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -383,7 +383,7 @@ public class DataTypeService {
                    description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]") String fieldsJson,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
                    description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if (name == null || name.isEmpty()) {
             return Response.err("Structure name is required");
         }
@@ -544,7 +544,7 @@ public class DataTypeService {
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "4",
                    description = "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). "
                                + "Anything else is rejected.") int size,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -639,7 +639,7 @@ public class DataTypeService {
                                + "cannot be resolved is skipped and reported under fields_skipped instead "
                                + "of failing the call. Names get the project's Hungarian prefix applied "
                                + "automatically.") String fieldsJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -711,7 +711,7 @@ public class DataTypeService {
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "Name for the copy. The clone is independent — later edits to "
                                + "source_type do not follow it.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -773,7 +773,7 @@ public class DataTypeService {
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
                    description = "Array only: number of ELEMENTS, not bytes — total size is length x "
                                + "sizeof(base_type). Must be positive.") int length,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         String derived = kind == null ? "" : kind.trim().toLowerCase();
         if (!List.of("typedef", "array", "pointer").contains(derived)) {
             return Response.err("kind must be typedef, array or pointer");
@@ -839,7 +839,7 @@ public class DataTypeService {
                                + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
                                + "a type containing a comma or a colon does not survive it, and a parameter "
                                + "whose type cannot be resolved is dropped silently.") String parametersJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -946,7 +946,7 @@ public class DataTypeService {
                                + "then fails with a conflict if anything overlaps. Clearing is also what "
                                + "arms the guard that refuses a write which would destroy named "
                                + "neighbours.") boolean clearExisting,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
@@ -1123,7 +1123,7 @@ public class DataTypeService {
                                + "the type.") String typeName,
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1201,7 +1201,7 @@ public class DataTypeService {
                    description = "Replacement field name. Leave empty to keep the current name and only "
                                + "retype. The project's Hungarian prefix is applied automatically from the "
                                + "field's type, so the stored name can differ from what you send.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1312,9 +1312,7 @@ public class DataTypeService {
                    description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Allow shrink even when defined fields extend past new_size (clips trailing layout).") boolean force,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1395,9 +1393,7 @@ public class DataTypeService {
                    description = "Delete a 1-byte placeholder/Demangler stub before recreate (default true).") boolean replacePlaceholder,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Delete an existing full-sized struct before recreate (fails if referenced).") boolean force,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1507,9 +1503,7 @@ public class DataTypeService {
                                + "category is searched for that name.") String typeName,
             @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
                    description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
 
         if (typeName == null || typeName.isEmpty()) {
             return Response.err("type_name is required");
@@ -1736,7 +1730,7 @@ public class DataTypeService {
                                + "A non-negative offset OVERWRITES whatever occupies that range rather than "
                                + "shifting later fields, and grows the struct when it lies at or past the "
                                + "current end.") int offset,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1846,7 +1840,7 @@ public class DataTypeService {
             @Param(value = "field_name", source = ParamSource.BODY,
                    description = "Field to remove. Matched exactly first, then by Hungarian stem, so the "
                                + "name you originally sent still works after auto-prefixing changed it.") String fieldName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1908,7 +1902,7 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "Destination category as a /-separated path, e.g. /MyTypes/Network. It "
                                + "is created, with any missing parents, if it does not exist.") String categoryPath,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1965,7 +1959,7 @@ public class DataTypeService {
                    description = "Current type name; may be bare (Foo) or category-qualified (/MyCat/Foo)") String oldName,
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "New type name. Must be unique within the type's category.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Argument guards run before the program lookup so a malformed call
         // reports the actual problem instead of "No program loaded".
         if (oldName == null || oldName.isEmpty()) return Response.err("Old name is required");
@@ -2039,7 +2033,7 @@ public class DataTypeService {
                                + "applicability at that address (memory range/alignment/conflicts). Accepts "
                                + "0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).") String addressStr,
             @Param(value = "type_name", description = "Data type name (bare names resolve across all categories)") String typeName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2137,7 +2131,7 @@ public class DataTypeService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "prototype", description = "Function prototype") String prototype,
             @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2227,7 +2221,7 @@ public class DataTypeService {
                    description = "Accepted but ignored: parsing is always C through Ghidra's CParser "
                                + "whatever you pass. Kept so existing callers that send it keep "
                                + "working.") String format,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2283,7 +2277,7 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "New category as a /-separated path, e.g. /MyTypes/Network. Missing "
                                + "parent categories are created too.") String categoryPath,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2353,7 +2347,7 @@ public class DataTypeService {
             @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10",
                    description = "How many referencing functions to decompile: 1 to 100, default 10. A "
                                + "value outside that range is REJECTED, not clamped.") int maxFunctionsToAnalyze,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return Response.err("maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
@@ -2585,7 +2579,7 @@ public class DataTypeService {
             @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Size of the structure in BYTES, or 0 (the default) to take the size "
                                + "from the data already applied at struct_address. Must be 0 to 65536.") int structSize,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
@@ -2722,7 +2716,7 @@ public class DataTypeService {
                                + "{name, type} objects; ARRAY needs count plus either element_type or "
                                + "element_struct; STRING takes an optional type. It must be an OBJECT — a "
                                + "JSON string is rejected.") Object typeDefinitionObj,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3743,7 +3737,7 @@ public class DataTypeService {
     public Response auditGlobal(
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3954,7 +3948,7 @@ public class DataTypeService {
             @Param(value = "address", paramType = "address",
                    description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (score/effective/band/missing only)") boolean compact,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3984,7 +3978,7 @@ public class DataTypeService {
             @Param(value = "function",
                    paramType = Param.FUNCTION_REF,
                    description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -4076,7 +4070,7 @@ public class DataTypeService {
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
                    description = "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg,

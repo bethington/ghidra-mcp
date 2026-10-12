@@ -693,6 +693,21 @@ public class AnnotationScanner {
     // Schema generation
     // ==================================================================
 
+    /**
+     * What every {@code program} parameter means unless its tool says otherwise; it
+     * states what resolution accepts ({@link ServiceUtils#getProgramOrError}).
+     */
+    static final String PROGRAM_PARAM_DESCRIPTION = "Target program: its project path "
+        + "(/folder/name) or a name unique in the project; it is opened on first use. Omit it "
+        + "only when exactly one program is open.";
+
+    private static String describe(Param param) {
+        if (param.description().isEmpty() && "program".equals(param.value())) {
+            return PROGRAM_PARAM_DESCRIPTION;
+        }
+        return param.description();
+    }
+
     private ToolDescriptor buildDescriptor(McpTool tool, Method method, ParamBinding[] bindings,
             String category, String categoryDescription) {
         List<ParamDescriptor> params = new ArrayList<>();
@@ -704,7 +719,7 @@ public class AnnotationScanner {
                 binding.param.source().name().toLowerCase(),
                 !NO_DEFAULT.equals(binding.param.defaultValue()),
                 NO_DEFAULT.equals(binding.param.defaultValue()) ? null : binding.param.defaultValue(),
-                binding.param.description(),
+                describe(binding.param),
                 binding.param.paramType(),
                 binding.param.allowEmpty(),
                 // Declared alternative spellings. resolveQueryParam / resolveBodyParam

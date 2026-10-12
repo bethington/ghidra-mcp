@@ -124,9 +124,9 @@ public class DocumentationApplyService {
                                + "for one function, false for entries[], where it costs a decompile "
                                + "each.") Boolean score,
             @Param(value = "program", defaultValue = "",
-                   description = "Target program name or project path. Every step runs against it. Omit "
-                               + "to use the active program; always specify it on a headless server or "
-                               + "when several programs are open.") String programName) {
+                   description = "Program every documentation step runs against (single or batch). "
+                               + "Omit for the active program; always specify on a headless server "
+                               + "or when several programs are open.") String programName) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) {

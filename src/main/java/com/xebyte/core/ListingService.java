@@ -57,7 +57,7 @@ public class ListingService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -245,7 +245,7 @@ public class ListingService {
                    description = "When undefined items are included, only return addresses with at least this many xrefs. Default 1 suppresses padding/alignment noise; set to 0 for the firehose.") int minXrefs,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned. Pass true to include every memory section.") boolean includeAllSections,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -374,9 +374,7 @@ public class ListingService {
                    description = "Page size. 0 means no limit, which on a large binary is a "
                                + "megabytes-long response — the old list_functions had no "
                                + "pagination at all and returned 1.7MB on a stripped `ls`.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always "
-                               + "specify when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -480,7 +478,7 @@ public class ListingService {
 
     @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listCallingConventions(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -510,7 +508,7 @@ public class ListingService {
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
             @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -545,7 +543,7 @@ public class ListingService {
 
     @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getFunctionCount(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -574,7 +572,7 @@ public class ListingService {
                    description = "Maximum matches returned in this page (default 100). `total` in the "
                                + "response reports how many matched before paging. Unlike the paged list "
                                + "endpoints, 0 here returns an EMPTY page rather than everything.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -636,7 +634,7 @@ public class ListingService {
                    description = "By default only data sections (.data/.rdata/.bss and similar) are scanned. Pass true to include every memory section (rare — picks up .text gaps which are usually padding).") boolean includeAllSections,
             @Param(value = "name_substring", defaultValue = "",
                    description = "Optional substring match against the symbol's display line (case-insensitive). Empty = no substring filter.") String nameSubstring,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -764,7 +762,7 @@ public class ListingService {
                                + "full unpaged count.") int limit,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned, matching list_globals.") boolean includeAllSections,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -853,7 +851,7 @@ public class ListingService {
 
     @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1076,7 +1074,7 @@ public class ListingService {
                    description = "External library name (as list_program_items(kind=imports) or "
                                + "kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the "
                                + "search only — it cannot select an entry by itself.") String dllName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

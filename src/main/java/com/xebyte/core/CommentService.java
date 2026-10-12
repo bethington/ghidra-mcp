@@ -116,7 +116,7 @@ public class CommentService {
             @Param(value = "only_with_comments", defaultValue = "false",
                    description = "Bulk mode: omit addresses where has_comment is false, so a sweep "
                                + "response holds only the interesting subset.") boolean onlyWithComments,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -203,7 +203,7 @@ public class CommentService {
                    description = "Comment text. An empty string clears this comment kind at the address.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
                    description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         String t = (type == null || type.trim().isEmpty()) ? "plate" : type.trim().toLowerCase();
         int ct;
         switch (t) {
@@ -244,7 +244,7 @@ public class CommentService {
                                + "that address's EOL comment.") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -432,7 +432,7 @@ public class CommentService {
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) removes every EOL (disassembly) comment inside the "
                                + "function body. False leaves them alone.") boolean clearEol,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
