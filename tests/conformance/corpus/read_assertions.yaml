@@ -93,9 +93,40 @@ tool_cases:
       address: "0x10001000"
       fields: decompiled_code
     assert:
-      json_keys: ["name", "address", "decompiled_code"]
-      json_equals: { name: "calc_crc16" }
+      json_keys: ["name", "address", "decompiled_code", "language_id", "variant"]
+      # Decompiled C says which SLEIGH dialect produced it.
+      json_equals: { name: "calc_crc16", language_id: "x86:LE:32:default", variant: "default" }
       # The CRC-16/CCITT polynomial must survive decompilation.
+      contains: ["0x1021"]
+      # x86's two variant rows load one x86.sla, so the loader made no guess
+      # worth flagging: the advisory must stay off.
+      not_contains: ["variant_ambiguous", "variant_notice"]
+
+  # A variant the caller names and the program contradicts is refused, never
+  # answered under the requested label. System Management Mode is a real x86
+  # variant row, so this is a mismatch, not an unknown name.
+  - tool: get_functions
+    name: curated_calc_crc16_variant_mismatch
+    tier: read
+    snapshot: false
+    args:
+      address: "0x10001000"
+      fields: decompiled_code
+      variant: "System Management Mode"
+    assert:
+      error_contains: ["variant_mismatch"]
+      not_contains: ["0x1021"]
+
+  - tool: get_functions
+    name: curated_calc_crc16_variant_confirmed
+    tier: read
+    snapshot: false
+    args:
+      address: "0x10001000"
+      fields: decompiled_code
+      variant: "x86:LE:32:default"
+    assert:
+      json_equals: { variant: "default" }
       contains: ["0x1021"]
 
   - tool: disassemble_function

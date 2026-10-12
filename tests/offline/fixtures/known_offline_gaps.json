@@ -44,6 +44,11 @@
       "reason": "asserts 'high_pcodes' is ABSENT at default granularity; the only recorded /get_function_pcode response was captured with high_pcodes present."
     },
     {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionAnalysis::test_get_functions_decompiled_code",
+      "cause": "recording_gap",
+      "reason": "asserts the decompile actually produced code. No /get_functions response has ever been recorded -- every get_functions case in the conformance corpus is snapshot: false -- so the fake synthesizes a body with no decompiled_code. Only a recording or a live server can answer whether Ghidra decompiled the function; the stamp on that output is covered in CI by DecompileVariantLabellingGhidraTest instead."
+    },
+    {
       "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_by_name",
       "cause": "bad_fixture",
       "reason": "tests/conformance/snapshots/search_functions.snap is a recorded ERROR ('Search term is required'), not a successful response, so there is no `functions` list to assert on -- measured: AssertionError: assert 'functions' in {'error': 'Search term is required'}. The TEST is now correct: it called /search_functions_by_name, which is not an endpoint, and now calls /search_functions with the declared `name_pattern`. Re-record the snapshot with a real search term to unblock it."

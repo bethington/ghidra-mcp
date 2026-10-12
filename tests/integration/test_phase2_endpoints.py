@@ -311,10 +311,14 @@ class TestForceDecompile:
         })
         assert response.status_code == 200
         body = response.json()
+        assert not body.get("error"), response.text
         assert body["address"].lstrip("0x").lower() == sample_address.lstrip(
             "0x"
         ).lower(), response.text
         assert body["decompiled"].strip(), response.text
+        # The dialect travels with the code on every response, so a transcript
+        # of pseudocode can be audited after the fact.
+        assert body.get("language_id"), response.text
 
     @pytest.mark.requires_program
     def test_force_decompile_invalid_address(self, http_client):
