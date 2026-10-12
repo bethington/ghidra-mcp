@@ -4,6 +4,7 @@ import com.xebyte.core.AnalysisService;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Program;
 import static org.mockito.Mockito.mock;
 import junit.framework.TestCase;
@@ -29,7 +30,7 @@ public class AnalysisServiceValidationTest extends TestCase {
     // --- validate-first branches (run before the program lookup) ---
 
     public void testGetFieldAccessContextRejectsNegativeOffset() {
-        Response r = analysis.getFieldAccessContext("0x401000", -1, 5, programStub);
+        Response r = analysis.getFieldAccessContext(mock(Address.class), -1, 5, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Field offset must be between 0 and"));
     }

@@ -224,7 +224,7 @@ public class DocumentationApplyService {
             steps.put("variable_renames", counted("variable_renames", renamed, errors,
                 Map.of("variables_renamed", "renamed", "variables_failed", "failed")));
         }
-        applyComments(program, target, address, program, entry, steps, errors);
+        applyComments(program, target, program, entry, steps, errors);
         applyLabels(program, target, program, list(entry.get("labels")), steps, errors);
         applyTags(address, program, entry, steps, errors);
 
@@ -322,7 +322,7 @@ public class DocumentationApplyService {
         }
     }
 
-    private void applyComments(Program program, Function target, String address, Program programArg,
+    private void applyComments(Program program, Function target, Program programArg,
             Map<String, Object> entry, Map<String, Object> steps, List<String> errors) {
         List<Map<String, String>> pre = new ArrayList<>();
         List<Map<String, String>> eol = new ArrayList<>();
@@ -343,7 +343,7 @@ public class DocumentationApplyService {
         if (plate == null && pre.isEmpty() && eol.isEmpty()) {
             return;
         }
-        Response written = comments.batchSetComments(address, pre, eol, plate, programArg);
+        Response written = comments.batchSetComments(target.getEntryPoint(), pre, eol, plate, programArg);
         Map<String, Object> result = counted("comments", written, errors, Map.of(
             "decompiler_comments_set", "pre", "disassembly_comments_set", "eol"));
         if (data(written).get("plate_comment_set") == Boolean.TRUE) {

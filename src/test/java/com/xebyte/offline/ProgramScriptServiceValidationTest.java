@@ -81,14 +81,15 @@ public class ProgramScriptServiceValidationTest extends TestCase {
     }
 
     public void testSetMemoryBlockNeedsSomethingToChange() {
-        Response r = scripts.setMemoryBlock("ram", "", null, null, null, null, programStub);
+        Response r = scripts.setMemoryBlock("ram", null, null, null, null, null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("nothing to change"));
     }
 
     public void testSetMemoryBlockNeedsExactlyOneOfBlockAndAddress() {
-        Response neither = scripts.setMemoryBlock("", "", null, false, null, null, programStub);
-        Response both = scripts.setMemoryBlock("ram", "0x08005000", null, false, null, null, programStub);
+        Response neither = scripts.setMemoryBlock("", null, null, false, null, null, programStub);
+        Response both = scripts.setMemoryBlock("ram", org.mockito.Mockito.mock(ghidra.program.model.address.Address.class),
+                null, false, null, null, programStub);
         assertTrue(((Response.Err) neither).message().contains("exactly one of block or address"));
         assertTrue(((Response.Err) both).message().contains("exactly one of block or address"));
     }

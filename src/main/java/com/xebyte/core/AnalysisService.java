@@ -291,11 +291,7 @@ public class AnalysisService {
         }
     }
 
-    public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap,
-                                    boolean includeBoundaryDetection) {
-        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
-    }
+
 
     @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response analyzeDataRegion(
@@ -304,7 +300,7 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddressStr,
+                               + "address is unambiguous.") Address startAddr,
 @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024",
                    description = "How many BYTES forward from `address` to walk while collecting "
                                + "references and hunting the next named symbol (default 1024). String "
@@ -323,12 +319,8 @@ public class AnalysisService {
                                + "begins. False scans the full max_scan_bytes whatever symbols it "
                                + "crosses.") boolean includeBoundaryDetection,
             @Param(value = "program", defaultValue = "") Program program) {
-        try {
-            Address startAddr = ServiceUtils.parseAddress(program, startAddressStr);
-            if (startAddr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
 
+        try {
             ReferenceManager refMgr = program.getReferenceManager();
             Listing listing = program.getListing();
 
@@ -471,13 +463,11 @@ public class AnalysisService {
         }
     }
 
+    
+
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public Response detectArrayBounds(String addressStr, int maxScanRange) {
-        return detectArrayBounds(addressStr, maxScanRange, null);
-    }
-
     @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response detectArrayBounds(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -485,17 +475,13 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
 @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
                    description = "How many BYTES forward from `address` to scan for references while "
                                + "estimating the array's extent (default 2048).") int maxScanRange,
             @Param(value = "program", defaultValue = "") Program program) {
-        try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
 
+        try {
             ReferenceManager refMgr = program.getReferenceManager();
 
             // Scan for xrefs to detect array bounds
@@ -534,13 +520,11 @@ public class AnalysisService {
         }
     }
 
+    
+
     /**
      * GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
      */
-    public Response getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
-        return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
-    }
-
     @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFieldAccessContext(
             @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
@@ -548,7 +532,7 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String structAddressStr,
+                               + "address is unambiguous.") Address structAddr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0",
                    description = "BYTE offset of the field inside the struct at struct_address; context is "
                                + "gathered at struct_address + this. Must be 0 to 65536.") int fieldOffset,
@@ -565,8 +549,7 @@ public class AnalysisService {
         }
 
 
-                Address structAddr = ServiceUtils.parseAddress(program, structAddressStr);
-        if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         try {
 
@@ -611,7 +594,7 @@ public class AnalysisService {
 
             Msg.info(this, "Found " + exampleCount + " field access examples");
             return Response.ok(JsonHelper.mapOf(
-                "struct_address", structAddressStr,
+                "struct_address", structAddr.toString(),
                 "field_offset", fieldOffset,
                 "field_address", fieldAddr.toString(),
                 "examples", examples
@@ -623,13 +606,11 @@ public class AnalysisService {
         }
     }
 
+    
+
     /**
      * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
      */
-    public Response inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
-        return inspectMemoryContent(addressStr, length, detectStrings, null);
-    }
-
     @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response inspectMemoryContent(
             @Param(value = "address", paramType = "address",
@@ -637,16 +618,12 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
             @Param(value = "program", defaultValue = "") Program program) {
-        try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
 
+        try {
             Memory memory = program.getMemory();
             int MAX_READ_BYTES = 16 * 1024 * 1024; // 16 MB safety limit
             if (length <= 0 || length > MAX_READ_BYTES) {
@@ -730,7 +707,7 @@ public class AnalysisService {
             }
 
             Map<String, Object> resultMap = new LinkedHashMap<>();
-            resultMap.put("address", addressStr);
+            resultMap.put("address", addr.toString());
             resultMap.put("bytes_read", bytesRead);
             resultMap.put("hex_dump", hexDump.toString().trim());
             resultMap.put("ascii_repr", asciiRepr.toString().trim());
@@ -1921,34 +1898,29 @@ public class AnalysisService {
      */
     @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findNextUndefinedFunction(
-            @Param(value = "start_address", paramType = "address",
+            @Param(value = "start_address", paramType = "address", defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddress,
+                               + "address is unambiguous.") Address start,
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
             @Param(value = "program", defaultValue = "") Program program) {
-                final Address startAddr;
-        if (startAddress != null && !startAddress.isEmpty()) {
-            startAddr = ServiceUtils.parseAddress(program, startAddress);
-            if (startAddr == null) return Response.err(ServiceUtils.getLastParseError());
-        } else {
-            startAddr = program.getMinAddress();
-        }
+        final Address startAddr = start != null ? start : program.getMinAddress();
 
         try {
             FunctionManager funcMgr = program.getFunctionManager();
-            Address start = startAddr;
 
             String searchPattern = pattern; // null means match all auto-generated names
             boolean ascending = !"descending".equals(direction);
 
+            Address scanFrom = startAddr;
+
             FunctionIterator iter = ascending ?
-                funcMgr.getFunctions(start, true) :
-                funcMgr.getFunctions(start, false);
+                funcMgr.getFunctions(scanFrom, true) :
+                funcMgr.getFunctions(scanFrom, false);
 
             Function found = null;
             while (iter.hasNext()) {
@@ -1976,11 +1948,7 @@ public class AnalysisService {
         }
     }
 
-    // Backward compatibility overload
-    public Response findNextUndefinedFunction(String startAddress, String criteria,
-                                            String pattern, String direction) {
-        return findNextUndefinedFunction(startAddress, criteria, pattern, direction, null);
-    }
+
 
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
@@ -4197,7 +4165,7 @@ public class AnalysisService {
     public Response analyzeDataflow(
             @Param(value = "address", paramType = "address",
                    description = "Address inside the target function where the value is observed. "
-                               + "Accepts 0x<hex> or <space>:<hex>.") String addressStr,
+                               + "Accepts 0x<hex> or <space>:<hex>.") Address anchorAddr,
             @Param(value = "variable",
                    description = "Anchor selector. Register name (EAX, RCX), HighVariable name (param_1, local_14, "
                                + "iVar1), or empty to use the PcodeOp output at the address.",
@@ -4212,8 +4180,7 @@ public class AnalysisService {
                    defaultValue = "") Program program) {
 
 
-        Address anchorAddr = ServiceUtils.parseAddress(program, addressStr);
-        if (anchorAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         boolean backward;
         if (direction == null || direction.isEmpty() || "backward".equalsIgnoreCase(direction)) {
@@ -4227,7 +4194,7 @@ public class AnalysisService {
         int stepCap = maxSteps <= 0 ? DATAFLOW_DEFAULT_STEPS : Math.min(maxSteps, DATAFLOW_MAX_STEPS);
 
 
-        return analyzeDataflowBody(program, anchorAddr, addressStr, variableHint, backward, stepCap);
+        return analyzeDataflowBody(program, anchorAddr, anchorAddr.toString(), variableHint, backward, stepCap);
     }
 
     private Response analyzeDataflowBody(Program program, Address anchorAddr, String addressStr,

@@ -324,15 +324,13 @@ public class FunctionService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (addr == null) return Response.err("Address is required");
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+Function func = ServiceUtils.getFunctionForAddress(program, addr);
+            if (func == null) return Response.err("No function found at or containing address " + addr.toString());
 
             StringBuilder sb = new StringBuilder();
             Listing listing = program.getListing();
@@ -496,10 +494,7 @@ public class FunctionService {
         }
     }
 
-    // Backward compatible overload for internal callers
-    public Response disassembleFunction(String addressStr) {
-        return disassembleFunction(addressStr, null);
-    }
+
 
     /**
      * True when a function's stored body cannot be the whole function.
@@ -2008,15 +2003,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String instructionAddrStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
         // Input validation
-        if (instructionAddrStr == null || instructionAddrStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Instruction address is required");
         }
 
-        Address addr = ServiceUtils.parseAddress(program, instructionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         try {
             String text = threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
@@ -2026,7 +2020,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 ghidra.program.model.listing.Instruction instruction = listing.getInstructionAt(addr);
 
                 if (instruction == null) {
-                    throw new Refusal("No instruction found at address " + instructionAddrStr);
+                    throw new Refusal("No instruction found at address " + addr.toString());
                 }
 
                 // Get the current flow override type (if any)
@@ -2035,12 +2029,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // Clear the flow override by setting to NONE
                 instruction.setFlowOverride(ghidra.program.model.listing.FlowOverride.NONE);
 
-                String msg = "Success: Cleared flow override at " + instructionAddrStr
+                String msg = "Success: Cleared flow override at " + addr.toString()
                         + " (was: " + oldOverride.toString() + ", now: NONE)";
 
                 // Get the instruction's mnemonic for logging
                 String mnemonic = instruction.getMnemonicString();
-                Msg.info(this, "Cleared flow override for instruction '" + mnemonic + "' at " + instructionAddrStr +
+                Msg.info(this, "Cleared flow override for instruction '" + mnemonic + "' at " + addr.toString() +
                          " (previous override: " + oldOverride + ")");
                 return msg;
             });
@@ -2053,9 +2047,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    public Response clearInstructionFlowOverride(String instructionAddrStr) {
-        return clearInstructionFlowOverride(instructionAddrStr, null);
-    }
+
 
     /**
      * Set custom storage for a local variable or parameter (v1.7.0).
@@ -2767,7 +2759,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional name for the new function; leave empty to keep Ghidra's "
                                + "generated FUN_<address>. Written directly, so the naming-quality gate "
@@ -2778,12 +2770,11 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "raw undefined bytes. False requires the address to be disassembled "
                                + "already; function creation fails otherwise.") boolean disassembleFirst,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address parameter required");
         }
 
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         try {
             Map<String, Object> data = threadingStrategy.executeWrite(program, "Create function at address", () -> {
@@ -2791,7 +2782,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // Check if a function already exists at this address
                 Function existing = program.getFunctionManager().getFunctionAt(addr);
                 if (existing != null) {
-                    throw new Refusal("Function already exists at " + addressStr + ": " + existing.getName());
+                    throw new Refusal("Function already exists at " + addr.toString() + ": " + existing.getName());
                 }
 
                 // Optionally disassemble first
@@ -2801,7 +2792,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         ghidra.app.cmd.disassemble.DisassembleCommand disCmd =
                             new ghidra.app.cmd.disassemble.DisassembleCommand(addrSet, null, true);
                         if (!disCmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                            throw new Refusal("Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg());
+                            throw new Refusal("Failed to disassemble at " + addr.toString() + ": " + disCmd.getStatusMsg());
                         }
                     }
                 }
@@ -2810,12 +2801,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                 ghidra.app.cmd.function.CreateFunctionCmd cmd =
                     new ghidra.app.cmd.function.CreateFunctionCmd(addr);
                 if (!cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                    throw new Refusal("Failed to create function at " + addressStr + ": " + cmd.getStatusMsg());
+                    throw new Refusal("Failed to create function at " + addr.toString() + ": " + cmd.getStatusMsg());
                 }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    throw new Refusal("Function creation reported success but function not found at " + addressStr);
+                    throw new Refusal("Function creation reported success but function not found at " + addr.toString());
                 }
 
                 // Optionally rename the function
@@ -2853,9 +2844,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
-        return createFunctionAtAddress(addressStr, name, disassembleFirst, null);
-    }
+
 
     // ========================================================================
     // Disassembly
@@ -2878,13 +2867,13 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddress,
+                               + "address is unambiguous.") Address start,
             @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String endAddress,
+                               + "address is unambiguous.") Address end,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "0",
                    description = "Number of BYTES to disassemble from start_address, as an alternative to "
                                + "end_address; end_address wins when both are given. 0 (the default) with "
@@ -2900,40 +2889,32 @@ Map<String, Object> out = new LinkedHashMap<>();
             @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
                    description = "Cap on number of instructions returned when include_instructions is true. Protects against runaway payload for large ranges; if the actual count exceeds this, the response sets truncated=true and instructions_total reports the real count.") int maxInstructions,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (startAddress == null || startAddress.isEmpty()) {
+
+        if (start == null) {
             return Response.err("start_address parameter required");
         }
 
-        // Resolve addresses before entering SwingUtilities lambda
-        Address start = ServiceUtils.parseAddress(program, startAddress);
-        if (start == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Address parsedEnd = null;
-        if (endAddress != null && !endAddress.isEmpty()) {
-            parsedEnd = ServiceUtils.parseAddress(program, endAddress);
-            if (parsedEnd == null) return Response.err(ServiceUtils.getLastParseError());
-        }
-        final Address resolvedEnd = parsedEnd;
+        final Address resolvedEnd = end;
 
         try {
-            Msg.debug(this, "disassembleBytes: Starting disassembly at " + startAddress +
+            Msg.debug(this, "disassembleBytes: Starting disassembly at " + start.toString() +
                      (length != null ? " with length " + length : "") +
-                     (endAddress != null ? " to " + endAddress : ""));
+                     (end != null ? " to " + end.toString() : ""));
 
             Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Disassemble Bytes", () -> {
                     // Determine end address
-                    Address end;
+                    Address rangeEnd;
                     if (resolvedEnd != null) {
                         // Make end address inclusive for AddressSet
                         try {
-                            end = resolvedEnd.subtract(1);
+                            rangeEnd = resolvedEnd.subtract(1);
                         } catch (Exception e) {
                             throw new Refusal("End address calculation failed: " + e.getMessage());
                         }
                     } else if (length != null && length > 0) {
                         // Use length to calculate end address
                         try {
-                            end = start.add(length - 1);
+                            rangeEnd = start.add(length - 1);
                         } catch (Exception e) {
                             throw new Refusal("End address calculation from length failed: " + e.getMessage());
                         }
@@ -2969,16 +2950,16 @@ Map<String, Object> out = new LinkedHashMap<>();
                             throw new Refusal("No undefined bytes found at address (already disassembled or defined data)");
                         }
 
-                        // end is now one past the last undefined byte
+                        // rangeEnd is now one past the last undefined byte
                         try {
-                            end = current.subtract(1);
+                            rangeEnd = current.subtract(1);
                         } catch (Exception e) {
-                            end = current;
+                            rangeEnd = current;
                         }
                     }
 
                     // Create address set
-                    AddressSet addressSet = new AddressSet(start, end);
+                    AddressSet addressSet = new AddressSet(start, rangeEnd);
                     long numBytes = addressSet.getNumAddresses();
 
                     // Execute disassembly
@@ -2991,11 +2972,11 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                     if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
                         // Success - build result
-                        Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + end);
+                        Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + rangeEnd);
                         Map<String, Object> result = new java.util.LinkedHashMap<>();
                         result.put("success", true);
                         result.put("start_address", start.toString());
-                        result.put("end_address", end.toString());
+                        result.put("end_address", rangeEnd.toString());
                         result.put("bytes_disassembled", numBytes);
                         result.put("message", "Successfully disassembled " + numBytes + " byte(s)");
 
@@ -3066,24 +3047,9 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    /**
-     * Back-compat overloads for callers that don't care about the
-     * include_instructions / max_instructions options added for issue #205.
-     * Default to the new behavior (instructions included, 1000-instruction cap)
-     * so the headless and registry paths surface the same data as the MCP
-     * endpoint.
-     */
-    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory) {
-        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
-                                true, 1000, null);
-    }
+    
 
-    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory, Program program) {
-        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
-                                true, 1000, program);
-    }
+
 
     // ========================================================================
     // Clear Flow and Repair
@@ -3102,24 +3068,18 @@ Map<String, Object> out = new LinkedHashMap<>();
     public Response clearFlowAndRepair(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
                    description = "Seed start. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000). "
-                               + "Use get_address_spaces first on multi-space programs.") String startAddress,
+                               + "Use get_address_spaces first on multi-space programs.") Address start,
             @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Exclusive seed end (consistent with disassemble_bytes). Must be in the same "
                                + "address space as start_address and strictly greater. Omitted: one-address seed; "
-                               + "the command still follows flow from there like clicking one address in the GUI.") String endAddress,
+                               + "the command still follows flow from there like clicking one address in the GUI.") Address end,
             @Param(value = "program", defaultValue = "") Program program) {
 
-        if (startAddress == null || startAddress.isEmpty()) {
+        if (start == null) {
             return Response.err("start_address parameter required");
         }
-
-        Address start = ServiceUtils.parseAddress(program, startAddress);
-        if (start == null) return Response.err(ServiceUtils.getLastParseError());
-
         Address seedEnd = start;
-        if (endAddress != null && !endAddress.isEmpty()) {
-            Address end = ServiceUtils.parseAddress(program, endAddress);
-            if (end == null) return Response.err(ServiceUtils.getLastParseError());
+        if (end != null) {
             if (!end.getAddressSpace().equals(start.getAddressSpace())) {
                 return Response.err("end_address must be in the same address space as start_address");
             }

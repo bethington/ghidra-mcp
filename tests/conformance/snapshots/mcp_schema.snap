@@ -3311,10 +3311,11 @@
       "method": "GET",
       "params": [
         {
+          "default": "",
           "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "start_address",
           "param_type": "address",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },

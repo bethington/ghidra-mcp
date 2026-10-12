@@ -64,8 +64,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     private static final String GROUP = "Program Information";
     private static final String UNKNOWN_GROUP = "No Such Group";
     private static final String GOOD_ADDR = "0x401000";
-    private static final String BAD_ADDR = "zzzz";
-
     /**
      * Runs work inline (so real handler logic executes) while recording the
      * transaction names it was handed. Tests assert on {@code writes} to prove a
@@ -114,7 +112,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(program.getUsrPropertyManager()).thenReturn(propertyMaps);
 
         // Minimal single-space address factory so ServiceUtils.parseAddress can both
-        // succeed (GOOD_ADDR) and fail with its rich hint (BAD_ADDR).
+        // succeed (GOOD_ADDR).
         addressFactory = mock(AddressFactory.class);
         AddressSpace ram = mock(AddressSpace.class);
         when(ram.getName()).thenReturn("ram");
@@ -380,7 +378,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("counts", intMap);
         stubMap("tags", voidMap);
 
-        Map<String, Object> data = okOf(svc.listProperties("", "", "", 0, 100, program));
+        Map<String, Object> data = okOf(svc.listProperties("", null, null, 0, 100, program));
         assertEquals(2, data.get("count"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> maps = (List<Map<String, Object>>) data.get("property_maps");
@@ -461,33 +459,23 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testSetPropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.setProperty("", GOOD_ADDR, "1", program)));
-        assertEquals("address is required", errOf(svc.setProperty("m", "", "1", program)));
+        assertEquals("map is required", errOf(svc.setProperty("", addr, "1", program)));
+        assertEquals("address is required", errOf(svc.setProperty("m", null, "1", program)));
         assertNoTransaction("blank required params");
     }
 
     public void testSetPropertyRejectsUnknownMap() {
-        String err = errOf(svc.setProperty("nope", GOOD_ADDR, "1", program));
+        String err = errOf(svc.setProperty("nope", addr, "1", program));
         assertTrue("must point at the creation tool: " + err,
                 err.contains("No property map named 'nope'") && err.contains("create_property_map"));
         assertNoTransaction("unknown map");
-    }
-
-    public void testSetPropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(IntPropertyMap.class));
-
-        String err = errOf(svc.setProperty("m", BAD_ADDR, "1", program));
-        assertNotNull("parse errors must not surface as a null message", err);
-        assertTrue("must be the ServiceUtils parse hint, not an exception: " + err,
-                err.contains("could not be resolved") && err.contains(BAD_ADDR));
-        assertNoTransaction("unparseable address");
     }
 
     public void testSetPropertyRejectsObjectMap() {
         ObjectPropertyMap<?> objMap = mock(ObjectPropertyMap.class);
         stubMap("obj", objMap);
 
-        String err = errOf(svc.setProperty("obj", GOOD_ADDR, "x", program));
+        String err = errOf(svc.setProperty("obj", addr, "x", program));
         assertTrue("object maps are read-only over MCP: " + err,
                 err.contains("Object property maps cannot be written"));
         assertNoTransaction("object map write");
@@ -498,16 +486,16 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("longs", mock(LongPropertyMap.class));
 
         assertEquals("value is required for an int property map",
-                errOf(svc.setProperty("ints", GOOD_ADDR, "", program)));
+                errOf(svc.setProperty("ints", addr, "", program)));
         assertEquals("value is required for a long property map",
-                errOf(svc.setProperty("longs", GOOD_ADDR, "", program)));
+                errOf(svc.setProperty("longs", addr, "", program)));
         assertNoTransaction("missing value for a typed map");
     }
 
     public void testSetPropertyRejectsUnparseableNumericValue() {
         stubMap("ints", mock(IntPropertyMap.class));
 
-        String err = errOf(svc.setProperty("ints", GOOD_ADDR, "abc", program));
+        String err = errOf(svc.setProperty("ints", addr, "abc", program));
         assertTrue("must blame the value and name the map: " + err,
                 err.contains("Value 'abc' is not valid for map 'ints'"));
         assertNoTransaction("bad numeric value is rejected before the transaction opens");
@@ -519,14 +507,14 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("ints", intMap);
         stubMap("strs", strMap);
 
-        Map<String, Object> intData = okOf(svc.setProperty("ints", GOOD_ADDR, " 42 ", program));
+        Map<String, Object> intData = okOf(svc.setProperty("ints", addr, " 42 ", program));
         assertEquals("int", intData.get("value_type"));
         assertEquals(Integer.valueOf(42), intData.get("value"));
         // Cast to Object: the service calls the generic PropertyMap.add(Address, Object)
         // overload (Integer -> Object needs no unboxing), not IntPropertyMap.add(Address, int).
         verify(intMap).add(addr, (Object) Integer.valueOf(42));
 
-        Map<String, Object> strData = okOf(svc.setProperty("strs", GOOD_ADDR, " 42 ", program));
+        Map<String, Object> strData = okOf(svc.setProperty("strs", addr, " 42 ", program));
         assertEquals("string", strData.get("value_type"));
         assertEquals("String maps must store the value verbatim, untrimmed", " 42 ", strData.get("value"));
         verify(strMap).add(addr, " 42 ");
@@ -536,7 +524,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         VoidPropertyMap voidMap = mock(VoidPropertyMap.class);
         stubMap("tags", voidMap);
 
-        Map<String, Object> data = okOf(svc.setProperty("tags", GOOD_ADDR, "", program));
+        Map<String, Object> data = okOf(svc.setProperty("tags", addr, "", program));
         assertEquals("void", data.get("value_type"));
         assertNull("void maps store presence only", data.get("value"));
         verify(voidMap).add(addr);
@@ -548,20 +536,12 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testGetPropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.getProperty("", GOOD_ADDR, program)));
-        assertEquals("address is required", errOf(svc.getProperty("m", "", program)));
+        assertEquals("map is required", errOf(svc.getProperty("", addr, program)));
+        assertEquals("address is required", errOf(svc.getProperty("m", null, program)));
     }
 
     public void testGetPropertyRejectsUnknownMap() {
-        assertTrue(errOf(svc.getProperty("nope", GOOD_ADDR, program)).contains("No property map named 'nope'"));
-    }
-
-    public void testGetPropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.getProperty("m", BAD_ADDR, program));
-        assertNotNull(err);
-        assertTrue("must be the ServiceUtils parse hint: " + err, err.contains("could not be resolved"));
+        assertTrue(errOf(svc.getProperty("nope", addr, program)).contains("No property map named 'nope'"));
     }
 
     public void testGetPropertyReportsAbsentValueWithoutError() {
@@ -569,7 +549,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", strMap);
         when(strMap.hasProperty(addr)).thenReturn(false);
 
-        Map<String, Object> data = okOf(svc.getProperty("m", GOOD_ADDR, program));
+        Map<String, Object> data = okOf(svc.getProperty("m", addr, program));
         assertEquals(Boolean.FALSE, data.get("has_value"));
         assertNull(data.get("value"));
         assertEquals("string", data.get("value_type"));
@@ -581,30 +561,21 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(strMap.hasProperty(addr)).thenReturn(true);
         when(strMap.get(addr)).thenReturn("stored");
 
-        Map<String, Object> data = okOf(svc.getProperty("m", GOOD_ADDR, program));
+        Map<String, Object> data = okOf(svc.getProperty("m", addr, program));
         assertEquals(Boolean.TRUE, data.get("has_value"));
         assertEquals("stored", data.get("value"));
         assertEquals("00401000", data.get("address"));
     }
 
     public void testRemovePropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.removeProperty("", GOOD_ADDR, program)));
-        assertEquals("address is required", errOf(svc.removeProperty("m", "", program)));
+        assertEquals("map is required", errOf(svc.removeProperty("", addr, program)));
+        assertEquals("address is required", errOf(svc.removeProperty("m", null, program)));
         assertNoTransaction("blank required params");
     }
 
     public void testRemovePropertyRejectsUnknownMap() {
-        assertTrue(errOf(svc.removeProperty("nope", GOOD_ADDR, program)).contains("No property map named 'nope'"));
+        assertTrue(errOf(svc.removeProperty("nope", addr, program)).contains("No property map named 'nope'"));
         assertNoTransaction("unknown map");
-    }
-
-    public void testRemovePropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.removeProperty("m", BAD_ADDR, program));
-        assertNotNull(err);
-        assertTrue("must be the ServiceUtils parse hint: " + err, err.contains("could not be resolved"));
-        assertNoTransaction("unparseable address");
     }
 
     public void testRemovePropertyReportsMapResult() {
@@ -612,7 +583,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", strMap);
         when(strMap.remove(addr)).thenReturn(true);
 
-        Map<String, Object> data = okOf(svc.removeProperty("m", GOOD_ADDR, program));
+        Map<String, Object> data = okOf(svc.removeProperty("m", addr, program));
         assertEquals(Boolean.TRUE, data.get("success"));
         assertEquals(List.of("Remove Property"), threading.writes);
     }
@@ -622,7 +593,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testListPropertiesRejectsUnknownMap() {
-        assertTrue(errOf(svc.listProperties("nope", "", "", 0, 100, program))
+        assertTrue(errOf(svc.listProperties("nope", null, null, 0, 100, program))
                 .contains("No property map named 'nope'"));
     }
 
@@ -631,19 +602,9 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", mock(StringPropertyMap.class));
 
         assertEquals("Provide both start and end to filter by range, or neither.",
-                errOf(svc.listProperties("m", GOOD_ADDR, "", 0, 100, program)));
+                errOf(svc.listProperties("m", addr, null, 0, 100, program)));
         assertEquals("Provide both start and end to filter by range, or neither.",
-                errOf(svc.listProperties("m", "", GOOD_ADDR, 0, 100, program)));
-    }
-
-    public void testListPropertiesReportsBadRangeEndpointsSeparately() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.listProperties("m", BAD_ADDR, GOOD_ADDR, 0, 100, program));
-        assertTrue("bad start must be labelled 'start:': " + err, err.startsWith("start:"));
-
-        String err2 = errOf(svc.listProperties("m", GOOD_ADDR, BAD_ADDR, 0, 100, program));
-        assertTrue("bad end must be labelled 'end:': " + err2, err2.startsWith("end:"));
+                errOf(svc.listProperties("m", null, addr, 0, 100, program)));
     }
 
     public void testListPropertiesPaginatesWithOffsetAndLimit() {
@@ -659,7 +620,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(strMap.getSize()).thenReturn(3);
         stubMap("m", strMap);
 
-        Map<String, Object> data = okOf(svc.listProperties("m", "", "", 1, 1, program));
+        Map<String, Object> data = okOf(svc.listProperties("m", null, null, 1, 1, program));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> entries = (List<Map<String, Object>>) data.get("entries");
         assertEquals("offset=1,limit=1 must yield exactly the second entry", 1, entries.size());
@@ -676,7 +637,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(strMap.getPropertyIterator()).thenReturn(it);
         stubMap("m", strMap);
 
-        Map<String, Object> data = okOf(svc.listProperties("m", "", "", -5, 0, program));
+        Map<String, Object> data = okOf(svc.listProperties("m", null, null, -5, 0, program));
         assertEquals("negative offset must clamp to 0", 0, data.get("offset"));
         assertEquals("non-positive limit must fall back to the 100 default", 100, data.get("limit"));
     }

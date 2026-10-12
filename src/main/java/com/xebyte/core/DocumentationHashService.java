@@ -520,18 +520,14 @@ public class DocumentationHashService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String stringAddress,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (stringAddress == null || stringAddress.isEmpty()) {
+        if (addr == null) {
             return Response.err("String address is required");
         }
 
-        try {
-            Address addr = ServiceUtils.parseAddress(program, stringAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
 
+        try {
             ReferenceManager refMgr = program.getReferenceManager();
             FunctionManager funcMgr = program.getFunctionManager();
 
@@ -572,7 +568,7 @@ public class DocumentationHashService {
             }
 
             return Response.ok(JsonHelper.mapOf(
-                "string_address", stringAddress,
+                "string_address", addr.toString(),
                 "undocumented_functions", undocumentedList,
                 "undocumented_count", undocCount,
                 "documented_count", docCount,

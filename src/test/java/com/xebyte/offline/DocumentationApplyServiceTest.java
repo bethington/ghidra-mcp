@@ -100,7 +100,7 @@ public class DocumentationApplyServiceTest {
         when(functions.setLocalVariableType(anyString(), anyString(), anyString(), any()))
             .thenReturn(Response.ok(Map.of()));
         when(functions.batchRenameVariables(anyString(), any(), anyBoolean(), any())).thenReturn(Response.ok(Map.of()));
-        when(comments.batchSetComments(anyString(), any(), any(), any(), any())).thenReturn(Response.ok(Map.of()));
+        when(comments.batchSetComments(any(Address.class), any(), any(), any(), any())).thenReturn(Response.ok(Map.of()));
         when(symbols.batchCreateLabels(any(), any())).thenReturn(Response.ok(Map.of()));
     }
 
@@ -167,7 +167,7 @@ public class DocumentationApplyServiceTest {
 
     @Test
     public void theStepsRunInOrderAndTheSignatureComesBeforeTheComments() {
-        when(comments.batchSetComments(anyString(), any(), any(), any(), eq(program)))
+        when(comments.batchSetComments(any(Address.class), any(), any(), any(), eq(program)))
             .thenReturn(Response.ok(Map.of("success", true, "plate_comment_set", true,
                 "decompiler_comments_set", 1, "disassembly_comments_set", 0)));
 
@@ -179,7 +179,7 @@ public class DocumentationApplyServiceTest {
         order.verify(functions).renameFunctionByAddress("0x1000", "Decode", program, null);
         order.verify(functions).setFunctionPrototype(eq("0x1000"), eq("int Decode(void)"), any(), eq(program));
         // setting a prototype wipes the plate comment, so comments must come after it
-        order.verify(comments).batchSetComments(eq("0x1000"), any(), any(), eq("plate"), eq(program));
+        order.verify(comments).batchSetComments(eq(function.getEntryPoint()), any(), any(), eq("plate"), eq(program));
         order.verify(analysis).analyzeFunctionCompleteness("0x1000", true, "", program);
         assertEquals(List.of(), out.get("errors"));
         assertEquals("a", out.get("program"));
@@ -282,7 +282,7 @@ public class DocumentationApplyServiceTest {
         verify(functions).setFunctionPrototype(anyString(), anyString(), any(), eq(program));
         verify(functions).setLocalVariableType(anyString(), anyString(), anyString(), eq(program));
         verify(functions).batchRenameVariables(anyString(), any(), anyBoolean(), eq(program));
-        verify(comments).batchSetComments(anyString(), any(), any(), any(), eq(program));
+        verify(comments).batchSetComments(any(Address.class), any(), any(), any(), eq(program));
         verify(symbols).batchCreateLabels(any(), eq(program));
         verify(analysis).analyzeFunctionCompleteness(anyString(), anyBoolean(), eq(""), eq(program));
     }
@@ -342,7 +342,7 @@ public class DocumentationApplyServiceTest {
 
         Map<String, String> pre = Map.of("address", "ram:00001004", "comment", "before");
         Map<String, String> eol = Map.of("address", "ram:00001004", "comment", "after");
-        verify(comments).batchSetComments("0x1000", List.of(pre), List.of(eol), null, program);
+        verify(comments).batchSetComments(function.getEntryPoint(), List.of(pre), List.of(eol), null, program);
     }
 
     @Test
