@@ -84,7 +84,7 @@ public class EmulationService {
             category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                    description = "Entry point address of the function to emulate") String addressStr,
+                    description = "Function name or any address within the function to emulate") Function func,
             @Param(value = "registers", source = ParamSource.BODY, fieldsJson = true,
                     description = "Initial register values as JSON: {\"EAX\": \"0x1234\", \"ECX\": \"0x7FFE0000\"}") String registersJson,
             @Param(value = "memory", source = ParamSource.BODY, fieldsJson = true,
@@ -106,11 +106,8 @@ public class EmulationService {
                     String readMemoryAfterJson,
             @Param(value = "program", defaultValue = "") Program program) {
 
-        Address entryAddr = ServiceUtils.resolveFunctionAddress(program, addressStr);
-        if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Function func = program.getFunctionManager().getFunctionAt(entryAddr);
-        if (func == null) return Response.err("No function at address: " + addressStr);
+        if (func == null) return Response.err("function is required");
+        Address entryAddr = func.getEntryPoint();
 
         try {
             EmulatorHelper emu = new EmulatorHelper(program);

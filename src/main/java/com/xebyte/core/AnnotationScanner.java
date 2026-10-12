@@ -9,6 +9,7 @@ import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
 /**
@@ -248,7 +249,7 @@ public class AnnotationScanner {
                         args[i] = resolveParam(bindings[i], query, body);
                     }
                 }
-                EntityParams.resolve(bindings, args, programProvider);
+                Function resolvedFunction = EntityParams.resolve(bindings, args, programProvider);
 
                 // Dry-run support: wrap POST endpoints in a transaction that always rolls back.
                 // Must check BOTH the query string and the JSON body -- this project's own
@@ -288,8 +289,8 @@ public class AnnotationScanner {
                             try {
                                 // Inject before dry-run wrap so the program label survives
                                 // the Text conversion; wrapDryRun prefixes into the same object.
-                                Response result = injectResolvedProgram(
-                                        (Response) method.invoke(service, args));
+                                Response result = stampResolvedFunction(injectResolvedProgram(
+                                        (Response) method.invoke(service, args)), resolvedFunction);
                                 return wrapDryRunResponse(result);
                             } finally {
                                 program.endTransaction(tx, false); // Always rollback
@@ -298,7 +299,8 @@ public class AnnotationScanner {
                     }
                 }
 
-                Response result = injectResolvedProgram((Response) method.invoke(service, args));
+                Response result = stampResolvedFunction(
+                        injectResolvedProgram((Response) method.invoke(service, args)), resolvedFunction);
                 return isWrite && tool.dryRun() ? warnIfUnsaveable(result) : result;
             } catch (Refusal refusal) {
                 // A parameter that names nothing (no such program, no function there).
@@ -350,6 +352,25 @@ public class AnnotationScanner {
         }
         warnings.add(reason);
         out.put("warnings", warnings);
+        return Response.ok(out);
+    }
+
+    /**
+     * Name the function a call acted on: {@code resolved_function: {name, address}}. A function
+     * parameter accepts a name or any address inside the function, so the caller may not know
+     * which one it got until the response says.
+     */
+    static Response stampResolvedFunction(Response response, Function function) {
+        if (function == null || !(response instanceof Response.Ok ok) || !(ok.data() instanceof Map<?, ?> map)
+                || map.containsKey("resolved_function")) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        out.put("resolved_function", JsonHelper.mapOf("name", function.getName(),
+            "address", AddressKeys.of(function)));
         return Response.ok(out);
     }
 

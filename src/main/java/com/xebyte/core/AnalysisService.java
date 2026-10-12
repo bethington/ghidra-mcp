@@ -859,10 +859,11 @@ public class AnalysisService {
             @Param(value = "operand_pattern", defaultValue = "",
                 description = "Case-insensitive substring matched against the joined operand string (e.g. '[ecx+0xd0]', 'eax', '0x10001000'). Omit to match any operand.") String operandPattern,
             @Param(value = "function", defaultValue = "",
-                description = "Restrict search to this function (by name or entry-point address). Omit to search the whole program.") String functionScope,
+                description = "Restrict search to this function (by name or entry-point address). Omit to search the whole program.") Function functionScope,
             @Param(value = "limit", defaultValue = "500",
                 description = "Maximum matches returned. Walking stops as soon as the cap is hit.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
+
         String wantMnemonic = mnemonic == null ? "" : mnemonic.trim();
         String wantOperand = operandPattern == null ? "" : operandPattern.trim().toLowerCase();
         if (wantMnemonic.isEmpty() && wantOperand.isEmpty()) {
@@ -878,11 +879,8 @@ public class AnalysisService {
 
             // Build the address set we'll iterate.
             AddressSetView searchSet;
-            if (functionScope != null && !functionScope.trim().isEmpty()) {
-                ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionScope);
-                if (resolved.hasError()) return resolved.error();
-                Function f = resolved.function();
-                searchSet = f.getBody();
+            if (functionScope != null) {
+                searchSet = functionScope.getBody();
             } else {
                 searchSet = program.getMemory();
             }
@@ -955,9 +953,9 @@ public class AnalysisService {
             result.put("match_count", matches.size());
             result.put("instructions_scanned", scanned);
             result.put("truncated", truncated);
-            result.put("scope", functionScope == null || functionScope.trim().isEmpty()
+            result.put("scope", functionScope == null
                     ? "program"
-                    : "function:" + functionScope);
+                    : "function:" + functionScope.getName());
             // Echo the filters back as plain strings (empty == "no filter") so
             // both keys are always present in the JSON. Gson drops null fields
             // by default, which left clients unable to tell "field absent
@@ -970,30 +968,16 @@ public class AnalysisService {
         }
     }
 
-    /**
-     * Find functions structurally similar to the target function
-     * Uses basic block count, instruction count, call count, and cyclomatic complexity
-     */
-    public Response findSimilarFunctions(String targetFunction, double threshold) {
-        return findSimilarFunctions(targetFunction, threshold, null);
-    }
+    
 
     @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findSimilarFunctions(
-            @Param(value = "target_function", description = "Function name") String targetFunction,
+            @Param(value = "target_function", description = "Function name") Function targetFunc,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (targetFunction == null || targetFunction.trim().isEmpty()) {
-            return Response.err("Target function name is required");
-        }
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-
-            // Find the target function by name or address
-            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, targetFunction);
-            if (resolved.hasError()) return resolved.error();
-            Function targetFunc = resolved.function();
 
             // Calculate metrics for target function
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -1003,7 +987,7 @@ public class AnalysisService {
             List<Map<String, Object>> similarFunctions = new ArrayList<>();
 
             for (Function func : functionManager.getFunctions(true)) {
-                if (func.getName().equals(targetFunction)) continue;
+                if (func.getEntryPoint().equals(targetFunc.getEntryPoint())) continue;
                 if (func.isThunk()) continue;
 
                 FunctionMetrics funcMetrics = calculateFunctionMetrics(func, blockModel, program);
@@ -1031,7 +1015,7 @@ public class AnalysisService {
             }
 
             return Response.ok(JsonHelper.mapOf(
-                "target_function", targetFunction,
+                "target_function", targetFunc.getName(),
                 "target_metrics", JsonHelper.mapOf(
                     "basic_blocks", targetMetrics.basicBlockCount,
                     "instructions", targetMetrics.instructionCount,
@@ -1047,29 +1031,15 @@ public class AnalysisService {
         }
     }
 
-    /**
-     * Analyze function control flow complexity
-     * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
-     */
-    public Response analyzeControlFlow(String functionName) {
-        return analyzeControlFlow(functionName, null);
-    }
+    
 
     @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeControlFlow(
-            @Param(value = "function_name", description = "Function name") String functionName,
+            @Param(value = "function_name", description = "Function name") Function func,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (functionName == null || functionName.trim().isEmpty()) {
-            return Response.err("Function name is required");
-        }
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-
-            // Find the function by name or address
-            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionName);
-            if (resolved.hasError()) return resolved.error();
-            Function func = resolved.function();
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
             Listing listing = program.getListing();
@@ -1183,7 +1153,7 @@ public class AnalysisService {
 
             Address ep = func.getEntryPoint();
             Map<String, Object> cfResult = new LinkedHashMap<>();
-            cfResult.put("function_name", functionName);
+            cfResult.put("function_name", func.getName());
             cfResult.put("entry_point", ep.toString(false));
             if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
                 cfResult.put("entry_point_full", ep.toString());
@@ -1235,13 +1205,6 @@ public class AnalysisService {
     }
 
     /**
-     * Analyze function documentation completeness
-     */
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, Program program) {
-        return analyzeFunctionCompleteness(functionAddress, compact, "", program);
-    }
-
-    /**
      * Analyze function documentation completeness.
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
@@ -1249,7 +1212,7 @@ public class AnalysisService {
     @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionCompleteness(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") String functionAddress,
+                   description = "Function name or any address within the function (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") Function func,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (single mode)") boolean compact,
             @Param(value = "addresses", defaultValue = "",
                    description = "Bulk mode: comma-separated addresses. When set, function_address/compact are ignored.") String addressesCsv,
@@ -1258,10 +1221,7 @@ public class AnalysisService {
             return batchAnalyzeCompleteness(addressesCsv, program);
         }
 
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        return computeFunctionCompleteness(program, addr, functionAddress, compact);
+        return computeFunctionCompleteness(program, func.getEntryPoint(), func.getName(), compact);
     }
 
     private Response computeFunctionCompleteness(Program program, Address addr, String functionAddress,
@@ -1878,7 +1838,9 @@ public class AnalysisService {
         for (String address : addresses) {
             Response r;
             try {
-                r = analyzeFunctionCompleteness(address, false, program);
+                ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, address);
+                if (resolved.hasError()) { r = resolved.error(); }
+                else { r = analyzeFunctionCompleteness(resolved.function(), false, "", program); }
             } catch (Exception e) {
                 r = Response.err(e.getMessage());
             }
@@ -1955,7 +1917,7 @@ public class AnalysisService {
      */
         @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
-            @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") String name,
+            @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") Function func,
             @Param(value = "include_xrefs", defaultValue = "true",
                    description = "True (the default) adds `xrefs` — the sources referencing the entry "
                                + "point — capped at the first 100. `xref_count` counts what was listed, so "
@@ -1978,19 +1940,14 @@ public class AnalysisService {
                                + "types and storage.") boolean includeVariables,
             @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
             @Param(value = "program", defaultValue = "") Program program) {
-        return buildAnalyzeFunctionCompleteResult(program, name, includeXrefs, includeCallees,
+        return buildAnalyzeFunctionCompleteResult(program, func, includeXrefs, includeCallees,
                 includeCallers, includeDisasm, includeVariables, includeCompleteness);
     }
 
-    private Response buildAnalyzeFunctionCompleteResult(Program program, String name, boolean includeXrefs,
+    private Response buildAnalyzeFunctionCompleteResult(Program program, Function func, boolean includeXrefs,
             boolean includeCallees, boolean includeCallers, boolean includeDisasm, boolean includeVariables,
             boolean includeCompleteness) {
         try {
-            ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, name);
-            if (lookup.hasError()) {
-                return Response.err(lookup.message());
-            }
-            Function func = lookup.function();
 
             // Build structured data for Gson serialization
             Map<String, Object> data = new LinkedHashMap<>();
@@ -2165,8 +2122,7 @@ public class AnalysisService {
 
             // Include completeness scoring (GitHub #109)
             if (includeCompleteness) {
-                String addrStr = func.getEntryPoint().toString(false);
-                Response completenessResp = analyzeFunctionCompleteness(addrStr, true, program);
+                Response completenessResp = analyzeFunctionCompleteness(func, true, "", program);
                 if (completenessResp instanceof Response.Ok ok) {
                     data.put("completeness", ok.data());
                 }
@@ -2177,7 +2133,6 @@ public class AnalysisService {
             return Response.err(e.getMessage());
         }
     }
-
 
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
@@ -3857,21 +3812,17 @@ public class AnalysisService {
     @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeForDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "program", defaultValue = "") Program program) {
-                Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        return buildAnalyzeForDocumentationResult(program, addr, functionAddress);
+        return buildAnalyzeForDocumentationResult(program, func.getEntryPoint(), func.getName());
     }
 
     private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress) {
         try {
-            // Resolve function by address
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
                 func = program.getFunctionManager().getFunctionContaining(addr);
@@ -4032,7 +3983,7 @@ public class AnalysisService {
             data.put("dat_global_count", datGlobalCount);
 
             // Compact completeness score; pass the same Program through.
-            Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, program);
+            Response completenessResponse = analyzeFunctionCompleteness(func, true, "", program);
             if (completenessResponse instanceof Response.Ok ok) {
                 data.put("completeness", ok.data());
             }
@@ -4581,16 +4532,10 @@ public class AnalysisService {
              category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFunctionPcode(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
+                   description = "Function entry address (0x<hex> or <space>:<hex>).") Function func,
             @Param(value = "granularity", defaultValue = "high",
                    description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
             @Param(value = "program", defaultValue = "") Program program) {
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Function func = program.getFunctionManager().getFunctionAt(addr);
-        if (func == null) func = program.getFunctionManager().getFunctionContaining(addr);
-        if (func == null) return Response.err("No function at address: " + functionAddress);
 
         DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
         if (decompResults == null || !decompResults.decompileCompleted()) {

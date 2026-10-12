@@ -30,14 +30,10 @@ public class SymbolLabelService {
     // Label Methods
     // -----------------------------------------------------------------------
 
-    public Response getFunctionLabels(String functionName, int offset, int limit) {
-        return getFunctionLabels(functionName, offset, limit, null);
-    }
-
     /** Kept for tests; agents use {@code /get_functions?fields=labels}. */
     public Response getFunctionLabels(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
+                   description = "Function name or address (0x<hex> / <space>:<hex>).") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of labels to skip before this page starts; 0 begins at the "
                                + "first.") int offset,
@@ -46,17 +42,11 @@ public class SymbolLabelService {
                                + "value for no limit; `total` in the response always reports the full "
                                + "count for the function.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (functionName == null || functionName.isEmpty()) {
-            return Response.err("name is required (function name or address)");
-        }
+        
 
         SymbolTable symbolTable = program.getSymbolTable();
 
-        ServiceUtils.FunctionOrError functionLookup = ServiceUtils.getFunctionOrError(program, functionName);
-        if (functionLookup.hasError()) return functionLookup.error();
-        Function function = functionLookup.function();
-
-        AddressSetView functionBody = function.getBody();
+        AddressSetView functionBody = func.getBody();
         SymbolIterator symbols = symbolTable.getSymbolIterator();
 
         // Collect the whole set and let the envelope page it, so `total`

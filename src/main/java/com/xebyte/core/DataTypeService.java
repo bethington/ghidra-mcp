@@ -1954,18 +1954,15 @@ public class DataTypeService {
     @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response validateFunctionPrototype(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "prototype", description = "Function prototype") String prototype,
             @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
             @Param(value = "program", defaultValue = "") Program program) {
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        return validateFunctionPrototypeAt(program, addr, functionAddress, prototype, callingConvention);
+        return validateFunctionPrototypeAt(program, func.getEntryPoint(), func.getName(), prototype, callingConvention);
     }
 
     private Response validateFunctionPrototypeAt(Program program, Address addr, String functionAddress,
@@ -2028,11 +2025,6 @@ public class DataTypeService {
                 "error", e.getMessage()
             ));
         }
-    }
-
-    // Backward compatibility overload
-    public Response validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
-        return validateFunctionPrototype(functionAddress, prototype, callingConvention, null);
     }
 
     /**
@@ -3748,16 +3740,9 @@ public class DataTypeService {
     public Response auditGlobalsInFunction(
             @Param(value = "function",
                    paramType = Param.FUNCTION_REF,
-                   description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Function name or any address within the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") Function func,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("function is required (name or entry-point address)");
-        }
-        // resolveFunction takes a name OR an address; parsing an address first would
-        // reject every name before the resolver ever ran.
-        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
-        if (funcLookup.hasError()) return funcLookup.error();
-        Function func = funcLookup.function();
+
         Address funcAddr = func.getEntryPoint();
 
         // Walk instructions, gather unique data-reference targets.

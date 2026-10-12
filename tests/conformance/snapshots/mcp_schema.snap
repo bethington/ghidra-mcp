@@ -385,7 +385,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -499,7 +499,7 @@
             "function_name"
           ],
           "default": "",
-          "description": "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.",
+          "description": "Function name or any address within the function (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.",
           "name": "function",
           "param_type": "function_ref",
           "required": false,
@@ -885,7 +885,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function entry-point address (Ghidra hex form)",
+          "description": "Function name or any address within the function (entry-point address, Ghidra hex form)",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -1038,7 +1038,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.",
+          "description": "Function name or any address within the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -1069,7 +1069,7 @@
             "address",
             "function_address"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "address",
           "required": true,
@@ -1380,7 +1380,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -2805,9 +2805,15 @@
       "method": "GET",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "aliases": [
+            "name",
+            "function_address",
+            "function_name",
+            "function"
+          ],
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "address",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "query",
           "type": "string"
@@ -2838,7 +2844,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Entry point address of the function to emulate",
+          "description": "Function name or any address within the function to emulate (entry point address)",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3838,7 +3844,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3872,7 +3878,7 @@
             "function_name"
           ],
           "default": "",
-          "description": "Function to hash: a name, or an address as 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous. Omit to hash many functions (offset, limit, filter).",
+          "description": "Function name or any address within the function to hash: a name, or an address as 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous. Omit to hash many functions (offset, limit, filter).",
           "name": "function",
           "param_type": "function_ref",
           "required": false,
@@ -5797,7 +5803,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -5805,7 +5811,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_function_variables and decompile_function report, not the raw listing's.",
+          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_functions reports (parameters, locals, decompiled_code), not the raw listing's.",
           "name": "variable_renames",
           "required": true,
           "source": "body",
@@ -6644,9 +6650,15 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "aliases": [
+            "address",
+            "name",
+            "function_name",
+            "function"
+          ],
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function_address",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -6681,9 +6693,15 @@
       "method": "POST",
       "params": [
         {
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "aliases": [
+            "address",
+            "name",
+            "function_name",
+            "function"
+          ],
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function_address",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -6756,9 +6774,15 @@
       "method": "POST",
       "params": [
         {
-          "description": "Function entry address (0x<hex> or <space>:<hex>).",
+          "aliases": [
+            "address",
+            "name",
+            "function_name",
+            "function"
+          ],
+          "description": "Function name or any address within the function (0x<hex> or <space>:<hex>).",
           "name": "function_address",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -7055,7 +7079,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -7096,9 +7120,15 @@
       "method": "POST",
       "params": [
         {
-          "description": "Entry address of the function that owns the variable. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use get_address_spaces first on targets that are not address-space-agnostic.",
+          "aliases": [
+            "address",
+            "name",
+            "function_name",
+            "function"
+          ],
+          "description": "Function name or any address within the function that owns the variable. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use get_address_spaces first on targets that are not address-space-agnostic.",
           "name": "function_address",
-          "param_type": "address",
+          "param_type": "function_ref",
           "required": true,
           "source": "body",
           "type": "string"
@@ -7107,7 +7137,7 @@
           "aliases": [
             "parameter_name"
           ],
-          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_function_variables lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
+          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_functions fields=parameters,locals lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
           "name": "variable_name",
           "required": true,
           "source": "body",
@@ -7146,7 +7176,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function entry point address",
+          "description": "Function name or any address within the function (entry point address)",
           "name": "function",
           "param_type": "function_ref",
           "required": true,

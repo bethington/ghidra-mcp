@@ -1233,6 +1233,10 @@
       "category": "function",
       "params": [
         "address",
+        "name",
+        "function_address",
+        "function_name",
+        "function",
         "program"
       ],
       "servers": [
@@ -2944,6 +2948,10 @@
       "category": "function",
       "params": [
         "function_address",
+        "address",
+        "name",
+        "function_name",
+        "function",
         "no_return",
         "noReturn",
         "program"
@@ -2960,6 +2968,10 @@
       "category": "function",
       "params": [
         "function_address",
+        "address",
+        "name",
+        "function_name",
+        "function",
         "prototype",
         "calling_convention",
         "program"
@@ -2991,6 +3003,10 @@
       "category": "function",
       "params": [
         "function_address",
+        "address",
+        "name",
+        "function_name",
+        "function",
         "this_type",
         "thisType",
         "program"
@@ -3113,6 +3129,10 @@
       "category": "function",
       "params": [
         "function_address",
+        "address",
+        "name",
+        "function_name",
+        "function",
         "variable_name",
         "parameter_name",
         "new_type",

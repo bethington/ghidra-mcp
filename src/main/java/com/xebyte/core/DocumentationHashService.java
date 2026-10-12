@@ -59,12 +59,12 @@ public class DocumentationHashService {
     @McpTool(path = "/get_function_hash", description = "Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=). On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionHash(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function to hash: a name, or an address as 0x<hex> (default space) or "
+                   description = "Function name or any address within the function to hash: a name, or an address as 0x<hex> (default space) or "
                                + "<space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous. Omit to hash many functions (offset, limit, "
-                               + "filter).") String functionAddress,
+                               + "filter).") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Bulk mode: number of matching functions to skip before this page "
                                + "starts; 0 begins at the first. The filter is applied before the skip, "
@@ -79,20 +79,12 @@ public class DocumentationHashService {
                                + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
                                + "with `switch`). Omit for all.") String filter,
             @Param(value = "program", defaultValue = "") Program program) {
-        if (functionAddress == null || functionAddress.trim().isEmpty()) {
+
+        if (func == null) {
             return getFunctionHashes(program, offset, limit, filter);
         }
 
         try {
-            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
-            }
 
             String hash = computeNormalizedFunctionHash(program, func);
             int instructionCount = countFunctionInstructions(program, func);
@@ -100,7 +92,7 @@ public class DocumentationHashService {
 
             Map<String, Object> hashResult = new LinkedHashMap<>();
             hashResult.put("function_name", func.getName());
-            hashResult.putAll(ServiceUtils.addressToJson(addr, program));
+            hashResult.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
             hashResult.put("hash", hash);
             hashResult.put("instruction_count", instructionCount);
             hashResult.put("size_bytes", functionSize);
@@ -296,28 +288,20 @@ public class DocumentationHashService {
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
      */
-    public Response getFunctionDocumentation(String functionAddress) {
-        return getFunctionDocumentation(functionAddress, null);
-    }
 
     @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "program", defaultValue = "") Program program) {
-        try {
-            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
 
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+        try {
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("function is required");
             }
 
             // Compute hash for matching
@@ -410,7 +394,7 @@ public class DocumentationHashService {
             return Response.ok(JsonHelper.mapOf(
                 "hash", hash,
                 "source_program", program.getName(),
-                "source_address", addr.toString(),
+                "source_address", func.getEntryPoint().toString(),
                 "function_name", func.getName(),
                 "return_type", func.getReturnType().getName(),
                 "calling_convention", func.getCallingConventionName() != null ? func.getCallingConventionName() : "",
@@ -464,7 +448,7 @@ public class DocumentationHashService {
             @Param(value = "program", defaultValue = "") Program program) {
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
-            Program currentProgram = program; // may be null if no program loaded, that's ok here
+            Program currentProgram = program;
 
             if (allPrograms == null || allPrograms.length == 0) {
                 return Response.err("No programs are open");
@@ -1357,7 +1341,7 @@ public class DocumentationHashService {
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                description = "Function entry-point address (Ghidra hex form)") String functionAddress,
+                description = "Function name or any address within the function (entry-point address, Ghidra hex form)") Function fn,
             @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
@@ -1367,10 +1351,8 @@ public class DocumentationHashService {
         if (!dryRun && getArchiveUrl().isEmpty()) {
             return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
         }
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-        Function fn = program.getFunctionManager().getFunctionAt(addr);
-        if (fn == null) return Response.err("No function at address: " + functionAddress);
+
+        if (fn == null) return Response.err("function is required");
 
         String version = (versionOverride != null && !versionOverride.isEmpty())
             ? versionOverride : extractVersion(program);

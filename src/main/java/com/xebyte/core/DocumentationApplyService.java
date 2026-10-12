@@ -208,29 +208,29 @@ public class DocumentationApplyService {
         }
         if (name != null) {
             steps.put("rename", step("rename",
-                functions.renameFunctionByAddress(address, name, program, null), errors));
+                functions.renameFunctionByAddress(target, name, program, null), errors));
         }
-        applySignature(program, target, address, program, entry, steps, errors);
+        applySignature(program, target, address, entry, steps, errors);
 
         Map<String, String> types = new LinkedHashMap<>(stringMap(entry.get("variable_types")));
         Map<String, String> renames = new LinkedHashMap<>(stringMap(entry.get("variable_renames")));
         addParameterChanges(target, list(entry.containsKey("params") ? entry.get("params") : entry.get("parameters")),
             types, renames);
         if (!types.isEmpty()) {
-            steps.put("variable_types", applyVariableTypes(address, types, program, errors));
+            steps.put("variable_types", applyVariableTypes(target, types, program, errors));
         }
         if (!renames.isEmpty()) {
-            Response renamed = functions.batchRenameVariables(address, renames, true, program);
+            Response renamed = functions.batchRenameVariables(target, renames, true, program);
             steps.put("variable_renames", counted("variable_renames", renamed, errors,
                 Map.of("variables_renamed", "renamed", "variables_failed", "failed")));
         }
-        applyComments(program, target, program, entry, steps, errors);
-        applyLabels(program, target, program, list(entry.get("labels")), steps, errors);
-        applyTags(address, program, entry, steps, errors);
+        applyComments(program, target, entry, steps, errors);
+        applyLabels(program, target, list(entry.get("labels")), steps, errors);
+        applyTags(target, program, entry, steps, errors);
 
         if (score) {
             // Compact: the caller already has the workflow guidance in its prompt.
-            Response scored = analysis.analyzeFunctionCompleteness(address, true, "", program);
+            Response scored = analysis.analyzeFunctionCompleteness(target, true, "", program);
             out.put("completeness", scored instanceof Response.Err e
                 ? Map.of("error", e.message()) : scored.asEmbeddable());
         }
@@ -239,7 +239,7 @@ public class DocumentationApplyService {
 
     // ---------------------------------------------------------------- steps
 
-    private void applySignature(Program program, Function target, String address, Program programArg,
+    private void applySignature(Program program, Function target, String address,
             Map<String, Object> entry, Map<String, Object> steps, List<String> errors) {
         String prototype = text(entry, "prototype");
         // An export of an undocumented function says "undefined": nothing to apply.
@@ -254,7 +254,7 @@ public class DocumentationApplyService {
         }
         if (prototype != null) {
             FunctionService.PrototypeResult result =
-                functions.setFunctionPrototype(address, prototype, convention, programArg);
+                functions.setFunctionPrototype(target, prototype, convention, program);
             Map<String, Object> outcome = new LinkedHashMap<>();
             outcome.put("success", result.isSuccess());
             if (!result.isSuccess()) {
@@ -322,7 +322,7 @@ public class DocumentationApplyService {
         }
     }
 
-    private void applyComments(Program program, Function target, Program programArg,
+    private void applyComments(Program program, Function target,
             Map<String, Object> entry, Map<String, Object> steps, List<String> errors) {
         List<Map<String, String>> pre = new ArrayList<>();
         List<Map<String, String>> eol = new ArrayList<>();
@@ -343,7 +343,7 @@ public class DocumentationApplyService {
         if (plate == null && pre.isEmpty() && eol.isEmpty()) {
             return;
         }
-        Response written = comments.batchSetComments(target.getEntryPoint(), pre, eol, plate, programArg);
+        Response written = comments.batchSetComments(target.getEntryPoint(), pre, eol, plate, program);
         Map<String, Object> result = counted("comments", written, errors, Map.of(
             "decompiler_comments_set", "pre", "disassembly_comments_set", "eol"));
         if (data(written).get("plate_comment_set") == Boolean.TRUE) {
@@ -352,7 +352,7 @@ public class DocumentationApplyService {
         steps.put("comments", result);
     }
 
-    private void applyLabels(Program program, Function target, Program programArg,
+    private void applyLabels(Program program, Function target,
             List<Map<String, Object>> labels, Map<String, Object> steps, List<String> errors) {
         List<Map<String, String>> wanted = new ArrayList<>();
         int unchanged = 0;
@@ -374,14 +374,14 @@ public class DocumentationApplyService {
             return;
         }
         Response created = wanted.isEmpty() ? Response.ok(Map.of())
-            : symbols.batchCreateLabels(wanted, programArg);
+            : symbols.batchCreateLabels(wanted, program);
         Map<String, Object> result = step("labels", created, errors);
         result.put("created", wanted.size());
         result.put("unchanged", unchanged);
         steps.put("labels", result);
     }
 
-    private void applyTags(String address, Program programArg, Map<String, Object> entry,
+    private void applyTags(Function target, Program program, Map<String, Object> entry,
             Map<String, Object> steps, List<String> errors) {
         String names = entry.get("tags") instanceof List<?> list
             ? list.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","))
@@ -389,8 +389,8 @@ public class DocumentationApplyService {
         if (names == null || names.isBlank()) {
             return;
         }
-        Response attached = functions.addFunctionTag(address, names, stringMap(entry.get("tag_comments")),
-            List.of(), programArg);
+        Response attached = functions.addFunctionTag(target, names, stringMap(entry.get("tag_comments")),
+            List.of(), program);
         steps.put("tags", counted("tags", attached, errors, Map.of(
             "added", "added", "already_present", "already_present", "created", "created")));
     }
@@ -436,12 +436,12 @@ public class DocumentationApplyService {
 
     // ---------------------------------------------------------------- steps
 
-    private Map<String, Object> applyVariableTypes(String address, Map<String, String> types,
-            Program programArg, List<String> errors) {
+    private Map<String, Object> applyVariableTypes(Function target, Map<String, String> types,
+            Program program, List<String> errors) {
         int set = 0;
         List<String> failures = new ArrayList<>();
         for (Map.Entry<String, String> e : types.entrySet()) {
-            String failed = failure(functions.setLocalVariableType(address, e.getKey(), e.getValue(), programArg));
+            String failed = failure(functions.setLocalVariableType(target, e.getKey(), e.getValue(), program));
             if (failed == null) {
                 set++;
             } else {

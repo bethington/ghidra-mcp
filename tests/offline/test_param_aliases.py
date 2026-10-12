@@ -71,9 +71,39 @@ def test_scan_finds_most_of_the_catalog():
             "POST",
             {"address": "target", "function_address": "target"},
         ),
-        ("/set_function_no_return", "POST", {"noReturn": "no_return"}),
-        ("/set_function_this_type", "POST", {"thisType": "this_type"}),
-        ("/set_variable_type", "POST", {"parameter_name": "variable_name"}),
+        (
+            "/set_function_no_return",
+            "POST",
+            {
+                "noReturn": "no_return",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
+        (
+            "/set_function_this_type",
+            "POST",
+            {
+                "thisType": "this_type",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
+        (
+            "/set_variable_type",
+            "POST",
+            {
+                "parameter_name": "variable_name",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
     ],
 )
 def test_known_alias_sets_exactly(path, method, expected):
@@ -154,7 +184,7 @@ def test_signature_parser_handles_parens_inside_descriptions():
     """Descriptions contain ')' -- naive paren matching ends the block early."""
     signature = (
         '@Param(value = "start", description = "Address (0x<hex> or space:hex)") '
-        'String start, '
+        "String start, "
         '@Param(value = "name", aliases = {"address", "function"}) String name'
     )
     assert _params_of_signature(signature) == {
@@ -217,8 +247,11 @@ def test_published_schema_aliases_match_the_annotation_parser():
         "server, or ParamDescriptor stopped emitting them."
     )
 
-    parsed = {route: dict(mapping)
-              for route, mapping in load_param_aliases().items() if mapping}
+    parsed = {
+        route: dict(mapping)
+        for route, mapping in load_param_aliases().items()
+        if mapping
+    }
 
     assert published == parsed, (
         "the published schema and the annotation parser disagree about which "
