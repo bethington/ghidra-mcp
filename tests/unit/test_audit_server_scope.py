@@ -290,9 +290,11 @@ def test_the_asymmetry_is_wiring_not_per_tool_annotation(live):
     headless = set(live["headless_service_classes"])
     assert gui - headless == {"DebuggerService", "PromptPolicyService", "GuiToolService"}
     assert headless - gui == {"HeadlessManagementService"}
-    # CoreServices (14) plus VersionControl, ProjectLifecycle, ServerLifecycle,
-    # DocumentationBatch on both (TypeReference and Partition among them).
-    assert len(gui & headless) == 18
+    # CoreServices' 15 take a ThreadingStrategy, so both servers build them
+    # (TypeReference, Partition and Checkout among them);
+    # VersionControl, ProjectLifecycle, ServerLifecycle and DocumentationApply are
+    # built by each server from what differs between them.
+    assert len(gui & headless) == 19
 
 
 # --------------------------------------------------------------------------

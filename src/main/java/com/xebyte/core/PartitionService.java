@@ -16,9 +16,11 @@ import java.util.Map;
 /**
  * Structural partitioning of a program into compartments, with the evidence.
  *
- * <p>An agent has to be able to rule out whole regions before decompiling any of
- * them. On a Windows driver the two library compartments were 42% of the binary and
- * were identifiable from their referenced strings alone.
+ * <p>Feeds the decompilation tree, whose entry point is a table of compartments
+ * rather than a flat directory of thousands of functions: an agent has to be able
+ * to rule out whole regions before decompiling any of them. On a Windows driver the
+ * two library compartments were 42% of the binary and were identifiable from their
+ * referenced strings alone.
  *
  * <p>Nothing here interprets. Slugs are machine-generated ({@code c05}, never
  * {@code crypto}) and every partition carries the rule that formed it plus the

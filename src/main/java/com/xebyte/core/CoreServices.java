@@ -34,7 +34,8 @@ public record CoreServices(
         EmulationService emulation,
         FunctionBundleService functionBundle,
         TypeReferenceService typeReference,
-        PartitionService partition) {
+        PartitionService partition,
+        DecompTreeService tree) {
 
     public static CoreServices build(ProgramProvider provider, ThreadingStrategy ts) {
         FunctionService function = new FunctionService(provider, ts);
@@ -55,14 +56,15 @@ public record CoreServices(
             new EmulationService(provider, ts),
             new FunctionBundleService(provider, ts, function),
             new TypeReferenceService(provider),
-            new PartitionService(provider));
+            new PartitionService(provider),
+            new DecompTreeService(provider));
     }
 
     /** Every shared service, in declaration order. */
     public List<Object> all() {
         return List.of(listing, comment, symbolLabel, function, xrefCallGraph, dataType,
             documentationHash, analysis, malwareSecurity, programScript, emulation,
-            functionBundle, typeReference, partition);
+            functionBundle, typeReference, partition, tree);
     }
 
     /** The shared services plus a server's own, ready to hand to {@link AnnotationScanner}. */
