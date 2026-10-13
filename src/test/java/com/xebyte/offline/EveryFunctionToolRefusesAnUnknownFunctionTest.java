@@ -110,7 +110,7 @@ public class EveryFunctionToolRefusesAnUnknownFunctionTest {
         CoreServices core = CoreServices.build(provider, ts);
         AnnotationScanner scanner = new AnnotationScanner(provider, ts,
             core.plus(
-                new DebuggerService(provider, ts, null),
+                new DebuggerService(ts, null),
                 new PromptPolicyService(),
                 new ProjectLifecycleService(new HeadlessProgramProvider()),
                 new VersionControlService(provider, new ProjectServerSession(provider)),

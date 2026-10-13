@@ -1717,14 +1717,6 @@
           "required": true,
           "source": "body",
           "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
         }
       ],
       "path": "/create_folder",

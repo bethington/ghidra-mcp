@@ -21,7 +21,7 @@ public class LongReadsStayOffTheLockTest {
         String src = ProjectSource.readMainSource("core", "ProgramScriptService.java");
         for (String signature : new String[] {
                 "public Response runGhidraScript(String scriptPath, String scriptArgs, "
-                        + "String programName, int timeoutSeconds)",
+                        + "Program program, int timeoutSeconds)",
                 "private ScriptRunOutcome executeGhidraScriptBody("}) {
             String body = methodBody(src, signature);
             // Lock held for up to the 30-minute script timeout; a script calling back

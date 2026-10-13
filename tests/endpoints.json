@@ -705,8 +705,7 @@
       "method": "POST",
       "category": "project",
       "params": [
-        "path",
-        "program"
+        "path"
       ],
       "servers": [
         "gui",
