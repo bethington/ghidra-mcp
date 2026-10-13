@@ -151,6 +151,15 @@ nothing is answered with the message tools used to return themselves, and the to
   exact entry. Since a caller may pass a name or an interior address, every single-function
   response carries `resolved_function` `{name, address}`, the function the call acted on.
 
+### Fixed — a tree pass's decompiler sees edits made during the pass
+
+The tree decompiles a whole sweep or reconcile pass with one decompiler. The decompile
+process caches the function and symbol data it reads and never re-reads it, so a block
+decompiled after a mid-pass rename or prototype change could show the old name. That decompiler
+now flushes its cache whenever the program changed since it last ran, and only then, so an
+unchanged program keeps the speedup. `rename_variables` no longer runs a throwaway decompile
+after renaming: it flushed a decompiler nobody else used, so it invalidated nothing.
+
 ### Fixed — every program write takes the headless write lock
 
 21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request
