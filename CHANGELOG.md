@@ -14,8 +14,12 @@ Tool parameters are typed as what they name. `AnnotationScanner` reads the calle
 before and resolves it per call, so programs opened later are found. A name that resolves to
 nothing is answered with the message tools used to return themselves, and the tool never runs.
 
-- **Programs.** 136 tools take the open `Program` ("No program loaded.", "Program not found: …").
-  About 100 compatibility overloads that took a program name, or none, are gone.
+- **Programs.** 146 tools take the open `Program` ("No program loaded.", "Program not found: …").
+  About 100 compatibility overloads that took a program name, or none, are gone. Three things
+  follow from resolving every program the same way: `switch_program` finds a program the way any
+  tool does (it used to match only programs already open); `run_ghidra_script` and
+  `run_script_inline` report an unknown program before the scripts-allowed check; and
+  `create_folder` lost its `program` parameter, which it never read.
 - **Addresses.** Most address parameters take an `Address` parsed against that program; a bad
   one is refused with the parse error.
 - **Functions.** 27 tools take the `Function` a reference names: its name, its entry address or

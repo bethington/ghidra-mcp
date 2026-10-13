@@ -85,7 +85,7 @@ public class HardeningWiringTest extends TestCase {
         ProgramScriptService scripts = new ProgramScriptService(
                 ServiceFactory.stubProvider(), new NoopThreadingStrategy());
         Response r = scripts.runGhidraScript(
-                "AnyScript.java", "", "no-such-program-should-never-resolve", 0);
+                "AnyScript.java", "", null, 0);
         assertTrue("Sink must return an error when scripts are disabled",
                 r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
@@ -106,32 +106,14 @@ public class HardeningWiringTest extends TestCase {
         int sig = indexOfScriptPathOverload(src);
         assertTrue("Could not locate the runGhidraScript overload declaring the "
                 + "script_path @Param", sig >= 0);
-        // The areScriptsAllowed() gate must appear early in the method body,
-        // before the program is resolved.
         int gate = src.indexOf("areScriptsAllowed()", sig);
-        int resolve = src.indexOf("getProgramOrError", sig);
+        int usesProgram = src.indexOf("scriptState(", sig);
         assertTrue("runGhidraScript sink must check areScriptsAllowed()", gate >= 0);
-        assertTrue("Gate must precede program resolution", gate < resolve);
+        assertTrue("Sink must take a resolved Program", src.indexOf("Program program", sig) >= 0);
+        assertTrue("Gate must precede using the program in scriptState",
+                usesProgram >= 0 && gate < usesProgram);
     }
 
-    /**
-     * Locate the {@code runGhidraScript} overload whose first parameter is the
-     * {@code script_path} {@code @Param}. Whitespace-tolerant on purpose: the
-     * previous form was a literal containing {@code "\n"} plus exactly twelve
-     * spaces, so it broke both on a CRLF checkout and on any reformat of the
-     * declaration.
-     *
-     * @return offset of the declaration, or -1
-     */
-    static int indexOfScriptPathOverload(String src) {
-        Matcher m = SCRIPT_PATH_OVERLOAD.matcher(src);
-        return m.find() ? m.start() : -1;
-    }
-
-    static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
-            "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
-                    + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
-            Pattern.MULTILINE | Pattern.DOTALL);
 
     /** The dead, ungated /run_script route must stay unregistered.
      *  (The old dead EndpointRegistry router was removed in 7.0.0.) */
@@ -200,6 +182,26 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("the folder walks must skip files outside the scope too",
                 src.split("isPathInProjectScope\\(", -1).length >= 4);
     }
+
+
+    /**
+     * Locate the {@code runGhidraScript} overload whose first parameter is the
+     * {@code script_path} {@code @Param}. Whitespace-tolerant on purpose: the
+     * previous form was a literal containing {@code "\n"} plus exactly twelve
+     * spaces, so it broke both on a CRLF checkout and on any reformat of the
+     * declaration.
+     *
+     * @return offset of the declaration, or -1
+     */
+    static int indexOfScriptPathOverload(String src) {
+        Matcher m = SCRIPT_PATH_OVERLOAD.matcher(src);
+        return m.find() ? m.start() : -1;
+    }
+
+    static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
+            "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
+                    + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
+            java.util.regex.Pattern.MULTILINE | java.util.regex.Pattern.DOTALL);
 
     private static int countOccurrences(String s, String sub) {
         int n = 0, i = 0;

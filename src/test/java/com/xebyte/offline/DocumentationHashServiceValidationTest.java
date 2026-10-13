@@ -33,22 +33,10 @@ public class DocumentationHashServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("String address is required"));
     }
 
-    public void testBulkFuzzyMatchRequiresSourceProgram() {
-        Response r = docs.handleBulkFuzzyMatch("", "Target.dll", 0.7, 0, 50, "");
+    public void testMergeProgramDocumentationRefusesSameProgram() {
+        Response r = docs.mergeProgramDocumentation(programStub, programStub, false);
         assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("source_program parameter is required"));
-    }
-
-    public void testMergeProgramDocumentationRequiresSource() {
-        Response r = docs.mergeProgramDocumentation("", "Target.dll", false);
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("source is required"));
-    }
-
-    public void testMergeProgramDocumentationRequiresTarget() {
-        Response r = docs.mergeProgramDocumentation("Source.dll", "", false);
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("target is required"));
+        assertTrue(((Response.Err) r).message().contains("same Program object"));
     }
 
 }

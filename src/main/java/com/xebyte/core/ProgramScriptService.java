@@ -1378,49 +1378,22 @@ it = map.getPropertyIterator(start, end);
      */
     @McpTool(path = "/switch_program", dryRun = false, description = "Switch MCP context to a different program", category = "program", access = ToolAccess.WRITE)
     public Response switchProgram(
-            @Param(value = "program", description = "Program name to switch to") String programName) {
-        if (programName == null || programName.trim().isEmpty()) {
-            return Response.err("Program name is required");
-        }
-
-        Program[] programs = programProvider.getAllOpenPrograms();
-        if (programs == null || programs.length == 0) {
-            return Response.err("No programs are currently open");
-        }
-
-        Program targetProgram;
-        try {
-            targetProgram = ProjectProgramProvider.match(java.util.Arrays.asList(programs), programName.trim());
-        } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
-        }
-
-        if (targetProgram == null) {
-            List<String> availablePrograms = new ArrayList<>();
-            for (Program prog : programs) {
-                availablePrograms.add(prog.getName());
-            }
-            return Response.ok(JsonHelper.mapOf(
-                "error", "Program not found: " + programName,
-                "available_programs", availablePrograms
-            ));
-        }
-
-        programProvider.setCurrentProgram(targetProgram);
+            @Param(value = "program", description = "Program name to switch to") Program program) {
+        programProvider.setCurrentProgram(program);
         // Headless keeps no current program by design (a sticky one made a 17-program
         // survey report one binary's numbers seventeen times), and a GUI program no
         // CodeBrowser shows cannot outrank the one that does. This used to answer
         // success anyway.
-        if (programProvider.getCurrentProgram() != targetProgram) {
-            return Response.err("This server did not switch to " + targetProgram.getName()
+        if (programProvider.getCurrentProgram() != program) {
+            return Response.err("This server did not switch to " + program.getName()
                 + ": it has no settable current program here. Pass program=\""
-                + ProjectProgramProvider.keyFor(targetProgram) + "\" on each call instead.");
+                + ProjectProgramProvider.keyFor(program) + "\" on each call instead.");
         }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
-            "switched_to", targetProgram.getName(),
-            "path", ProjectProgramProvider.keyFor(targetProgram)
+            "switched_to", program.getName(),
+            "path", ProjectProgramProvider.keyFor(program)
         ));
     }
 
@@ -1481,8 +1454,7 @@ it = map.getPropertyIterator(start, end);
 
     @McpTool(path = "/create_folder", dryRun = false, method = "POST", description = "Create a folder in the project", category = "project", access = ToolAccess.WRITE)
     public Response createFolder(
-            @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath) {
         ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
@@ -2012,6 +1984,7 @@ it = map.getPropertyIterator(start, end);
 
     @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program", access = ToolAccess.READ_ONLY)
     public Response analysisStatus(
+            // Omit means every open program, not the single-target resolve rule.
             @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
 
         Program[] allPrograms = programProvider.getAllOpenPrograms();
@@ -2075,19 +2048,15 @@ it = map.getPropertyIterator(start, end);
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
-    public Response runGhidraScript(String scriptPath, String scriptArgs) {
-        return runGhidraScript(scriptPath, scriptArgs, (String) null);
-    }
-
     // Removed from MCP schema — use run_ghidra_script instead (has output capture + timeout)
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", defaultValue = "") String programName) {
-        return runGhidraScript(scriptPath, scriptArgs, programName, 0);
+            @Param(value = "program", defaultValue = "") Program program) {
+        return runGhidraScript(scriptPath, scriptArgs, program, 0);
     }
 
-    public Response runGhidraScript(String scriptPath, String scriptArgs, String programName, int timeoutSeconds) {
+    public Response runGhidraScript(String scriptPath, String scriptArgs, Program program, int timeoutSeconds) {
         // Defense in depth: the script-execution gate belongs on the sink, not
         // only on the callers. runGhidraScriptWithCapture already checks this
         // before delegating here; enforcing it again means no current or future
@@ -2098,9 +2067,6 @@ it = map.getPropertyIterator(start, end);
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
                 + "runGhidraScript executes any script resolvable via the Ghidra script path.");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
         Workbench workbench = programProvider.workbench();
         ScriptRunOutcome outcome = executeGhidraScriptBody(
             scriptPath, scriptArgs, program, timeoutSeconds, workbench);
@@ -2405,7 +2371,7 @@ it = map.getPropertyIterator(start, end);
                    description = "Arguments handed to the script, split on WHITESPACE into a String[]. "
                                + "There is no quoting, so an argument containing a space arrives as two "
                                + "arguments.") String args,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
@@ -2470,7 +2436,7 @@ it = map.getPropertyIterator(start, end);
             }
 
             java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
-            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, programName);
+            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, program);
             return responseHolder[0];
         } catch (Exception e) {
             return Response.err("Failed to create inline script: " + e.getMessage());
@@ -3316,7 +3282,7 @@ it = map.getPropertyIterator(start, end);
                                + "'success' is still reported, but 'console_output' is omitted and 'output_captured' "
                                + "is false. Output of a FAILED script is always returned regardless, so a failure is "
                                + "never silent.") boolean captureOutput,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
@@ -3328,14 +3294,6 @@ it = map.getPropertyIterator(start, end);
         if (timeoutSeconds <= 0 || timeoutSeconds > MAX_SCRIPT_TIMEOUT_SECONDS) {
             return Response.err("timeout_seconds must be between 1 and " + MAX_SCRIPT_TIMEOUT_SECONDS + " seconds");
         }
-
-        // Fail fast with a clear "program not found" error before doing
-        // the script-file search. The Program object isn't used in this
-        // method directly — the 3-arg runGhidraScript call at the end
-        // re-resolves it from programName via the same helper, which is
-        // where currentProgram-via-GhidraState binding actually happens.
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
 
         try {
             // Locate the script file - search Ghidra's standard script directories
@@ -3380,21 +3338,11 @@ it = map.getPropertyIterator(start, end);
             }
 
             // Execute the script via the existing execution method.
-            //
-            // The 3-arg overload (line ~1133) threads programName through
-            // ServiceUtils.getProgramOrError -> GhidraState -> the script's
-            // currentProgram global. The 2-arg overload below drops the
-            // program info, so the script executes against whatever
-            // currentProgram happens to be in the session (typically the
-            // GUI's focused CodeBrowser). Prior to v5.11.5 this method
-            // called the 2-arg form even though it had just resolved the
-            // operator's requested program at line 1891 — a real bug
-            // surfaced by community report (Copilot review on #207):
-            // "It is fixed for run_script_inline but not fixed for
-            //  run_ghidra_script, which always runs for the current program."
+            // The Program-typed overload threads the resolved program into
+            // GhidraState -> the script's currentProgram global.
             long startTime = System.currentTimeMillis();
             Response scriptResponse = runGhidraScript(
-                    scriptFile.getAbsolutePath(), scriptArgs, programName, timeoutSeconds);
+                    scriptFile.getAbsolutePath(), scriptArgs, program, timeoutSeconds);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
             // Extract the structured result from runGhidraScript's own response

@@ -44,7 +44,7 @@ public class ProjectMoveEndpointsOfflineTest extends TestCase {
         // Siblings that already worked; locked in here so a future refactor of
         // this group cannot quietly regress one of them the same way.
         EXPECTED.put("/create_folder",
-            new Expected("POST", "project", "path", "program"));
+            new Expected("POST", "project", "path"));
         EXPECTED.put("/delete_file",
             new Expected("POST", "project", "filePath"));
     }

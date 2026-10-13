@@ -85,9 +85,6 @@ public class DeadParameterTest extends TestCase {
         KNOWN_INERT.put("/import_data_types#format",
             "Only C source is parseable (via Ghidra's CParser); the parameter anticipates other "
                 + "formats that do not exist. Either validate it or remove it.");
-        KNOWN_INERT.put("/create_folder#program",
-            "Boilerplate 'program' on a project-level operation. Creating a folder does not involve "
-                + "a program; the parameter was copied onto the signature and never used.");
         KNOWN_INERT.put("/detect_crypto_constants#program",
             "Placeholder endpoint; program is resolved by EntityParams but the stub implementation "
                 + "does not read it yet.");

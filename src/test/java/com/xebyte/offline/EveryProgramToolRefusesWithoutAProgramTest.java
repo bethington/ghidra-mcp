@@ -77,6 +77,6 @@ public class EveryProgramToolRefusesWithoutAProgramTest {
         }
 
         assertEquals("every Program-typed tool is registered and was checked", programPaths.size(), covered);
-        assertTrue("the conversion covers most tools; " + covered + " is implausibly few", covered > 100);
+        assertTrue("the conversion covers most tools; " + covered + " is implausibly few", covered > 110);
     }
 }

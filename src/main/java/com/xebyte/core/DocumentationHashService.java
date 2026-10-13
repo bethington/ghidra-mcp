@@ -672,26 +672,13 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
-            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "source_program", defaultValue = "", description = "Source program name") Program srcProgram,
+            @Param(value = "target_program", description = "Target program name") Program tgtProgram,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
             @Param(value = "limit", defaultValue = "20",
                    description = "Maximum matches returned, highest similarity first (default 20). It "
                                + "truncates the result only: every candidate in the target program is still "
                                + "scored, so a small limit does not make the call cheaper.") int limit) {
-        // Source program: use sourceProgramName if given, otherwise current program
-        ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
-        if (srcPe.hasError()) return srcPe.error();
-        Program srcProgram = srcPe.program();
-
-        // Target program is required
-        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return Response.err("target_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError tgtPe = ServiceUtils.getProgramOrError(programProvider, targetProgramName);
-        if (tgtPe.hasError()) return tgtPe.error();
-        Program tgtProgram = tgtPe.program();
-
         try {
             Address addr = ServiceUtils.resolveFunctionAddress(srcProgram, addressStr);
             if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -711,8 +698,8 @@ public class DocumentationHashService {
      */
     @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleBulkFuzzyMatch(
-            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
-            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "source_program", description = "Source program name") Program srcProgram,
+            @Param(value = "target_program", description = "Target program name") Program tgtProgram,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of SOURCE functions to skip before this page starts; 0 begins at "
@@ -724,20 +711,6 @@ public class DocumentationHashService {
                                + "total_source_functions reports the full count to page "
                                + "against.") int limit,
             @Param(value = "filter", description = "Name filter") String filter) {
-        if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
-            return Response.err("source_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
-        if (srcPe.hasError()) return srcPe.error();
-        Program srcProgram = srcPe.program();
-
-        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return Response.err("target_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError tgtPe = ServiceUtils.getProgramOrError(programProvider, targetProgramName);
-        if (tgtPe.hasError()) return tgtPe.error();
-        Program tgtProgram = tgtPe.program();
-
         try {
             return BinaryComparisonService.bulkFuzzyMatchJson(
                 srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor());
@@ -763,23 +736,8 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressB,
-            @Param(value = "program_a", description = "First program name") String programAName,
-            @Param(value = "program_b", description = "Second program name") String programBName) {
-        // Program A
-        ServiceUtils.ProgramOrError peA = ServiceUtils.getProgramOrError(programProvider, programAName);
-        if (peA.hasError()) return peA.error();
-        Program progA = peA.program();
-
-        // Program B defaults to Program A if not specified
-        Program progB;
-        if (programBName == null || programBName.trim().isEmpty()) {
-            progB = progA;
-        } else {
-            ServiceUtils.ProgramOrError peB = ServiceUtils.getProgramOrError(programProvider, programBName);
-            if (peB.hasError()) return peB.error();
-            progB = peB.program();
-        }
-
+            @Param(value = "program_a", defaultValue = "", description = "First program name") Program progA,
+            @Param(value = "program_b", defaultValue = "", description = "Second program name") Program progB) {
         try {
             Address addrA = ServiceUtils.parseAddress(progA, addressA);
             if (addrA == null) return Response.err(ServiceUtils.getLastParseError());
@@ -824,19 +782,11 @@ public class DocumentationHashService {
         category = "documentation", access = ToolAccess.WRITE)
     public Response mergeProgramDocumentation(
             @Param(value = "source", source = ParamSource.BODY,
-                description = "Source program path or name (read-only — the rescued copy)") String sourceName,
+                description = "Source program path or name (read-only — the rescued copy)") Program source,
             @Param(value = "target", source = ParamSource.BODY,
-                description = "Target program path or name (writes go here — the original .dll)") String targetName,
+                description = "Target program path or name (writes go here — the original .dll)") Program target,
             @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
                 description = "If true, count what would be merged without writing") boolean dryRun) {
-        if (sourceName == null || sourceName.isEmpty()) return Response.err("source is required");
-        if (targetName == null || targetName.isEmpty()) return Response.err("target is required");
-        if (sourceName.equals(targetName)) return Response.err("source and target must differ");
-
-        Program source = programProvider.getProgram(sourceName);
-        if (source == null) return Response.err("Source program not found: " + sourceName);
-        Program target = programProvider.getProgram(targetName);
-        if (target == null) return Response.err("Target program not found: " + targetName);
         if (source == target) return Response.err("source and target resolved to same Program object");
 
         // Counters: each pair tracks (planned_or_seen, actually_applied)

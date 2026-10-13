@@ -150,7 +150,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.analysisService = services.analysis();
         this.malwareSecurityService = services.malwareSecurity();
         this.programScriptService = services.programScript();
-        this.debuggerService = new com.xebyte.core.DebuggerService(programProvider, threadingStrategy, tool);
+        this.debuggerService = new com.xebyte.core.DebuggerService(threadingStrategy, tool);
         this.guiToolService = new com.xebyte.core.GuiToolService(tool);
         this.promptPolicyService = new com.xebyte.core.PromptPolicyService();
         Msg.info(this, "============================================");
@@ -745,49 +745,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         sendResponse(exchange, response.toJson());
     }
 
-    // ----------------------------------------------------------------------------------
-    // Data Type Analysis and Management Methods
-    // ----------------------------------------------------------------------------------
-
-    /**
-     * Helper method to extract JSON values from simple JSON strings
-     */
-    /**
-     * Convert an object to JSON string format
-     */
-    // ===================================================================================
-    // NEW DATA STRUCTURE MANAGEMENT METHODS
-    // ===================================================================================
-
-    // ==========================================================================
-    // HIGH-PERFORMANCE DATA ANALYSIS METHODS (v1.3.0)
-    // ==========================================================================
-
-    /**
-     * === FIELD-LEVEL ANALYSIS IMPLEMENTATIONS (v1.4.0) ===
-     */
-
-    // ============================================================================
-    // MALWARE ANALYSIS IMPLEMENTATION METHODS
-    // ============================================================================
-
-    // ===================================================================================
-    // BOOKMARK METHODS (v1.9.4) - Progress tracking via Ghidra bookmarks
-    // ===================================================================================
-
-    // ==================================================================================
-    // CROSS-VERSION MATCHING TOOLS
-    // ==================================================================================
-
-    // ==========================================================================
-    // FUZZY MATCHING & DIFF HANDLERS
-    // ==========================================================================
-
-    // ==========================================================================
-    // PROJECT VERSION CONTROL HELPER METHODS
-    // Uses Ghidra's internal DomainFile/DomainFolder API
-    // ==========================================================================
-
     // ==========================================================================
     // PROJECT & TOOL MANAGEMENT HELPERS
     // ==========================================================================
@@ -999,4 +956,5 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         super.dispose();
     }
 }
+
 
