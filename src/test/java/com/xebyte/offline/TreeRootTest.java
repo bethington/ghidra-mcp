@@ -2,6 +2,7 @@ package com.xebyte.offline;
 
 import com.xebyte.core.tree.TreeConfig;
 import com.xebyte.core.tree.TreeKey;
+import com.xebyte.core.tree.TreeRegistry;
 import com.xebyte.core.tree.TreeRoot;
 import com.xebyte.core.SafePaths;
 import org.junit.After;
@@ -51,7 +52,7 @@ public class TreeRootTest {
 
     @Test
     public void sameBasenameDifferentDomainPathsProduceDifferentDirectories() {
-        Path parent = tempBase; // TreeRegistry.defaultParent() restored with registry
+        Path parent = TreeRegistry.defaultParent();
         TreeKey vanilla = TreeKey.of("/Vanilla/1.13d/D2Common.dll", parent.toString());
         TreeKey mod = TreeKey.of("/Mods/PD2-S12/D2Common.dll", parent.toString());
 
