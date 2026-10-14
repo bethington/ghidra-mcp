@@ -73,12 +73,29 @@
       "type": 14
     }
   ],
+  "available_variants": [
+    {
+      "decoder": "x86.sla",
+      "description": "Intel/AMD 32-bit x86",
+      "language_id": "x86:LE:32:default",
+      "loaded": true,
+      "variant": "default"
+    },
+    {
+      "decoder": "x86.sla",
+      "description": "Intel/AMD 32-bit x86 System Management Mode",
+      "language_id": "x86:LE:32:System Management Mode",
+      "loaded": false,
+      "variant": "System Management Mode"
+    }
+  ],
   "default_data_space": "ram",
   "default_space": "ram",
   "default_symbols": [],
   "endian": "little",
   "language_id": "x86:LE:32:default",
   "processor": "x86",
+  "program": "Benchmark.dll",
   "program_counter": "EIP",
   "registers": [
     {
@@ -16110,5 +16127,7 @@
     }
   ],
   "size": 32,
-  "variant": "default"
+  "variant": "default",
+  "variant_ambiguous": false,
+  "variant_enumeration_failed": false
 }

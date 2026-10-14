@@ -40,7 +40,7 @@ public class FunctionBundleFieldsEndpointTest extends TestCase {
         FunctionBundleService svc = new FunctionBundleService(
                 provider, new NoopThreadingStrategy(), mock(FunctionService.class));
         Function func = mock(Function.class);
-        Response r = svc.getFunctions(func, "", "callers,nope", false, 0, 3, false, program);
+        Response r = svc.getFunctions(func, "", "callers,nope", false, 0, 3, false, program, "");
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Unknown field"));
         assertTrue(((Response.Err) r).message().contains("callers"));

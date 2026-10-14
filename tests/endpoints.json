@@ -179,13 +179,14 @@
         "name",
         "function_address",
         "function_name",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
+      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness); decompiled_code is stamped with language_id + variant, and withheld if a supplied variant= contradicts the program"
     },
     {
       "path": "/analyze_function_complete",
@@ -203,13 +204,14 @@
         "include_disasm",
         "include_variables",
         "include_completeness",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Comprehensive single-call function analysis. Accepts function name or address."
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. decompiled_code is stamped with language_id + variant, and withheld if a supplied variant= contradicts the program."
     },
     {
       "path": "/analyze_function_completeness",
@@ -1493,13 +1495,14 @@
         "name",
         "function_address",
         "function_name",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Force fresh decompilation"
+      "description": "Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)"
     },
     {
       "path": "/get_address_spaces",
@@ -1726,13 +1729,14 @@
         "call_context_lines",
         "call_context_window",
         "include_disasm",
-        "program"
+        "program",
+        "variant"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that."
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), and on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE) also carries variant_ambiguous + variant_candidates; pass variant= to have that assumption checked: naming a variant the program is not loaded under is refused."
     },
     {
       "path": "/get_language_metadata",
@@ -1747,7 +1751,7 @@
         "gui",
         "headless"
       ],
-      "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections."
+      "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections. Also reports the loaded variant, available_variants (each with the SLEIGH decoder it loads) and variant_ambiguous: where the legal variant= values are listed."
     },
     {
       "path": "/get_metadata",

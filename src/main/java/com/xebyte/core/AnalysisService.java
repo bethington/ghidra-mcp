@@ -1908,7 +1908,7 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions.", category = "analysis", access = ToolAccess.READ_ONLY)
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
             @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") Function func,
             @Param(value = "include_xrefs", defaultValue = "true",
@@ -1932,14 +1932,19 @@ public class AnalysisService {
                    description = "True (the default) adds the function's parameters and locals with their "
                                + "types and storage.") boolean includeVariables,
             @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
-            @Param(value = "program", defaultValue = "") Program program) {
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "variant", defaultValue = "",
+                   description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.") String variant) {
+        // Null -- the common case, including every call that omits variant= -- means
+        // nothing contradicts the caller and the pseudocode field may travel.
         return buildAnalyzeFunctionCompleteResult(program, func, includeXrefs, includeCallees,
-                includeCallers, includeDisasm, includeVariables, includeCompleteness);
+                includeCallers, includeDisasm, includeVariables, includeCompleteness,
+                ServiceUtils.variantRejectionData(program, variant));
     }
 
     private Response buildAnalyzeFunctionCompleteResult(Program program, Function func, boolean includeXrefs,
             boolean includeCallees, boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-            boolean includeCompleteness) {
+            boolean includeCompleteness, Map<String, Object> variantIssue) {
         try {
 
             // Build structured data for Gson serialization
@@ -1970,7 +1975,21 @@ public class AnalysisService {
                 decompResults.getDecompiledFunction() != null) {
                 String decompiledCode = decompResults.getDecompiledFunction().getC();
                 if (decompiledCode != null) {
-                    data.put("decompiled_code", decompiledCode);
+                    // Stamped like get_functions: the dialect that produced the C
+                    // travels with it, plus the ambiguity advisory where the loader
+                    // had a real choice to get wrong.
+                    //
+                    // variantIssue is non-null only when the caller NAMED a variant
+                    // the program contradicts. Withholding this one field, rather
+                    // than failing the whole composite, keeps the analysis useful
+                    // while closing the route that would otherwise hand out exactly
+                    // what get_functions just refused.
+                    if (variantIssue == null) {
+                        ServiceUtils.putLanguageSelection(data, program);
+                        data.put("decompiled_code", decompiledCode);
+                    } else {
+                        data.put("decompiled_code_withheld", variantIssue);
+                    }
                 }
             }
 
@@ -3802,7 +3821,7 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeForDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -3810,11 +3829,17 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") Function func,
-            @Param(value = "program", defaultValue = "") Program program) {
-        return buildAnalyzeForDocumentationResult(program, func.getEntryPoint(), func.getName());
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "variant", defaultValue = "",
+                   description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.") String variant) {
+        // See analyze_function_complete: null means nothing contradicts the caller and
+        // the pseudocode field may travel.
+        return buildAnalyzeForDocumentationResult(program, func.getEntryPoint(), func.getName(),
+                ServiceUtils.variantRejectionData(program, variant));
     }
 
-    private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress) {
+    private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress,
+            Map<String, Object> variantIssue) {
         try {
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
@@ -3851,7 +3876,21 @@ public class AnalysisService {
                 decompResults.getDecompiledFunction() != null) {
                 String decompiledCode = decompResults.getDecompiledFunction().getC();
                 if (decompiledCode != null) {
-                    data.put("decompiled_code", decompiledCode);
+                    // Stamped like get_functions: the dialect that produced the C
+                    // travels with it, plus the ambiguity advisory where the loader
+                    // had a real choice to get wrong.
+                    //
+                    // variantIssue is non-null only when the caller NAMED a variant
+                    // the program contradicts. Withholding this one field, rather
+                    // than failing the whole composite, keeps the analysis useful
+                    // while closing the route that would otherwise hand out exactly
+                    // what get_functions just refused.
+                    if (variantIssue == null) {
+                        ServiceUtils.putLanguageSelection(data, program);
+                        data.put("decompiled_code", decompiledCode);
+                    } else {
+                        data.put("decompiled_code_withheld", variantIssue);
+                    }
                 }
             }
 
@@ -4580,7 +4619,7 @@ public class AnalysisService {
     }
 
     @McpTool(path = "/get_language_metadata",
-             description = "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+             description = "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. Also reports the SLEIGH variant the program is loaded under plus available_variants (each with the decoder it loads) and variant_ambiguous — true when the processor offers more than one SLEIGH decoder at this endian/size (PowerPC vs PowerPC VLE), meaning the loader guessed that column and decompiler output may be confidently wrong. variant_enumeration_failed is true when Ghidra's language table could not be walked at all, in which case variant_ambiguous reports ignorance rather than a single variant. This is where the legal variant= values are enumerated. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getLanguageMetadata(
             @Param(value = "include_registers", defaultValue = "true",
@@ -4597,6 +4636,17 @@ public class AnalysisService {
         out.put("endian", ld.getEndian().toString());
         out.put("size", ld.getSize());
         out.put("variant", ld.getVariant());
+        // Variant-selection surface for the decompile tools. variant_ambiguous is the
+        // same test they use to decide whether to attach the advisory, so a caller can
+        // ask the question up front instead of reading it off a decompile response. It
+        // counts DECODERS, not variant rows: x86's `default` and `System Management
+        // Mode` are one x86.sla configured two ways and are not worth flagging, while
+        // PowerPC's eleven variants load ten different decoders and are.
+        // available_variants enumerates the legal variant= values, each with the
+        // decoder it loads.
+        out.put("variant_ambiguous", ServiceUtils.variantAmbiguous(program));
+        out.put("variant_enumeration_failed", ServiceUtils.variantEnumerationFailed(program));
+        out.put("available_variants", ServiceUtils.languageVariantsAsJson(program));
         out.put("default_space", lang.getDefaultSpace() != null ? lang.getDefaultSpace().getName() : null);
         out.put("default_data_space", lang.getDefaultDataSpace() != null ? lang.getDefaultDataSpace().getName() : null);
         Register pc = lang.getProgramCounter();

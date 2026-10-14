@@ -220,7 +220,7 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response forceDecompile(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -228,8 +228,18 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") Function func,
-            @Param(value = "program", defaultValue = "") Program program) {
-        
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "variant", defaultValue = "",
+                   description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.") String variant) {
+
+        // The same check get_functions runs, and like it this fires only on a variant
+        // the caller named that the program contradicts. This endpoint is reached for
+        // when ordinary decompile output looks wrong, which is the moment a caller is
+        // most likely to be staring at wrong-variant C and treating it as a stale-cache
+        // problem -- so a mismatch here is worth catching more than anywhere else.
+        Response variantReject = ServiceUtils.variantGate(program, variant);
+        if (variantReject != null) return variantReject;
+
 
         ForceDecompileOutcome outcome;
         try {
@@ -290,6 +300,10 @@ public class FunctionService {
         out.put("status", "success");
         out.put("address", func.getEntryPoint().toString(false));
         out.put("name", outcome.functionName());
+        // The dialect that produced the code travels with it. Pseudocode with no
+        // record of the variant that decoded it cannot be audited after the fact,
+        // which is how a VLE-as-classic-PowerPC mistake survives review.
+        ServiceUtils.putLanguageSelection(out, program);
         out.put("decompiled", outcome.decompiledCode());
         return Response.ok(out);
     }

@@ -71,7 +71,14 @@ public class FunctionBundleService {
             + "code. Replaces get_function_by_address, get_function_variables, "
             + "get_function_xrefs, decompile_function, and the former "
             + "get_function_callers/callees/labels/signature tools. Completeness scoring is "
-            + "NOT included — call analyze_function_completeness for that.",
+            + "NOT included — call analyze_function_completeness for that. A bundle carrying "
+            + "decompiled_code or call_context is stamped with language_id + variant (in bulk "
+            + "mode, every entry), so the dialect that produced the C can be audited later; on "
+            + "a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC "
+            + "VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, "
+            + "because the loader GUESSED that column and a wrong guess returns confident, "
+            + "wrong C. Pass variant= to have that assumption checked rather than assumed: "
+            + "naming a variant the program is not loaded under is refused.",
         category = "function", access = ToolAccess.READ_ONLY)
     public Response getFunctions(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
@@ -110,7 +117,27 @@ public class FunctionBundleService {
             @Param(value = "include_disasm", defaultValue = "false",
                    description = "Include the raw instruction listing. Off by default: it roughly "
                                + "doubles the payload and agents rarely read it.") boolean includeDisasm,
-            @Param(value = "program", defaultValue = "") Program program) {
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "variant", defaultValue = "",
+                   description = "OPTIONAL assertion of the SLEIGH language variant you believe "
+                               + "this program is loaded under (e.g. default, "
+                               + "PowerISA-VLE-64-32addr, Cortex), or the full language id "
+                               + "(PowerPC:BE:64:VLE-32addr). Omit it and the call proceeds, any "
+                               + "decompiled_code or call_context labelled with whatever actually "
+                               + "ran. Supply it and it is CHECKED, in single and bulk mode alike: "
+                               + "naming a variant the program is not loaded under is refused "
+                               + "rather than answered, because the decompiler decodes with the "
+                               + "program's own language and cannot reinterpret the bytes under "
+                               + "another one. get_language_metadata reports variant, "
+                               + "available_variants and variant_ambiguous.") String variant) {
+
+        // Ahead of the bulk dispatch and of any field selection. The caller volunteered a
+        // belief about which dialect it is reading; if the program contradicts it, every
+        // field this endpoint could return -- the C, the call sites, the locals the
+        // decompiler named, the disassembly -- answers a different question than the one
+        // asked. Checked in one place so functions= cannot be the unchecked way around it.
+        Response variantReject = ServiceUtils.variantGate(program, variant);
+        if (variantReject != null) return variantReject;
 
         Set<String> fields;
         try {
