@@ -482,3 +482,37 @@ class TestUdsRequest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAuthenticatedDiscovery(unittest.TestCase):
+    def test_tcp_probe_sends_token_with_and_without_cancellation_handle(self):
+        from bridge_mcp_ghidra import discovery
+
+        received = []
+
+        class AuthHandler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                auth = self.headers.get("Authorization")
+                received.append(auth)
+                self.send_response(200 if auth == "Bearer fixture-token" else 401)
+                self.end_headers()
+                self.wfile.write(b'{"project":"Chosen","pid":1}')
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), AuthHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.object(transport, "AUTH_TOKEN", "fixture-token"):
+                for cancel in (None, state.RequestCancelHandle()):
+                    with self.subTest(cancel=cancel):
+                        result = discovery._probe_tcp_port(server.server_port, 2, cancel)
+                        self.assertIsNotNone(result)
+                        self.assertEqual(result[1]["project"], "Chosen")
+            self.assertEqual(received, ["Bearer fixture-token", "Bearer fixture-token"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
