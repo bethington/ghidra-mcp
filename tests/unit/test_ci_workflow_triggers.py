@@ -47,7 +47,7 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 # The repository's default branch. scorecard-action accepts no other push
 # trigger. Cross-checked against git's own `origin/HEAD` below wherever that
 # is resolvable, so this constant cannot quietly go stale on a dev machine.
-DEFAULT_BRANCH = "main"
+DEFAULT_BRANCH = "dev"
 
 # Branches that must be covered by the test + code-scanning workflows. `main` is
 # the release branch; `dev` is where the work happens, so it is the one whose

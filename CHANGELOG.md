@@ -8,6 +8,12 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — Scorecard push trigger follows the default dev branch
+
+Scorecard's push filter and its test constant still named `main` while the
+repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
+and the existing check against `origin/HEAD` passes on a fresh clone.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for
