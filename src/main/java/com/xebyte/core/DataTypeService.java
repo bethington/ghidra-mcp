@@ -2404,6 +2404,25 @@ public class DataTypeService {
         return suggestions;
     }
 
+    /** Parse the ARRAY count, including Gson's Double representation of JSON numbers. */
+    static int arrayClassificationCount(Map<String, Object> typeDef) {
+        int count = 1;
+        if (typeDef.containsKey("count")) {
+            Object countObj = typeDef.get("count");
+            if (countObj instanceof Number n) {
+                count = n.intValue();
+            } else if (countObj instanceof String s) {
+                count = Integer.parseInt(s);
+            }
+        } else {
+            throw new IllegalArgumentException("ARRAY type_definition must contain 'count' field");
+        }
+        if (count <= 0) {
+            throw new IllegalArgumentException("Array count must be positive, got: " + count);
+        }
+        return count;
+    }
+
     /**
      * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
      */
@@ -2542,7 +2561,6 @@ public class DataTypeService {
                         }
 
                         DataType elementType = null;
-                        int count = 1;
 
                         // Support element_type or element_struct
                         if (typeDef.containsKey("element_type")) {
@@ -2562,20 +2580,7 @@ public class DataTypeService {
                                 "ARRAY type_definition must contain 'element_type' or 'element_struct'");
                         }
 
-                        if (typeDef.containsKey("count")) {
-                            Object countObj = typeDef.get("count");
-                            if (countObj instanceof Integer) {
-                                count = (Integer) countObj;
-                            } else if (countObj instanceof String) {
-                                count = Integer.parseInt((String) countObj);
-                            }
-                        } else {
-                            throw new IllegalArgumentException("ARRAY type_definition must contain 'count' field");
-                        }
-
-                        if (count <= 0) {
-                            throw new IllegalArgumentException("Array count must be positive, got: " + count);
-                        }
+                        int count = arrayClassificationCount(typeDef);
 
                         ArrayDataType arrayType = new ArrayDataType(elementType, count, elementType.getLength());
                         dataTypeToApply = arrayType;
