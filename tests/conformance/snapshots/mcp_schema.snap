@@ -3683,7 +3683,7 @@
         },
         {
           "default": "",
-          "description": "External library name (as list_imports / list_external_locations report it) to scope the search to. Omit to scan every library. It narrows the search only — it cannot select an entry by itself.",
+          "description": "External library name (as list_program_items(kind=imports) or kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the search only — it cannot select an entry by itself.",
           "name": "dll_name",
           "required": false,
           "source": "query",
@@ -5305,15 +5305,14 @@
     },
     {
       "category": "headless",
-      "category_description": "Headless server program management (no GUI required)",
-      "description": "Open a Ghidra project: a local .gpr/directory, or a shared Ghidra Server repository via ghidra://host[:port]/repo (creates a persistent local shared project under ~/.ghidra-mcp/shared-projects/ keyed by host_port_repo, overridable with GHIDRA_MCP_SHARED_PROJECT_DIR). Does not auto-open repository files — max ~5 shared-server programs open at once; opening 20+ crashes Ghidra. Requires /server/connect first for URL opens. The local tree mirrors YOUR working copy (not other users' checkins until you refresh).",
+      "description": "Open a Ghidra project: local .gpr/directory, or ghidr<PATH>//host[:port]/repo (persistent shared project; does not auto-open repo files — max ~5 shared programs). GUI mode adds optional `headless` (default true) and `program`; the headless server ignores those. Local tree mirrors YOUR working copy.",
       "destructive": false,
       "method": "POST",
       "params": [
         {
-          "description": "Path to an existing project: either its .gpr file, the project directory holding it, or a ghidra://host[:port]/repo URL for a shared Ghidra Server repository.",
+          "description": "Path to the project: its .gpr file or the project directory holding it.",
           "name": "path",
-          "required": true,
+          "required": false,
           "source": "body",
           "type": "string"
         },
@@ -5836,7 +5835,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_function_variables and decompile_function report, not the raw listing's.",
+          "description": "JSON object mapping each variable's CURRENT decompiler name to its new name. Matching happens against the decompiler's high-level symbols, so use the names get_functions reports (parameters, locals, decompiled_code), not the raw listing's.",
           "name": "variable_renames",
           "required": true,
           "source": "body",
@@ -7138,7 +7137,7 @@
           "aliases": [
             "parameter_name"
           ],
-          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_function_variables lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
+          "description": "Local or parameter to retype, named exactly as the decompiler shows it (get_functions fields=parameters,locals lists them). The literal value 'this' is special-cased and routes to set_function_this_type.",
           "name": "variable_name",
           "required": true,
           "source": "body",

@@ -6,7 +6,7 @@
     "release"
   ],
   "result": "passed",
-  "source_fingerprint": "c3030c4a7db1c9060303535cd6bd2a14aa44f6c28f0d7e3ba4b10e3ccd530a58",
+  "source_fingerprint": "4d786f8d0a65be1d71f35f3dff15629836fd66927ce578d59196249e13524c7c",
   "fingerprinted_paths": [
     "src/main/java",
     "python/bridge_mcp_ghidra",
@@ -17,5 +17,5 @@
     "build.gradle"
   ],
   "ghidra_version": "12.1.4",
-  "recorded_utc": "2026-10-08T14:03:32Z"
+  "recorded_utc": "2026-10-14T01:16:03Z"
 }
