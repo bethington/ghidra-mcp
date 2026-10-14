@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — native JSON values reach Java Object parameters through MCP
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for

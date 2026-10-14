@@ -1,5 +1,7 @@
 """Schema parsing — converts the upstream /mcp/schema to internal tool defs."""
 
+from typing import Any
+
 from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES
 from .validation import sanitize_tool_name, _allocate_tool_name
 
@@ -12,7 +14,9 @@ _TYPE_MAP = {
     "number": float,
     "object": dict,
     "array": list,
-    "any": str,
+    # Java Object bindings accept native JSON values. A str annotation makes
+    # FastMCP reject objects/arrays before the request can reach the server.
+    "any": Any,
     "address": str,
 }
 
