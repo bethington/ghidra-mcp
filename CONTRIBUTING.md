@@ -21,6 +21,20 @@ If your team depends on Ghidra MCP in production or client work, please consider
 [sponsoring the project](https://github.com/sponsors/bethington) to help fund
 maintenance and compatibility updates.
 
+## What is stable, and where your PR goes
+
+| What you are running | Level | What that means |
+| --- | --- | --- |
+| A tagged release (7.0.0, 7.1.0, ...) | Stable | A bug is a bug. Fixes ship as patch releases. |
+| A release candidate, or `main` | Beta | Feature-complete for that release and live-tested, but tool shapes can still change before final. Reports here help most. |
+| `dev` | Experimental | Tools are merged, renamed and refactored freely. Build nothing on its API. |
+
+**Open PRs against `dev`.** A release line in flight lives on a `release/X.Y`
+branch cut from `main` (7.0.0 is cut from `release/7.0`); only the maintainer
+targets one, and it is merged back into `dev` after the tag. If you are not sure
+whether something you hit is a bug or still settling, say which of the three you
+are running when you report it.
+
 ## How this project uses AI
 
 To be upfront: AI tooling assists with code, reviews, and drafting on this
