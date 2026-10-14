@@ -999,7 +999,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation
+- `force_decompile` - Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)
 - `get_functions` - Everything about one or many functions in a single call
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
@@ -1079,7 +1079,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_control_flow` - Analyze control flow
 - `analyze_data_region` - Analyze data region
 - `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
-- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
+- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness); decompiled_code is stamped with language_id + variant, and withheld if a supplied variant= contradicts the program
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
 - `apply_documentation` - Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...])
