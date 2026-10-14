@@ -702,7 +702,9 @@ public class AnnotationScanner {
     // ==================================================================
 
     private static int exactInt(Object value, int defaultValue, boolean hasDefault, String name) {
-        if (value == null && hasDefault) return defaultValue;
+        // An empty query value ("?limit=") means "not given", as it always did.
+        boolean absent = value == null || value instanceof String text && text.isEmpty();
+        if (absent && hasDefault) return defaultValue;
         try {
             if (value instanceof Number || value instanceof String) {
                 return new java.math.BigDecimal(value.toString()).intValueExact();
