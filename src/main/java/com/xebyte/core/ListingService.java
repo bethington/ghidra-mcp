@@ -786,6 +786,14 @@ public class ListingService {
 
     @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of entries to skip before this page starts; 0 begins at the "
+                               + "first entry. Page by adding `limit` each call until offset reaches the "
+                               + "`total` the response reports.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
+                               + "negative value for no limit; `total` in the response always reports the "
+                               + "full unpaged count.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> entryPoints = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
@@ -853,7 +861,7 @@ public class ListingService {
             }
         }
 
-        return ServiceUtils.listed("entry_points", entryPoints);
+        return ServiceUtils.paged("entry_points", entryPoints, offset, limit);
     }
 
     // ========================================================================

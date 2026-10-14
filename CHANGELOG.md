@@ -45,6 +45,16 @@ still skips/takes). Explicit `limit <= 0` is unbounded (the `@Param` default sta
 tool's own, e.g. 100 for property maps). Responses gain `count`; `/list_class_members`
 reports `total` instead of `total_members`. Documented REJECT limits elsewhere are unchanged.
 
+### Changed — `/list_bookmarks` and `/get_entry_points` page like every other listing
+
+The last two unpaged list routes now take `offset` (default 0) / `limit`
+(default 100, `<= 0` unbounded) and answer through `ServiceUtils.paged`
+(`count`/`offset`/`limit`/`total`). `/list_bookmarks` previously returned
+every bookmark in one envelope (16k-bookmark programs observed in the
+field); its response drops the redundant `"success": true` flag, matching
+the other paged listings — absence of an error is the success signal.
+`tests/endpoints.json` regenerated.
+
 ### Changed — exception error texts no longer read `"null"`
 
 Tool catch tails go through `ServiceUtils.fail` / `failureMessage`: when an exception has no

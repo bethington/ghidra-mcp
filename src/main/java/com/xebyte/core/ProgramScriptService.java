@@ -3128,6 +3128,14 @@ if (map instanceof ObjectPropertyMap) {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") Address addr,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of entries to skip before this page starts; 0 begins at the "
+                               + "first entry. Page by adding `limit` each call until offset reaches the "
+                               + "`total` the response reports.") int offset,
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum entries returned in this page (default 100). Pass 0 or a "
+                               + "negative value for no limit; `total` in the response always reports the "
+                               + "full unpaged count.") int limit,
             @Param(value = "program", defaultValue = "") Program program) {
 
         try {
@@ -3166,11 +3174,7 @@ if (map instanceof ObjectPropertyMap) {
                 }
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "bookmarks", bookmarks,
-                "count", bookmarks.size()
-            ));
+            return ServiceUtils.paged("bookmarks", bookmarks, offset, limit);
 
         } catch (Exception e) {
             return ServiceUtils.fail(e);

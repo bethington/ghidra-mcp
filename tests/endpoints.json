@@ -1550,6 +1550,8 @@
       "method": "GET",
       "category": "listing",
       "params": [
+        "offset",
+        "limit",
         "program"
       ],
       "servers": [
@@ -1974,6 +1976,8 @@
       "params": [
         "category",
         "address",
+        "offset",
+        "limit",
         "program"
       ],
       "servers": [
