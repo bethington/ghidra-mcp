@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
@@ -17,9 +18,13 @@ import java.util.Set;
  * {@code get_function_callers} + {@code get_comment} + {@code get_function_xrefs} — and
  * every write forced the agent to re-read to see its effect. This endpoint collapses that
  * into one call backed by **one** decompilation, which matters because the plugin has no
- * decompiler cache: each decompile builds and disposes a fresh {@code DecompInterface}, so
- * two bundled reads composed from existing endpoints would decompile the same function
- * twice.
+ * decompiler cache across requests: two bundled reads composed from existing endpoints would
+ * decompile the same function twice.
+ *
+ * <p>Within one call -- single or bulk -- every decompile, targets and call_context callers
+ * alike, goes through one {@link RequestScopedDecompiler}: one {@code DecompInterface} for
+ * the request (~238 ms to open, 5-10 ms per decompile after, #575) and one result per entry
+ * point, so a caller shared by several targets is decompiled once.
  *
  * <p>It also carries {@code call_context} — a window of the caller's actual decompiled
  * source centred on the call, three lines by default, because the line that decides whether
@@ -50,12 +55,22 @@ public class FunctionBundleService {
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private final FunctionService functionService;
+    /** Opens the request's decompiler. A seam so a test can count how many one call opens. */
+    private final java.util.function.Function<Program, DecompInterface> decompilerOpener;
 
     public FunctionBundleService(ProgramProvider programProvider,
             ThreadingStrategy threadingStrategy, FunctionService functionService) {
+        this(programProvider, threadingStrategy, functionService,
+            p -> ServiceUtils.createConfiguredDecompiler(p, FunctionFacts::configureDecompiler));
+    }
+
+    FunctionBundleService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
+            FunctionService functionService,
+            java.util.function.Function<Program, DecompInterface> decompilerOpener) {
         this.programProvider = programProvider;
         this.threadingStrategy = threadingStrategy;
         this.functionService = functionService;
+        this.decompilerOpener = decompilerOpener;
     }
 
     @McpTool(path = "/get_functions",
@@ -153,27 +168,33 @@ public class FunctionBundleService {
         final int ctxLines = Math.clamp(callContextLines, 1, MAX_CALL_CONTEXT_LINES);
         final Set<String> resolvedFields = fields;
 
-        if (functionsParam != null && !functionsParam.isBlank()) {
-            return getFunctionsBulk(program, functionsParam, resolvedFields, includeCallContext,
-                ctxLimit, ctxLines, includeDisasm);
-        }
+        // One decompiler for this whole call, opened on first use and disposed here, on the
+        // request thread that used it.
+        try (RequestScopedDecompiler decompiler = new RequestScopedDecompiler(
+                () -> decompilerOpener.apply(program),
+                FunctionService.NO_RETRY_DECOMPILE_TIMEOUT_SECONDS)) {
+            if (functionsParam != null && !functionsParam.isBlank()) {
+                return getFunctionsBulk(program, functionsParam, resolvedFields, includeCallContext,
+                    ctxLimit, ctxLines, includeDisasm, decompiler);
+            }
 
-        if (func == null) {
-            return Response.err("function name or address required (or pass functions= for bulk)");
-        }
+            if (func == null) {
+                return Response.err("function name or address required (or pass functions= for bulk)");
+            }
 
-        try {
-            return Response.ok(buildBundle(program, func, resolvedFields, includeCallContext,
-                ctxLimit, ctxLines, includeDisasm));
-        } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to build bundle for " + func.getName() + ": " + msg);
+            try {
+                return Response.ok(buildBundle(program, func, resolvedFields, includeCallContext,
+                    ctxLimit, ctxLines, includeDisasm, decompiler));
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                return Response.err("Failed to build bundle for " + func.getName() + ": " + msg);
+            }
         }
     }
 
     private Response getFunctionsBulk(Program program, String functionsParam, Set<String> fields,
             boolean includeCallContext, int callContextLimit, int callContextLines,
-            boolean includeDisasm) {
+            boolean includeDisasm, FunctionFacts.Decompiler decompiler) {
         List<String> refs = ServiceUtils.csvTokens(functionsParam);
         Map<String, Object> out = new LinkedHashMap<>();
         Map<String, Object> functions = new LinkedHashMap<>();
@@ -193,7 +214,7 @@ public class FunctionBundleService {
             Function func = lookup.function();
             try {
                 functions.put(funcRef, buildBundle(program, func, fields, includeCallContext,
-                    callContextLimit, callContextLines, includeDisasm));
+                    callContextLimit, callContextLines, includeDisasm, decompiler));
                 resolved++;
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -235,11 +256,11 @@ public class FunctionBundleService {
 
     private Map<String, Object> buildBundle(Program program, Function func,
             Set<String> fields, boolean includeCallContext, int callContextLimit,
-            int callContextLines, boolean includeDisasm) {
+            int callContextLines, boolean includeDisasm, FunctionFacts.Decompiler decompiler) {
         return FunctionFacts.build(program, func,
             new FunctionFacts.Options(fields, includeCallContext, callContextLimit, callContextLines,
                 includeDisasm),
-            f -> functionService.decompileFunctionNoRetry(f, program, FunctionFacts::configureDecompiler));
+            decompiler);
     }
 
     /** Whether a {@code fields=} subset pays for target decompilation. */

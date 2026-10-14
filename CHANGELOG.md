@@ -8,6 +8,21 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Performance — `get_functions` opens one decompiler per call (#575)
+
+Every decompile in a `get_functions` call -- each target and each caller decompiled for
+`call_context` -- used to open and dispose its own `DecompInterface` (~238 ms to open, 5-10 ms
+per decompile on an open one), so a 20-function bulk read with call context opened one per
+target plus one per (target, caller) pair. The call now opens one decompiler on first use,
+reuses it for the whole request in single and bulk mode, and disposes it before returning; a
+`fields=` subset that decompiles nothing opens none. Results are kept per entry point for the
+request, so a caller shared by several targets is decompiled once. A decompile that does not
+complete (timeout, dead process, exception) disposes the interface and the next one reopens,
+so one bad function cannot fail the rest of a bulk call. Options and the 12 s per-decompile
+timeout are unchanged, and so is every response field. Measured on the real-Ghidra tier
+(`RequestScopedDecompilerGhidraTest`, 20 leaf targets + 10 shared callers,
+`fields=decompiled_code,call_context`): 14.5 s -> 0.32 s.
+
 ### Changed — empty boolean env values mean unset
 
 `GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to

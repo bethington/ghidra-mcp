@@ -63,7 +63,8 @@ public class FunctionService {
     //   4 * 12s = 48s < 60s client timeout. Pathological functions that
     //   need >12s are treated as "too complex to score" — an acceptable
     //   trade since they also pin the HTTP thread pool under any longer cap.
-    private static final int NO_RETRY_DECOMPILE_TIMEOUT_SECONDS = 12;
+    //   Package-private so /get_functions' request-scoped decompiler uses the same cap.
+    static final int NO_RETRY_DECOMPILE_TIMEOUT_SECONDS = 12;
 
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
