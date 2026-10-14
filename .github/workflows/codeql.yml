@@ -18,9 +18,9 @@ name: CodeQL
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'release/**']
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, 'release/**']
   schedule:
     # Weekly scan — separate from push-triggered runs so a quiet
     # repo still gets fresh analysis as rules update.
