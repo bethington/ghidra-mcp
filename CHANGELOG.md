@@ -23,6 +23,16 @@ timeout are unchanged, and so is every response field. Measured on the real-Ghid
 (`RequestScopedDecompilerGhidraTest`, 20 leaf targets + 10 shared callers,
 `fields=decompiled_code,call_context`): 14.5 s -> 0.32 s.
 
+### Added — startup project selection
+
+`--project NAME` (or `GHIDRA_MCP_PROJECT`) selects an exact project name before
+initial tool discovery, including when several Ghidra instances are running.
+The flag overrides the environment, and background retries retain the selector.
+Missing or ambiguous matches stay disconnected instead of falling back to another
+project. Discovery checks both transports and deduplicates listeners of the same
+instance; TCP probes send the configured authentication token. Existing auto-connect
+selection is unchanged when no selector is supplied.
+
 ### Changed — empty boolean env values mean unset
 
 `GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to

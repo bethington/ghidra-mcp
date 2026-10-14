@@ -544,7 +544,15 @@ def main():
         "and no server-initiated notifications. Needed to run several bridge "
         "workers behind a load balancer.",
     )
+    parser.add_argument(
+        "--project",
+        default=(os.getenv("GHIDRA_MCP_PROJECT") or "").strip() or None,
+        help="Exact project name to connect on startup (env: GHIDRA_MCP_PROJECT)",
+    )
     args = parser.parse_args()
+    project = args.project.strip() if args.project is not None else None
+    if args.project is not None and not project:
+        parser.error("--project / GHIDRA_MCP_PROJECT must not be blank")
 
     # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_LAZY decides, and
     # only then the built-in default. Argparse leaves args.lazy as None when
@@ -573,12 +581,12 @@ def main():
             "nextCursor will see only the first page",
             args.tools_page_size,
         )
-    if not _auto_connect():
+    if not _auto_connect(project=project):
         # Ghidra may simply not be up yet. Keep looking in the background so a
         # bridge that wins the startup race still gets its tools, instead of
         # serving only the static ones for the life of the process.
         logger.info("No Ghidra tools registered at startup; retrying in the background")
-        _start_auto_connect_retry()
+        _start_auto_connect_retry(project=project)
 
     mcp.settings.log_level = "INFO"
     mcp.settings.host = args.mcp_host

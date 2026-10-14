@@ -35,7 +35,7 @@ class _CliHarness(unittest.TestCase):
         mcp.settings.host = self._saved_host
         mcp.settings.port = self._saved_port
 
-    def run_main(self, *argv, env=None):
+    def run_main(self, *argv, env=None, connected=True):
         """Invoke cli.main() with the given argv; returns the mocks.
 
         Returns a dict with the ``mcp.run`` mock (stdio path), the
@@ -43,7 +43,8 @@ class _CliHarness(unittest.TestCase):
         """
         patches = [
             patch.object(sys, "argv", ["bridge-mcp-ghidra", *argv]),
-            patch.object(cli, "_auto_connect"),
+            patch.object(cli, "_auto_connect", return_value=connected),
+            patch.object(cli, "_start_auto_connect_retry"),
             patch.object(mcp, "run"),
             patch.object(cli.uvicorn, "run"),
             patch.object(cli, "_build_http_app"),
@@ -62,12 +63,16 @@ class _CliHarness(unittest.TestCase):
             started.append(p.start())
         if "GHIDRA_MCP_LAZY" not in effective_env:
             os.environ.pop("GHIDRA_MCP_LAZY", None)
+        if "GHIDRA_MCP_PROJECT" not in effective_env:
+            os.environ.pop("GHIDRA_MCP_PROJECT", None)
         try:
             cli.main()
             return {
-                "mcp_run": started[2],
-                "uvicorn_run": started[3],
-                "build_app": started[4],
+                "auto_connect": started[1],
+                "retry": started[2],
+                "mcp_run": started[3],
+                "uvicorn_run": started[4],
+                "build_app": started[5],
             }
         finally:
             for p in patches:
@@ -83,6 +88,26 @@ class TestCliArguments(_CliHarness):
         mocks["mcp_run"].assert_called_once_with(transport="stdio")
         mocks["uvicorn_run"].assert_not_called()
         self.assertTrue(state._lazy_mode)
+
+    def test_project_flag_overrides_environment(self):
+        mocks = self.run_main("--project", "Chosen", env={"GHIDRA_MCP_PROJECT": "Other"})
+        mocks["auto_connect"].assert_called_once_with(project="Chosen")
+
+    def test_project_environment_fallback(self):
+        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " Chosen "})
+        mocks["auto_connect"].assert_called_once_with(project="Chosen")
+
+    def test_empty_project_environment_is_unset(self):
+        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " "})
+        mocks["auto_connect"].assert_called_once_with(project=None)
+
+    def test_blank_project_flag_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("--project", " ", env={"GHIDRA_MCP_PROJECT": "Other"})
+
+    def test_project_is_passed_to_background_retry(self):
+        mocks = self.run_main("--project", "Chosen", connected=False)
+        mocks["retry"].assert_called_once_with(project="Chosen")
 
     def test_lazy_flag_sets_lazy_mode(self):
         self.run_main("--lazy")

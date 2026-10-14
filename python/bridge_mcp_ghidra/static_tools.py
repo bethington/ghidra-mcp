@@ -648,18 +648,17 @@ async def import_file(
     return result
 
 
-def _auto_connect() -> bool:
-    """Try to auto-connect to a single running instance on startup.
-
-    Returns True only if dynamic tools were actually registered from a live
-    Ghidra. Callers use that to decide whether to keep retrying in the
-    background — see `_start_auto_connect_retry`.
-    """
+def _auto_connect(project: str | None = None) -> bool:
+    """Return True after connecting and registering tools for a unique instance."""
     # Try UDS first
     instances = discovery.discover_instances()
+    if project is not None:
+        instances = discovery.find_project_instances(project, instances)
+        if len(instances) != 1:
+            return False
     if len(instances) == 1:
         inst = instances[0]
-        if transport.uds_supported():
+        if inst.get("socket") and transport.uds_supported():
             candidate = state.build_connection_snapshot(
                 mode="uds",
                 active_socket=inst["socket"],
@@ -722,6 +721,10 @@ def _auto_connect() -> bool:
         # matching connect_instance's own multi-instance refusal logic.
         return False
 
+    if project is not None:
+        # Never fall back to an unrelated listener after selecting a project.
+        return False
+
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
     if not validate_server_url(tcp_url):
@@ -755,7 +758,9 @@ def _auto_connect() -> bool:
 AUTO_CONNECT_RETRY_INTERVAL_SEC = 15.0
 
 
-def _start_auto_connect_retry(interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC) -> threading.Thread:
+def _start_auto_connect_retry(
+    interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC, *, project: str | None = None
+) -> threading.Thread:
     """Retry `_auto_connect()` in the background until Ghidra shows up.
 
     `_auto_connect()` runs exactly once during startup, so a bridge launched
@@ -777,7 +782,7 @@ def _start_auto_connect_retry(interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC)
                 # connect_instance call) — nothing left to retry.
                 return
             try:
-                connected = _auto_connect()
+                connected = _auto_connect(project=project) if project is not None else _auto_connect()
             except Exception as e:  # never let the retry thread die silently
                 logger.debug(f"Auto-connect retry attempt failed: {e}")
                 continue
