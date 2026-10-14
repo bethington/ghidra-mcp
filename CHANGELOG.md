@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — ARRAY classification honors numeric JSON counts
+
+`apply_data_classification` handled `count` only as an Integer or string,
+but Gson represents JSON numbers as Double. A request with `count: 64`
+therefore applied a one-element array and reported success; numeric zero and
+negative counts also became one. Numeric counts now use Number conversion
+before the existing positive-count validation. String counts still work.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for
