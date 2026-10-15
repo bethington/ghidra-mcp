@@ -2572,7 +2572,7 @@
     },
     {
       "category": "decompile-tree",
-      "description": "Deregister a tree; with delete_files=true also remove the files it wrote, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched.",
+      "description": "Deregister a tree; with delete_files=true also remove the files it recorded writing, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched.",
       "destructive": true,
       "method": "POST",
       "params": [
@@ -2585,7 +2585,7 @@
         },
         {
           "default": "false",
-          "description": "When true, delete the files the tree wrote.",
+          "description": "When true, delete the files the tree recorded writing.",
           "name": "delete_files",
           "required": false,
           "source": "body",

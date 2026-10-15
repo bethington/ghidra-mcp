@@ -151,29 +151,12 @@ public final class TreeLayout {
         return "index/addresses.tsv";
     }
 
-    private static final java.util.Set<String> FIXED_FILES = java.util.Set.of(
-            treeJson(), statusMd(), readmeMd(), agentsMd(), callgraphTsv(),
-            modulesIndexMd(), byAddressTsv(), partitionsJson(), legacyAddressesTsv());
-
     /**
-     * True when {@code relative} (separated by {@code /}) is a path the tree writes, or the
-     * {@code .tmp} sibling an interrupted atomic write leaves. A root can hold the caller's own
-     * files too, and deleting a tree must not take them with it, so this is the rule for what
-     * a delete may remove.
+     * Append-only record of every relative path {@link TreeRoot} has written. Delete removes
+     * exactly these paths (and their {@code .tmp} siblings), never a name-matched lookalike.
      */
-    public static boolean isTreeFile(String relative) {
-        String rel = relative.endsWith(".tmp")
-                ? relative.substring(0, relative.length() - ".tmp".length())
-                : relative;
-        if (FIXED_FILES.contains(rel)) {
-            return true;
-        }
-        if (isModuleFile(rel)) {
-            return true;
-        }
-        String[] parts = rel.split("/", -1);
-        return parts.length == 3 && parts[0].equals("modules") && isValidSlug(parts[1])
-                && parts[2].equals("README.md");
+    public static String manifest() {
+        return "index/manifest.txt";
     }
 
     /**

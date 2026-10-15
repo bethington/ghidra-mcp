@@ -645,15 +645,15 @@ public class DecompTreeService {
 
     @McpTool(path = "/decompile_tree_delete", dryRun = false, method = "POST",
         description = "Deregister a tree; with delete_files=true also remove the files it "
-            + "wrote, then the directories that leaves empty. Anything else under the root "
-            + "stays and is listed under kept. The program itself is untouched.",
+            + "recorded writing, then the directories that leaves empty. Anything else under "
+            + "the root stays and is listed under kept. The program itself is untouched.",
         category = "decompile-tree", access = ToolAccess.DESTRUCTIVE)
     public Response treeDelete(
             @Param(value = "tree", source = ParamSource.BODY,
                    description = "DecompTree id, program name, or domain path.")
             String treeSelector,
             @Param(value = "delete_files", source = ParamSource.BODY, defaultValue = "false",
-                   description = "When true, delete the files the tree wrote.")
+                   description = "When true, delete the files the tree recorded writing.")
             boolean deleteFiles) {
 
         RequiredTree required = RequiredTree.of(treeSelector);

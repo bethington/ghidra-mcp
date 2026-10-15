@@ -1240,7 +1240,7 @@ When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_U
 
 - `decompile_tree_configure` - Change a tree's configuration: exclusions (tag: / partition: / range:), enabled strategies, band size, max file bytes, throttle
 - `decompile_tree_create` - Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob
-- `decompile_tree_delete` - Deregister a tree; with delete_files=true also remove the files it wrote, then the directories that leaves empty
+- `decompile_tree_delete` - Deregister a tree; with delete_files=true also remove the files it recorded writing, then the directories that leaves empty
 - `decompile_tree_pin_module` - Pin a function to a tree compartment forever
 - `decompile_tree_run` - Start or stop the sweep that fills a tree
 - `decompile_tree_status` - Status, config and root path of a decompilation tree — poll this after decompile_tree_run(action=start), then Grep the reported root

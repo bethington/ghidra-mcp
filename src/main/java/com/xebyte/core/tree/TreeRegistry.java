@@ -462,8 +462,8 @@ public final class TreeRegistry {
     }
 
     /**
-     * Deregister {@code id}, and with {@code deleteFiles} remove the files it wrote
-     * ({@link TreeRoot#deleteTree}). Null when no tree has that id.
+     * Deregister {@code id}, and with {@code deleteFiles} remove the files it recorded
+     * writing ({@link TreeRoot#deleteTree}). Null when no tree has that id.
      */
     public synchronized TreeRoot.DeleteResult delete(String id, boolean deleteFiles)
             throws IOException {
