@@ -21,6 +21,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Resolved tree root plus safe, recreate-tolerant writing.
@@ -46,6 +47,10 @@ public final class TreeRoot {
     private boolean established;
     /** Lazily loaded from {@link TreeLayout#manifest()}; null until first read or write. */
     private Set<String> written;
+    /** Set by {@link #deleteTree}; every later write fails instead of recreating the root. */
+    private volatile boolean deleted;
+    /** Writes hold the read side, {@link #deleteTree} the write side: none straddles a delete. */
+    private final ReentrantReadWriteLock writers = new ReentrantReadWriteLock();
 
     private TreeRoot(Path root) {
         this.root = root.toAbsolutePath().normalize();
@@ -109,6 +114,12 @@ public final class TreeRoot {
         return rootRecreated;
     }
 
+    private void requireOpen() throws IOException {
+        if (deleted) {
+            throw new IOException("tree root deleted: " + root);
+        }
+    }
+
     public void writeFile(Path relative, String content) throws IOException {
         writeFile(relative, content.getBytes(StandardCharsets.UTF_8));
     }
@@ -119,17 +130,23 @@ public final class TreeRoot {
         if (relative.isAbsolute()) {
             throw new IllegalArgumentException("relative path must not be absolute: " + relative);
         }
+        writers.readLock().lock();
         try {
-            writeFileOnce(relative, content);
-        } catch (NoSuchFileException first) {
-            // TOCTOU: directory vanished between createDirectories and write.
-            recreateRoot();
+            requireOpen();
             try {
                 writeFileOnce(relative, content);
-            } catch (NoSuchFileException second) {
-                throw new IOException(
-                        "tree root vanished and recreate failed: " + root, second);
+            } catch (NoSuchFileException first) {
+                // TOCTOU: directory vanished between createDirectories and write.
+                recreateRoot();
+                try {
+                    writeFileOnce(relative, content);
+                } catch (NoSuchFileException second) {
+                    throw new IOException(
+                            "tree root vanished and recreate failed: " + root, second);
+                }
             }
+        } finally {
+            writers.readLock().unlock();
         }
     }
 
@@ -196,9 +213,15 @@ public final class TreeRoot {
 
     /** Ensure the root directory exists (e.g. before first status write). */
     public void ensureExists() throws IOException {
-        Files.createDirectories(root);
-        synchronized (this) {
-            established = true;
+        writers.readLock().lock();
+        try {
+            requireOpen();
+            Files.createDirectories(root);
+            synchronized (this) {
+                established = true;
+            }
+        } finally {
+            writers.readLock().unlock();
         }
     }
 
@@ -210,7 +233,15 @@ public final class TreeRoot {
      * Used by {@code /decompile_tree_delete?delete_files=true}.
      */
     public DeleteResult deleteTree() throws IOException {
-        return deleteTreeFiles(root);
+        // Writes check the flag under the read lock, so once the write lock is held every
+        // write either finished before this or fails after it; none recreates the root.
+        deleted = true;
+        writers.writeLock().lock();
+        try {
+            return deleteTreeFiles(root);
+        } finally {
+            writers.writeLock().unlock();
+        }
     }
 
     /** What {@link #deleteTree} removed and what it left in place. */

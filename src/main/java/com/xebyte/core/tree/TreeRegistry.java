@@ -463,7 +463,10 @@ public final class TreeRegistry {
 
     /**
      * Deregister {@code id}, and with {@code deleteFiles} remove the files it recorded
-     * writing ({@link TreeRoot#deleteTree}). Null when no tree has that id.
+     * writing ({@link TreeRoot#deleteTree}). Cancels the tree's sweep and queued dirty work
+     * first; {@link TreeRoot#deleteTree} then waits for any write already in flight, and
+     * every later one fails, so a sweep still unwinding cannot bring the tree back.
+     * Null when no tree has that id.
      */
     public synchronized TreeRoot.DeleteResult delete(String id, boolean deleteFiles)
             throws IOException {
@@ -471,6 +474,8 @@ public final class TreeRegistry {
         if (removed == null) {
             return null;
         }
+        cancelSweep(id, "tree deleted");
+        dirtyQueue.clear(id);
         // Drop the listener before the tree — a deleted tree must not keep
         // splicing into a path that no longer exists.
         detachObserver(id);

@@ -181,6 +181,73 @@ public class TreeRegistryTest {
         assertFalse(registry.resolve(c.id()).isOk());
     }
 
+    /**
+     * A delete while the sweep executor still holds work for the tree leaves the root gone:
+     * the work's write after the delete fails instead of recreating it.
+     */
+    @Test
+    public void deleteCancelsRunningWorkAndRootStaysGone() throws Exception {
+        TreeRegistry registry = TreeRegistry.getInstance();
+        DecompTree tree = registry.create(
+                "/x/hold.exe",
+                "hold.exe",
+                TreeConfig.defaults().withRootPath(tempA.toAbsolutePath().toString()));
+        tree.root().writeFile(Path.of("tree.json"), "{}");
+        Path rootPath = tree.root().path();
+        String id = tree.id();
+
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Throwable> writeError = new AtomicReference<>();
+        CountDownLatch jobDone = new CountDownLatch(1);
+        registry.enqueue(() -> {
+            try {
+                started.countDown();
+                if (!release.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("release timed out");
+                }
+                try {
+                    tree.root().writeFile(Path.of("STATUS.md"), "resurrected\n");
+                } catch (Throwable t) {
+                    writeError.set(t);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                jobDone.countDown();
+            }
+        });
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+
+        CountDownLatch deleteStarted = new CountDownLatch(1);
+        AtomicReference<TreeRoot.DeleteResult> deleted = new AtomicReference<>();
+        AtomicReference<Exception> deleteError = new AtomicReference<>();
+        Thread deleter = new Thread(() -> {
+            deleteStarted.countDown();
+            try {
+                deleted.set(registry.delete(id, true));
+            } catch (Exception e) {
+                deleteError.set(e);
+            }
+        }, "tree-delete-test");
+        deleter.start();
+        assertTrue(deleteStarted.await(5, TimeUnit.SECONDS));
+        // The job is still running and has not written yet: delete must finish without it.
+        deleter.join(10_000);
+        release.countDown();
+        assertTrue(jobDone.await(5, TimeUnit.SECONDS));
+
+        assertTrue("delete must not fail: " + deleteError.get(), deleteError.get() == null);
+        assertNotNull(deleted.get());
+        assertTrue(registry.byId(id) == null);
+        assertFalse("root must be gone after delete_files", Files.exists(rootPath));
+        assertNotNull("finishing write must see the deleted root", writeError.get());
+        assertTrue(writeError.get().getMessage(),
+                writeError.get().getMessage().contains("deleted"));
+
+        assertFalse("the finishing write must not recreate the root", Files.exists(rootPath));
+    }
+
     @Test
     public void registerAndKeyDerivation() {
         TreeKey key = TreeKey.of("/a/b.dll", tempA.toAbsolutePath().toString());
