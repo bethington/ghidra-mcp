@@ -11,9 +11,12 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **211 tools** — 207 served by the GUI plugin, 192 by the headless
-server, 188 by both:
+The catalog stands at **218 tools** — 214 served by the GUI plugin, 199 by the headless
+server, 195 by both:
 
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C as files
+  an agent searches with its own Grep, Read and Glob, and keeps them current as the
+  program changes.
 - **`partition_program`** groups functions into compartments by evidence before any
   decompile.
 - **`find_type_users`** lists the functions whose decompilation uses a type or one
@@ -52,6 +55,10 @@ After rc.1 a second pass removed 53 more tools and added 9, so
 - **`apply_documentation`** replaces `apply_function_documentation` and
   `batch_apply_documentation`, and takes what `get_function_documentation`
   exports (one function, or `entries=[...]` for many).
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C to
+  disk as a file tree an agent searches with its own Grep, Read and Glob, and keeps
+  it current as the program changes. `partition_program` and `find_type_users` come
+  with it.
 - Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
   `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
   `create_derived_type`, `debugger/step(kind=)`.

@@ -295,7 +295,7 @@ public final class DerivedFiles {
         try (DirectoryStream<Path> dirs = Files.newDirectoryStream(modules, Files::isDirectory)) {
             for (Path dir : dirs) {
                 if (!slugs.contains(dir.getFileName().toString())) {
-                    TreeRoot.deleteTreeFiles(decompTree.root().path(), dir);
+                    decompTree.root().deleteTreeFiles(dir);
                 }
             }
         }

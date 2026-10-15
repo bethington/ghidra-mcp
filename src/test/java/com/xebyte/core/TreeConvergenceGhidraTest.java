@@ -117,7 +117,7 @@ public class TreeConvergenceGhidraTest {
 
     private DecompTree swept(String name, TreeConfig config) throws IOException {
         DecompTree c = decompTree(name, config);
-        new SweepJob(c, program).run();
+        new SweepJob(c, program, null).run();
         return c;
     }
 
@@ -128,7 +128,8 @@ public class TreeConvergenceGhidraTest {
         try (Stream<Path> walk = Files.walk(root)) {
             for (Path p : walk.filter(Files::isRegularFile).collect(Collectors.toList())) {
                 String rel = root.relativize(p).toString();
-                if (rel.equals(TreeLayout.statusMd()) || rel.equals(TreeLayout.treeJson())) {
+                if (rel.equals(TreeLayout.statusMd()) || rel.equals(TreeLayout.treeJson())
+                        || rel.equals(TreeLayout.manifest())) {
                     continue;
                 }
                 String text = Files.readString(p, StandardCharsets.UTF_8)
@@ -177,10 +178,12 @@ public class TreeConvergenceGhidraTest {
         DecompTree a = swept("a", TreeConfig.defaults());
         Map<String, java.nio.file.attribute.FileTime> before = mtimes(a);
         Thread.sleep(1100);
-        new SweepJob(a, program).run();
+        new SweepJob(a, program, null).run();
         Map<String, java.nio.file.attribute.FileTime> after = mtimes(a);
-        before.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson()));
-        after.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson()));
+        before.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson())
+                || k.equals(TreeLayout.manifest()));
+        after.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson())
+                || k.equals(TreeLayout.manifest()));
         assertEquals(before, after);
     }
 
