@@ -117,7 +117,7 @@ public class TreeConvergenceGhidraTest {
 
     private DecompTree swept(String name, TreeConfig config) throws IOException {
         DecompTree c = decompTree(name, config);
-        new SweepJob(c, program).run();
+        new SweepJob(c, program, null).run();
         return c;
     }
 
@@ -178,7 +178,7 @@ public class TreeConvergenceGhidraTest {
         DecompTree a = swept("a", TreeConfig.defaults());
         Map<String, java.nio.file.attribute.FileTime> before = mtimes(a);
         Thread.sleep(1100);
-        new SweepJob(a, program).run();
+        new SweepJob(a, program, null).run();
         Map<String, java.nio.file.attribute.FileTime> after = mtimes(a);
         before.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson())
                 || k.equals(TreeLayout.manifest()));

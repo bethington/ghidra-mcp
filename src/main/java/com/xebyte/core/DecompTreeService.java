@@ -45,13 +45,15 @@ import java.util.stream.Stream;
  * <p>Status is its own {@link ToolAccess#READ_ONLY} endpoint (not an {@code action}
  * on a POST) because plan mode forces a permission prompt for every non-read-only
  * MCP tool that no allow-rule can suppress, and a tree is polled while
- * planning by construction. Most write paths are host-filesystem only (bridge
- * marks them {@code NONE} for resource invalidation). The exception is
- * {@code /decompile_tree_pin_module}, which stores placement on the program
- * so it survives resweeps.
+ * planning by construction. Most write paths are host-filesystem only. Tools that
+ * can start a sweep ({@code run}, {@code configure}, {@code refresh}) may also
+ * disassemble missing entries when that config is on — an asynchronous program write
+ * of unknown extent (bridge: {@code UNBOUNDED}; the change-token poll sees it).
+ * {@code /decompile_tree_pin_module} stores placement on the program so it survives
+ * resweeps.
  *
- * <p>Sweeps run as {@link SweepJob} on {@link TreeRegistry}'s daemon thread —
- * never through {@code ThreadingStrategy}.
+ * <p>Sweeps run as {@link SweepJob} on {@link TreeRegistry}'s daemon thread. The
+ * decompile loop stays off {@code ThreadingStrategy}; disassembly writes go through it.
  *
  * @since 7.2.0
  */
@@ -67,7 +69,7 @@ public class DecompTreeService {
 
     private final ProgramProvider programProvider;
 
-    public DecompTreeService(ProgramProvider programProvider) {
+    public DecompTreeService(ProgramProvider programProvider, ThreadingStrategy threading) {
         this.programProvider = programProvider;
         // Auto-reconcile needs to re-resolve a Program (the observer must never
         // hold one). Only FrontEndProgramProvider registered a lookup, so
@@ -76,6 +78,7 @@ public class DecompTreeService {
         // here; the GUI's cache-aware lookup still wins via IfAbsent.
         TreeRegistry.getInstance().setProgramLookupIfAbsent(this::lookupViaProvider);
         TreeRegistry.getInstance().setAdoptOnOpenIfAbsent(this::adoptOnOpen);
+        TreeRegistry.getInstance().setThreadingStrategyIfAbsent(threading);
     }
 
     /**
@@ -192,9 +195,11 @@ public class DecompTreeService {
             @Param(value = "throttle_percent", source = ParamSource.BODY, defaultValue = "10",
                    description = "Interactive yield 0..90 after each decompiled function.")
             int throttlePercent,
-            @Param(value = "disassemble_missing", source = ParamSource.BODY, defaultValue = "true",
-                   description = "Before partitioning, disassemble at function entries with "
-                       + "no instruction yet (typical for PE .pdata imports).")
+            @Param(value = "disassemble_missing", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Off by default. When true, the next sweep disassembles at "
+                       + "function entries that have no instruction yet (typical for PE "
+                       + ".pdata imports) and may reflow stub bodies — a program write, "
+                       + "not filesystem-only.")
             boolean disassembleMissing) {
 
         List<ExclusionRule> exclRules;
@@ -305,8 +310,8 @@ public class DecompTreeService {
                    description = "Interactive yield 0..90. Omit to leave unchanged.")
             Integer throttlePercent,
             @Param(value = "disassemble_missing", source = ParamSource.BODY, defaultValue = "",
-                   description = "Disassemble at entries without instructions before sweep. "
-                       + "Omit to leave unchanged.")
+                   description = "When true, the next sweep disassembles missing entries "
+                       + "(program write). Off by default. Omit to leave unchanged.")
             Boolean disassembleMissing) {
 
         RequiredTree required = RequiredTree.of(treeSelector);

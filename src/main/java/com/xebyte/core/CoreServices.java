@@ -57,7 +57,7 @@ public record CoreServices(
             new FunctionBundleService(provider, ts, function),
             new TypeReferenceService(provider),
             new PartitionService(provider),
-            new DecompTreeService(provider));
+            new DecompTreeService(provider, ts));
     }
 
     /** Every shared service, in declaration order. */

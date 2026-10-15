@@ -29,8 +29,9 @@ import java.util.Map;
  * @param maxFileBytes             Read-budget for each {@code .c} inside a
  *                                 compartment (default 32 KiB); changing it
  *                                 moves file paths → repartitioning
- * @param disassembleMissing       before partitioning, disassemble at entries
- *                                 with no instruction (PE {@code .pdata} stubs)
+ * @param disassembleMissing       off by default; when true, the sweep
+ *                                 disassembles entries with no instruction
+ *                                 (PE {@code .pdata} stubs) via the threading strategy
  */
 public record TreeConfig(
         String rootPath,
@@ -87,7 +88,7 @@ public record TreeConfig(
                 DEFAULT_DECOMPILE_TIMEOUT_SECONDS,
                 DEFAULT_ANALYSIS_WAIT_SECONDS,
                 DEFAULT_MAX_FILE_BYTES,
-                true);
+                false);
     }
 
     public static Builder builder() {
@@ -212,7 +213,7 @@ public record TreeConfig(
         private int decompileTimeoutSeconds = DEFAULT_DECOMPILE_TIMEOUT_SECONDS;
         private int analysisWaitSeconds = DEFAULT_ANALYSIS_WAIT_SECONDS;
         private int maxFileBytes = DEFAULT_MAX_FILE_BYTES;
-        private boolean disassembleMissing = true;
+        private boolean disassembleMissing = false;
 
         public Builder rootPath(String rootPath) {
             this.rootPath = rootPath;

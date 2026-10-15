@@ -1,5 +1,6 @@
 package com.xebyte.core.tree;
 
+import com.xebyte.core.ThreadingStrategy;
 import ghidra.framework.model.DomainFile;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -48,6 +49,8 @@ public final class TreeRegistry {
     private final DirtyQueue dirtyQueue;
     private volatile Function<DecompTree, Program> programLookup;
     private volatile Consumer<Program> adoptOnOpen;
+    /** Program writes from a sweep's disassembly pass; set by {@link com.xebyte.core.DecompTreeService}. */
+    private volatile ThreadingStrategy threading;
     private final Map<Program, Boolean> adoptChecked =
             Collections.synchronizedMap(new WeakHashMap<>());
     private final ExecutorService adoptExecutor;
@@ -114,6 +117,20 @@ public final class TreeRegistry {
         if (adoptOnOpen == null) {
             adoptOnOpen = hook;
         }
+    }
+
+    /**
+     * How a sweep's optional disassembly pass opens write transactions. First
+     * registration wins (same race as {@link #setProgramLookupIfAbsent}).
+     */
+    public synchronized void setThreadingStrategyIfAbsent(ThreadingStrategy strategy) {
+        if (threading == null && strategy != null) {
+            threading = strategy;
+        }
+    }
+
+    ThreadingStrategy threadingStrategy() {
+        return threading;
     }
 
     /**
@@ -497,8 +514,13 @@ public final class TreeRegistry {
         if (phase.isBusy()) {
             return;
         }
+        ThreadingStrategy strategy = threading;
+        if (strategy == null) {
+            throw new IllegalStateException(
+                    "no ThreadingStrategy registered; cannot enqueue a tree sweep");
+        }
         decompTree.publish(decompTree.progress().withPhase(SweepProgress.Phase.QUEUED), "dirty");
-        enqueueSweep(new SweepJob(decompTree, program));
+        enqueueSweep(new SweepJob(decompTree, program, strategy));
     }
 
     public void enqueueSweep(SweepJob job) {
@@ -544,6 +566,7 @@ public final class TreeRegistry {
         dirtyQueue.clearAll();
         programLookup = null;
         adoptOnOpen = null;
+        threading = null;
         adoptChecked.clear();
     }
 

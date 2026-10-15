@@ -18,7 +18,10 @@ function. `decompile_tree_create` registers a tree without sweeping it;
 progress; `decompile_tree_configure`, `decompile_tree_pin_module` and
 `decompile_tree_delete` manage it. `/decompile_tree_refresh` is an internal route: it
 stays callable over HTTP but is left out of `/mcp/schema` (`@McpTool(internal = true)`),
-and the published "MCP tools" count excludes it.
+and the published "MCP tools" count excludes it. `disassemble_missing` is **off by
+default**; turning it on makes the next sweep disassemble at function entries that still
+lack an instruction (typical PE `.pdata` stubs) and reflow stub bodies — a program write
+routed through the server's threading strategy, not filesystem-only.
 
 - **Each function block carries what `get_functions` returns for it**, one greppable
   `// key: value` header line per fact (signature, classification, body range, tags,

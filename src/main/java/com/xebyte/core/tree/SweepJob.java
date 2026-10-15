@@ -3,7 +3,7 @@ package com.xebyte.core.tree;
 import com.xebyte.core.AddressKeys;
 import com.xebyte.core.FunctionFacts;
 import com.xebyte.core.ServiceUtils;
-import com.xebyte.core.WriteTx;
+import com.xebyte.core.ThreadingStrategy;
 import com.xebyte.core.partition.Partition;
 import com.xebyte.core.partition.PartitionCascade;
 import com.xebyte.core.partition.PartitionContext;
@@ -12,7 +12,6 @@ import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
-import ghidra.program.database.function.OverlappingFunctionException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
@@ -38,10 +37,12 @@ import java.util.Set;
  * Background sweep that materialises a partitioned decompilation tree.
  *
  * <p><b>Threading:</b> runs on {@link TreeRegistry}'s single daemon thread.
- * Never route through {@code ThreadingStrategy} — under Swing that freezes the
- * GUI for the whole sweep; under Direct it takes the global read lock and
- * serialises every other HTTP request. Same escape hatch
- * {@link com.xebyte.core.PartitionService} documents.
+ * The decompile loop stays off {@link ThreadingStrategy} — under Swing that
+ * freezes the GUI for the whole sweep; under Direct it would take the global
+ * lock and serialise every other HTTP request (same escape hatch
+ * {@link com.xebyte.core.PartitionService} documents). The optional
+ * {@code disassemble_missing} pass is the exception: its program writes go
+ * through {@link ThreadingStrategy#executeWrite}.
  *
  * <p><b>Decompiler:</b> one pooled {@link DecompInterface} for the entire sweep.
  * Measured: fresh interface per function = 238 ms ({@code openProgram} alone
@@ -61,14 +62,16 @@ public final class SweepJob implements Runnable {
 
     private final DecompTree decompTree;
     private final Program program;
+    private final ThreadingStrategy threading;
 
     private final CancelSignal cancel = new CancelSignal();
     private volatile DecompInterface decomp;
     private volatile String cancelReason;
 
-    public SweepJob(DecompTree decompTree, Program program) {
+    public SweepJob(DecompTree decompTree, Program program, ThreadingStrategy threading) {
         this.decompTree = Objects.requireNonNull(decompTree, "decompTree");
         this.program = Objects.requireNonNull(program, "program");
+        this.threading = threading;
     }
 
     public String treeId() {
@@ -145,8 +148,13 @@ public final class SweepJob implements Runnable {
 
             TreeConfig cfg = decompTree.config();
             if (cfg.disassembleMissing()) {
+                if (threading == null) {
+                    throw new IllegalStateException(
+                            "disassemble_missing requires a ThreadingStrategy");
+                }
                 DisassemblyPassResult disasm = disassembleMissingAtEntries(
-                        program, cancel, cfg.throttlePercent(), SweepJob::disassembleAtEntry);
+                        program, cancel, cfg.throttlePercent(), threading,
+                        (prog, entry) -> disassembleAtEntry(prog, entry, threading));
                 publish(decompTree.progress()
                         .withDisassemblyCounts(
                                 disasm.disassembledOnDemand(), disasm.disassemblyFailed())
@@ -471,21 +479,24 @@ public final class SweepJob implements Runnable {
             Program program,
             CancelSignal cancel,
             int throttlePercent,
+            ThreadingStrategy threading,
             EntryDisassembler disassembler) {
         return disassembleMissingAtEntries(
-                program, cancel, throttlePercent, disassembler, SweepJob::defaultBodyComputer);
+                program, cancel, throttlePercent, threading, disassembler,
+                SweepJob::defaultBodyComputer);
     }
 
     /**
-     * Same as {@link #disassembleMissingAtEntries(Program, CancelSignal, int, EntryDisassembler)}
-     * with an injectable body computer for offline tests.
+     * Same as the four-arg form with an injectable body computer for offline tests.
      */
     public static DisassemblyPassResult disassembleMissingAtEntries(
             Program program,
             CancelSignal cancel,
             int throttlePercent,
+            ThreadingStrategy threading,
             EntryDisassembler disassembler,
             BodyComputer bodyComputer) {
+        Objects.requireNonNull(threading, "threading");
         int succeeded = 0;
         int failed = 0;
         int bodiesRecomputed = 0;
@@ -508,7 +519,7 @@ public final class SweepJob implements Runnable {
             if (disassembler.disassemble(program, entry)) {
                 succeeded++;
                 BodyReflowOutcome bodyOutcome = recomputeBodyIfDegenerate(
-                        program, f, cancel.monitor(), bodyComputer);
+                        program, f, cancel.monitor(), bodyComputer, threading);
                 if (bodyOutcome == BodyReflowOutcome.RECOMPUTED) {
                     bodiesRecomputed++;
                 } else if (bodyOutcome == BodyReflowOutcome.FAILED) {
@@ -564,7 +575,9 @@ public final class SweepJob implements Runnable {
             Program program,
             Function function,
             TaskMonitor monitor,
-            BodyComputer bodyComputer) {
+            BodyComputer bodyComputer,
+            ThreadingStrategy threading) {
+        Objects.requireNonNull(threading, "threading");
         AddressSetView current = function.getBody();
         // PE .pdata stubs are one address (start == end). A real body is larger —
         // leave it alone; curated extents must not be "fixed".
@@ -581,43 +594,41 @@ public final class SweepJob implements Runnable {
         if (body == null || body.getNumAddresses() <= current.getNumAddresses()) {
             return BodyReflowOutcome.SKIPPED;
         }
-        WriteTx tx = WriteTx.begin(program, "DecompTree recompute function body");
         try {
-            function.setBody(body);
-            tx.end(true);
-            return BodyReflowOutcome.RECOMPUTED;
-        } catch (OverlappingFunctionException e) {
-            // One bad neighbour must not abort the sweep — count and continue.
-            tx.end(false);
-            return BodyReflowOutcome.FAILED;
+            return threading.executeWrite(program, "DecompTree recompute function body", () -> {
+                function.setBody(body);
+                return BodyReflowOutcome.RECOMPUTED;
+            });
         } catch (Exception e) {
-            tx.end(false);
+            // One bad neighbour (typically an overlapping function) must not abort the
+            // sweep — count and continue.
             return BodyReflowOutcome.FAILED;
         }
     }
 
-    private static boolean disassembleAtEntry(Program program, Address entry) {
+    /** Package-and-test visible: one entry through {@link ThreadingStrategy#executeWrite}. */
+    public static boolean disassembleAtEntry(
+            Program program, Address entry, ThreadingStrategy threading) {
         Listing listing = program.getListing();
         if (listing.getInstructionAt(entry) != null) {
             return true;
         }
-        WriteTx tx = WriteTx.begin(program, "DecompTree disassemble entry");
         try {
-            AddressSet addrSet = new AddressSet(entry, entry);
-            DisassembleCommand cmd = new DisassembleCommand(addrSet, null, true);
-            // Follow flow from the entry only — do not pull in auto-analysis or
-            // rename anything beyond what disassembly requires.
-            cmd.setSeedContext(null);
-            cmd.setInitialContext(null);
-            cmd.enableCodeAnalysis(false);
-            if (!cmd.applyTo(program, TaskMonitor.DUMMY)) {
-                tx.end(false);
-                return false;
-            }
-            tx.end(true);
-            return listing.getInstructionAt(entry) != null;
+            return Boolean.TRUE.equals(threading.executeWrite(
+                    program, "DecompTree disassemble entry", () -> {
+                        AddressSet addrSet = new AddressSet(entry, entry);
+                        DisassembleCommand cmd = new DisassembleCommand(addrSet, null, true);
+                        // Follow flow from the entry only — do not pull in auto-analysis or
+                        // rename anything beyond what disassembly requires.
+                        cmd.setSeedContext(null);
+                        cmd.setInitialContext(null);
+                        cmd.enableCodeAnalysis(false);
+                        if (!cmd.applyTo(program, TaskMonitor.DUMMY)) {
+                            return false;
+                        }
+                        return listing.getInstructionAt(entry) != null;
+                    }));
         } catch (Exception e) {
-            tx.end(false);
             return false;
         }
     }

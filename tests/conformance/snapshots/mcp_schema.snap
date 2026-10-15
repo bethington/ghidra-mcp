@@ -2478,7 +2478,7 @@
         },
         {
           "default": "",
-          "description": "Disassemble at entries without instructions before sweep. Omit to leave unchanged.",
+          "description": "When true, the next sweep disassembles missing entries (program write). Off by default. Omit to leave unchanged.",
           "name": "disassemble_missing",
           "required": false,
           "source": "body",
@@ -2559,8 +2559,8 @@
           "type": "integer"
         },
         {
-          "default": "true",
-          "description": "Before partitioning, disassemble at function entries with no instruction yet (typical for PE .pdata imports).",
+          "default": "false",
+          "description": "Off by default. When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies — a program write, not filesystem-only.",
           "name": "disassemble_missing",
           "required": false,
           "source": "body",

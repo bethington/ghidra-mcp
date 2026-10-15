@@ -628,7 +628,10 @@ one search instead of one MCP round trip per function.
 ```
 
 Create and start are separate on purpose: config changes must not silently launch
-a multi-minute sweep. `decompile_tree_status` is READ_ONLY so it stays usable in plan
+a multi-minute sweep. `disassemble_missing` defaults to off; set it true on create
+or configure only when you want the next sweep to disassemble entries that still
+have no instruction (and possibly reflow PE stub bodies) — that is a program write,
+not filesystem-only. `decompile_tree_status` is READ_ONLY so it stays usable in plan
 mode; the five write paths (`create` / `configure` / `start` / `stop` / `delete`)
 are not.
 
