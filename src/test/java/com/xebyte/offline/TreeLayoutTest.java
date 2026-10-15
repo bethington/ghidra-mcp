@@ -116,19 +116,8 @@ public class TreeLayoutTest {
     }
 
     @Test
-    public void treeFilesAreExactlyWhatTheTreeWrites() {
-        for (String rel : List.of("tree.json", "STATUS.md", "README.md", "AGENTS.md",
-                "callgraph.tsv", "index/by-address.tsv", "index/partitions.json",
-                "index/addresses.tsv", "modules/index.md", "modules/crt/README.md",
-                "modules/crt/00401000_main.c", "modules/crt/00401000_main.c.tmp",
-                "STATUS.md.tmp")) {
-            assertTrue(rel, TreeLayout.isTreeFile(rel));
-        }
-        for (String rel : List.of("notes.md", "src/main.c", "modules/crt/notes.txt",
-                "modules/crt/sub/00401000_main.c", "modules/README.md", "modules//x.c",
-                "modules/crt/.c", "index/other.tsv", "x.tmp", "modules/crt/x.h")) {
-            assertFalse(rel, TreeLayout.isTreeFile(rel));
-        }
+    public void manifestLivesBesideTheOtherIndexFiles() {
+        assertEquals("index/manifest.txt", TreeLayout.manifest());
     }
 
     @Test

@@ -31,7 +31,7 @@ _Last updated: 2026-10-07, against `dev` while preparing 7.0.0-rc.2. For the too
 
 ### 1. Tool-surface size
 
-**The problem.** The server advertises 211 tools. Several MCP clients cannot
+**The problem.** The server advertises 218 tools. Several MCP clients cannot
 accept a `tools/list` that large. Gemini rejects it outright with HTTP 400
 `INVALID_ARGUMENT` — "too many states for serving" — before a single tool is
 called (#440). Even where it works, the schema consumes context that the model
@@ -47,7 +47,7 @@ shipped to 209: one function reader (`get_functions`), one function search
 (`find_functions`), one program-inventory tool (`list_program_items`), one GUI
 cursor tool (`get_ui_cursor`), one health answer (`check_connection`), and one
 name per program operation on both servers, plus `set_memory_block`, and one documentation writer (`apply_documentation`).
-`partition_program` and `find_type_users` came after 7.0.0. The catalog stands at 211 today. See
+The decompilation tree, `partition_program` and `find_type_users` came after 7.0.0. The catalog stands at 218 today. See
 `CHANGELOG.md` and
 `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` for the
 old-to-new call-site mapping.

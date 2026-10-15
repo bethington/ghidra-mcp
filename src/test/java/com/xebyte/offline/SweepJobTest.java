@@ -1,5 +1,6 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.ThreadingStrategy;
 import com.xebyte.core.tree.DecompTree;
 import com.xebyte.core.tree.FunctionBlock;
 import com.xebyte.core.tree.TreeConfig;
@@ -10,7 +11,6 @@ import com.xebyte.core.tree.TreeRoot;
 import com.xebyte.core.tree.TreeStatusMd;
 import com.xebyte.core.tree.SweepJob;
 import com.xebyte.core.tree.SweepProgress;
-import ghidra.framework.model.TransactionInfo;
 import ghidra.program.database.function.OverlappingFunctionException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
@@ -32,6 +32,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.mockito.Mockito.mock;
@@ -48,6 +50,22 @@ import static org.junit.Assert.assertTrue;
  * row shape, STATUS.md states, and cancel-flag plumbing. No live Program.
  */
 public class SweepJobTest {
+
+    /** Runs the write action with no real transaction — enough for mocked Programs. */
+    private static ThreadingStrategy passthroughWrites() {
+        return new ThreadingStrategy() {
+            @Override
+            public <T> T executeRead(Callable<T> action) throws Exception {
+                return action.call();
+            }
+
+            @Override
+            public <T> T executeWrite(Program program, String txName, Callable<T> action)
+                    throws Exception {
+                return action.call();
+            }
+        };
+    }
 
     private Path tempRoot;
 
@@ -250,6 +268,7 @@ public class SweepJobTest {
                 program,
                 new SweepJob.CancelSignal(),
                 0,
+                passthroughWrites(),
                 (prog, entry) -> {
                     touched.add(entry);
                     return true;
@@ -292,6 +311,7 @@ public class SweepJobTest {
                 program,
                 new SweepJob.CancelSignal(),
                 0,
+                passthroughWrites(),
                 (prog, entry) -> entry.equals(addrA));
 
         assertEquals(1, result.disassembledOnDemand());
@@ -300,7 +320,7 @@ public class SweepJobTest {
         SweepJob.CancelSignal cancel = new SweepJob.CancelSignal();
         cancel.cancel();
         SweepJob.DisassemblyPassResult cancelled = SweepJob.disassembleMissingAtEntries(
-                program, cancel, 0, (prog, entry) -> true);
+                program, cancel, 0, passthroughWrites(), (prog, entry) -> true);
         assertEquals(0, cancelled.disassembledOnDemand());
         assertEquals(0, cancelled.disassemblyFailed());
     }
@@ -332,7 +352,6 @@ public class SweepJobTest {
     @Test
     public void recomputeBodyLeavesRealBodyAlone() throws Exception {
         Program program = mock(Program.class);
-        when(program.getCurrentTransactionInfo()).thenReturn(mock(TransactionInfo.class));
 
         Function func = mock(Function.class);
         AddressSetView realBody = mock(AddressSetView.class);
@@ -344,7 +363,7 @@ public class SweepJobTest {
 
         SweepJob.BodyReflowOutcome outcome = SweepJob.recomputeBodyIfDegenerate(
                 program, func, TaskMonitor.DUMMY,
-                (prog, entry, mon) -> candidate);
+                (prog, entry, mon) -> candidate, passthroughWrites());
 
         assertEquals(SweepJob.BodyReflowOutcome.SKIPPED, outcome);
         verify(func, never()).setBody(org.mockito.ArgumentMatchers.any());
@@ -353,7 +372,6 @@ public class SweepJobTest {
     @Test
     public void recomputeBodySetsBiggerBodyOnDegenerate() throws Exception {
         Program program = mock(Program.class);
-        when(program.getCurrentTransactionInfo()).thenReturn(mock(TransactionInfo.class));
 
         Function func = mock(Function.class);
         Address entry = mock(Address.class);
@@ -367,7 +385,7 @@ public class SweepJobTest {
 
         SweepJob.BodyReflowOutcome outcome = SweepJob.recomputeBodyIfDegenerate(
                 program, func, TaskMonitor.DUMMY,
-                (prog, e, mon) -> candidate);
+                (prog, e, mon) -> candidate, passthroughWrites());
 
         assertEquals(SweepJob.BodyReflowOutcome.RECOMPUTED, outcome);
         verify(func).setBody(candidate);
@@ -376,7 +394,6 @@ public class SweepJobTest {
     @Test
     public void recomputeBodyCountsOverlapAsFailure() throws Exception {
         Program program = mock(Program.class);
-        when(program.getCurrentTransactionInfo()).thenReturn(mock(TransactionInfo.class));
 
         Function func = mock(Function.class);
         Address entry = mock(Address.class);
@@ -392,9 +409,55 @@ public class SweepJobTest {
 
         SweepJob.BodyReflowOutcome outcome = SweepJob.recomputeBodyIfDegenerate(
                 program, func, TaskMonitor.DUMMY,
-                (prog, e, mon) -> candidate);
+                (prog, e, mon) -> candidate, passthroughWrites());
 
         assertEquals(SweepJob.BodyReflowOutcome.FAILED, outcome);
+    }
+
+    @Test
+    public void disassemblyWritesGoThroughTheThreadingStrategy() throws Exception {
+        Program program = mock(Program.class);
+        Listing listing = mock(Listing.class);
+        when(program.getListing()).thenReturn(listing);
+        Address entry = mock(Address.class);
+        when(listing.getInstructionAt(entry)).thenReturn(null);
+
+        AtomicInteger writes = new AtomicInteger();
+        List<String> names = new ArrayList<>();
+        ThreadingStrategy counting = new ThreadingStrategy() {
+            @Override
+            public <T> T executeRead(Callable<T> action) throws Exception {
+                return action.call();
+            }
+
+            @Override
+            public <T> T executeWrite(Program p, String txName, Callable<T> action)
+                    throws Exception {
+                writes.incrementAndGet();
+                names.add(txName);
+                return action.call();
+            }
+        };
+
+        // DisassembleCommand cannot apply to a mock Program; the write still opens.
+        assertFalse(SweepJob.disassembleAtEntry(program, entry, counting));
+        assertEquals(1, writes.get());
+        assertEquals("DecompTree disassemble entry", names.get(0));
+
+        Function func = mock(Function.class);
+        AddressSetView stubBody = mock(AddressSetView.class);
+        when(stubBody.getNumAddresses()).thenReturn(1L);
+        when(func.getBody()).thenReturn(stubBody);
+        when(func.getEntryPoint()).thenReturn(entry);
+        AddressSetView bigger = mock(AddressSetView.class);
+        when(bigger.getNumAddresses()).thenReturn(40L);
+
+        assertEquals(SweepJob.BodyReflowOutcome.RECOMPUTED,
+                SweepJob.recomputeBodyIfDegenerate(
+                        program, func, TaskMonitor.DUMMY,
+                        (prog, e, mon) -> bigger, counting));
+        assertEquals(2, writes.get());
+        assertEquals("DecompTree recompute function body", names.get(1));
     }
 
     @Test
@@ -404,7 +467,6 @@ public class SweepJobTest {
         Listing listing = mock(Listing.class);
         when(program.getFunctionManager()).thenReturn(fm);
         when(program.getListing()).thenReturn(listing);
-        when(program.getCurrentTransactionInfo()).thenReturn(mock(TransactionInfo.class));
 
         Function needs = mock(Function.class);
         Address missing = mock(Address.class);
@@ -428,6 +490,7 @@ public class SweepJobTest {
                 program,
                 new SweepJob.CancelSignal(),
                 0,
+                passthroughWrites(),
                 (prog, entry) -> true,
                 (prog, entry, mon) -> bigger);
         assertEquals(1, ok.disassembledOnDemand());
@@ -443,6 +506,7 @@ public class SweepJobTest {
                 program,
                 new SweepJob.CancelSignal(),
                 0,
+                passthroughWrites(),
                 (prog, entry) -> true,
                 (prog, entry, mon) -> bigger);
         assertEquals(1, overlap.disassembledOnDemand());
