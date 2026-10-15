@@ -56,6 +56,8 @@ SCANNED_SERVICES = (
     "DebuggerService",
     "PromptPolicyService",
     "FunctionBundleService",
+    "TypeReferenceService",
+    "PartitionService",
     "VersionControlService",
     "ServerLifecycleService",
     "GuiToolService",
