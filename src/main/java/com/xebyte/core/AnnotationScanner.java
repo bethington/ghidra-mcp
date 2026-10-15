@@ -160,22 +160,32 @@ public class AnnotationScanner {
             }
             descriptors.set(i, new ToolDescriptor(existing.path(), existing.method(),
                 existing.description(), existing.category(), existing.categoryDescription(),
-                existing.access(), merged));
+                existing.access(), existing.internal(), merged));
             return;
         }
         descriptors.add(descriptor);
         descriptors.sort(Comparator.comparing(ToolDescriptor::path));
     }
 
-    /** Generate a JSON schema string describing all discovered tools. */
+    /**
+     * Generate a JSON schema string describing agent-visible tools.
+     * Internal endpoints stay registered as HTTP routes but are omitted here
+     * so the bridge never advertises them as MCP tools.
+     */
     public String generateSchema() {
-        List<Map<String, Object>> tools = new ArrayList<>();
+        List<ToolDescriptor> visible = new ArrayList<>();
         for (ToolDescriptor d : descriptors) {
+            if (!d.internal()) {
+                visible.add(d);
+            }
+        }
+        List<Map<String, Object>> tools = new ArrayList<>();
+        for (ToolDescriptor d : visible) {
             tools.add(d.toMap());
         }
         return JsonHelper.toJson(JsonHelper.mapOf(
             "tools", tools,
-            "count", descriptors.size()
+            "count", visible.size()
         ));
     }
 
@@ -759,7 +769,7 @@ public class AnnotationScanner {
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
-            category, categoryDescription, tool.access(), params);
+            category, categoryDescription, tool.access(), tool.internal(), params);
     }
 
     private static String jsonType(Class<?> type, boolean fieldsJson) {
@@ -781,7 +791,7 @@ public class AnnotationScanner {
     /** Describes an MCP tool for schema generation. */
     public record ToolDescriptor(String path, String method, String description,
             String category, String categoryDescription, ToolAccess access,
-            List<ParamDescriptor> params) {
+            boolean internal, List<ParamDescriptor> params) {
 
         /** Map form used by {@link #toJson()} and by {@link AnnotationScanner#generateSchema()}. */
         public Map<String, Object> toMap() {
@@ -803,6 +813,9 @@ public class AnnotationScanner {
             if (access != null && access != ToolAccess.UNSPECIFIED) {
                 out.put("read_only", access.isReadOnly());
                 out.put("destructive", access.isDestructive());
+            }
+            if (internal) {
+                out.put("internal", true);
             }
             List<Map<String, Object>> paramMaps = new ArrayList<>();
             for (ParamDescriptor p : params) {
