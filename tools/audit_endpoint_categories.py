@@ -57,6 +57,7 @@ SCANNED_SERVICES = (
     "PromptPolicyService",
     "FunctionBundleService",
     "TypeReferenceService",
+    "ChangeTokenService",
     "PartitionService",
     "DecompTreeService",
     "VersionControlService",
