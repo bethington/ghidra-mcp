@@ -4,168 +4,6 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-
-## Unreleased
-
-Changes on `dev` after 7.0.0.
-
-### Fixed — ARRAY classification honors numeric JSON counts
-
-`apply_data_classification` handled `count` only as an Integer or string,
-but Gson represents JSON numbers as Double. A request with `count: 64`
-therefore applied a one-element array and reported success; numeric zero and
-negative counts also became one. Numeric counts now use Number conversion
-before the existing positive-count validation. String counts still work.
-
-### Fixed — parameter aliases take precedence over omitted defaults
-
-FastMCP inserted a canonical parameter's default before the bridge folded
-aliases, so `get_functions(call_context_window=9)` silently sent
-`call_context_lines=3`. Defaults for aliased parameters are now applied after
-alias resolution. An explicitly supplied canonical value still wins, and
-omitting both spellings keeps the upstream default. Array aliases such as
-`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
-
-### Fixed — native JSON values reach Java Object parameters through MCP
-
-The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
-native objects and arrays before dispatch. `apply_data_classification` could
-not receive its required `type_definition` object, and `get_assembly_context`
-could not receive an address array. These bindings now preserve native JSON
-values; existing string arguments remain accepted.
-
-### Performance — `get_functions` opens one decompiler per call (#575)
-
-Every decompile in a `get_functions` call -- each target and each caller decompiled for
-`call_context` -- used to open and dispose its own `DecompInterface` (~238 ms to open, 5-10 ms
-per decompile on an open one), so a 20-function bulk read with call context opened one per
-target plus one per (target, caller) pair. The call now opens one decompiler on first use,
-reuses it for the whole request in single and bulk mode, and disposes it before returning; a
-`fields=` subset that decompiles nothing opens none. Results are kept per entry point for the
-request, so a caller shared by several targets is decompiled once. A decompile that does not
-complete (timeout, dead process, exception) disposes the interface and the next one reopens,
-so one bad function cannot fail the rest of a bulk call. Options and the 12 s per-decompile
-timeout are unchanged, and so is every response field. Measured on the real-Ghidra tier
-(`RequestScopedDecompilerGhidraTest`, 20 leaf targets + 10 shared callers,
-`fields=decompiled_code,call_context`): 14.5 s -> 0.32 s.
-
-### Changed — empty boolean env values mean unset
-
-`GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to
-parse as false because `""` sat in the falsey set. Empty or whitespace now means unset and
-keeps the key's default — the same rule `GHIDRA_MCP_LAZY` already used. Known
-`1/true/yes/on` and `0/false/no/off` spellings are unchanged; each caller still chooses how
-unknown non-empty values behave (default / error / warn) through one `parse_bool` helper.
-
-### Changed — deploy tiers treat `success: false` / `status: rejected` as failures
-
-`_ensure_mcp_ok` (every post-deploy tier that checks an MCP response) used to fail only on
-a truthy `error` field or a body string starting with `"failed"`. Soft failures that arrive
-as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shapes the bridge
-already treats as tool errors — were ignored, so a tier could exit green after a refused
-write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
-
-### Fixed — one project-path resolver; folder scope and `..` on every site
-
-Caller-supplied project (domain) paths go through `ProjectPaths` (normalize, `file`, `folder`):
-leading-slash policy, rejection of `.`/`..` segments, and `project.folder_scope` no longer
-depend on which tool handled the path. `/list_project_files` listed every folder and file
-whatever the scope; it now lists a folder in the scope or one on the way to it, showing only
-the branch toward the scope. Sites that previously skipped scope (GZF import's target folder,
-`ProjectProgramProvider` import dest / exact-path open) now refuse out-of-scope paths with the
-same text version-control used:
-`Path is outside this server's project-folder scope: /…`. Mutating tools that said
-`Access denied: path is outside the configured project scope.` use that text too. Missing
-files answer `No file at /…` (was `File not found in project: /…` on checkout/checkin).
-
-### Changed — list paging: `limit <= 0` means no limit on four more tools
-
-`/list_function_tags`, `/list_class_members`, `/find_code_gaps`, and `/list_properties`
-now page through `ServiceUtils.paged` (property maps via `pagedWindow` so the iterator
-still skips/takes). Explicit `limit <= 0` is unbounded (the `@Param` default stays each
-tool's own, e.g. 100 for property maps). Responses gain `count`; `/list_class_members`
-reports `total` instead of `total_members`. Documented REJECT limits elsewhere are unchanged.
-
-### Changed — exception error texts no longer read `"null"`
-
-Tool catch tails go through `ServiceUtils.fail` / `failureMessage`: when an exception has no
-message, the response names the exception class instead of the literal `"null"`.
-
-### Changed — write success envelopes go through `Response.success` (+ extras)
-
-Hand-built `{status:"success", message:…}` maps now use `Response.success` /
-`successWithWarnings`. `/rename_variable` always returns that one envelope;
-`warnings` is present only when non-empty. Structured extras still follow
-`status`/`message` (some tools previously put `message` last).
-
-### Changed — structure / enum wrong-kind refusals use one quoted form
-
-`/get_struct_layout` and `/get_enum_values` used to say
-`Data type is not a structure: X` / `Data type is not an enumeration: X` when the name
-resolved to the wrong kind. They now match the write tools:
-`Data type 'X' is not a structure` / `Data type 'X' is not an enumeration`. Not-found text
-is unchanged (`Structure not found: X` / `Enumeration not found: X`).
-
-### Changed — the server resolves programs, addresses and functions before a tool runs
-
-Tool parameters are typed as what they name. `AnnotationScanner` reads the caller's string as
-before and resolves it per call, so programs opened later are found. A name that resolves to
-nothing is answered with the message tools used to return themselves, and the tool never runs.
-
-- **Programs.** 146 tools take the open `Program` ("No program loaded.", "Program not found: …").
-  About 100 compatibility overloads that took a program name, or none, are gone. Three things
-  follow from resolving every program the same way: `switch_program` finds a program the way any
-  tool does (it used to match only programs already open); `run_ghidra_script` and
-  `run_script_inline` report an unknown program before the scripts-allowed check; and
-  `create_folder` lost its `program` parameter, which it never read.
-- **Addresses.** Most address parameters take an `Address` parsed against that program; a bad
-  one is refused with the parse error.
-- **Functions.** 27 tools take the `Function` a reference names: its name, its entry address or
-  any address inside it ("Function not found: …"). 16 of them (`disassemble_function`,
-  `get_function_hash`, the prototype, variable and no-return setters, among others) used to
-  demand the exact entry address. Only `delete_function` and `create_function` still want an
-  exact entry. Since a caller may pass a name or an interior address, every single-function
-  response carries `resolved_function` `{name, address}`, the function the call acted on.
-
-### Fixed — every program write takes the headless write lock
-
-21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request
-thread, instead of going through `executeWrite`. On the headless server that skipped the lock
-that serializes writes, so comments, labels, bookmarks, memory blocks, the image base, variable
-renames and types, prototypes and the documentation merge could interleave with any other write.
-They all go through `executeWrite` now, and `WritesTakeTheWriteLockTest` fails on a transaction
-opened inside `runOnUi` or `executeRead`.
-
-- **A tool's own "cannot do that" is a refusal, not an error.** No function there, nothing to
-  disassemble: the write rolls back, the caller gets the message, and neither server logs a
-  stack trace for it, including when the tool runs inside a dry run.
-- **`set_function_prototype` is one unit.** A calling convention that fails to apply rolls the
-  prototype back too, instead of leaving it applied under an error response.
-- **`rename_variables` keeps what its fallback renamed.** When the batch failed and it retried
-  variable by variable, the outer rollback discarded those renames while reporting them done.
-
-### Fixed — batch completeness runs on the request thread
-
-`analyze_function_completeness(addresses=...)` queued each function on the Swing thread
-with `invokeLater` and waited up to 90 s for it: the work ran outside the server lock,
-froze the GUI while it ran, and a timed-out function kept running there after the call
-gave up on it. It now runs on the request thread like the single-function call, bounded by
-the decompiler's own timeout. A function that fails is an `{"error": ...}` entry in
-`results` as before; the `chunk_timeout:` / `chunk_error:` / `chunk_exception:` prefixes
-are gone. `SwingHopsOnlyWhereWindowsAreTest` keeps Swing-thread hops in the classes that
-drive windows. Error messages and comments that still named the Swing thread for work that
-no longer runs there say what failed instead (`Rename failed: ...`, `Write failed: ...`).
-
-### Changed — tool bodies run on the request thread
-
-`ThreadingStrategy.runOnUi` promised the Swing thread but ran on the caller on both servers,
-outside the server lock, and `SwingThreadingStrategy` was never constructed. Both are gone; the
-tools that used it (decompile and analysis reads, save and close, script runs and listings,
-the rename check, the merge dry run) run directly, as they already did. They stay off the
-server-wide lock on purpose: a script run under it would block every other request for up to
-its 30-minute timeout. Results come back from `executeRead`/`executeWrite` as return values
-instead of through `Atomic*` holders; responses are unchanged.
-
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
 **209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
@@ -193,6 +31,33 @@ the 235-tool schema recording); the figures above are the current ones.
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Fixed — native JSON values reach Java Object parameters through MCP ([#598](https://github.com/bethington/ghidra-mcp/pull/598))
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted. The two parameters are now
+advertised to MCP clients with an untyped schema (`{}`); clients with a strict
+schema dialect may need to skip those two tools.
+
+### Fixed — parameter aliases take precedence over omitted defaults ([#599](https://github.com/bethington/ghidra-mcp/pull/599))
+
+FastMCP inserted a canonical parameter's default before the bridge folded
+aliases, so `get_functions(call_context_window=9)` silently sent
+`call_context_lines=3`. Defaults for aliased parameters are now applied after
+alias resolution. An explicitly supplied canonical value still wins, and
+omitting both spellings keeps the upstream default. Array aliases such as
+`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
+
+### Fixed — ARRAY classification honors numeric JSON counts ([#600](https://github.com/bethington/ghidra-mcp/pull/600))
+
+`apply_data_classification` handled `count` only as an Integer or string,
+but Gson represents JSON numbers as Double. A request with `count: 64`
+therefore applied a one-element array and reported success; numeric zero and
+negative counts also became one. Numeric counts now use Number conversion
+before the existing positive-count validation. String counts still work.
 
 ### Added — decompiled C says which language variant produced it ([#509](https://github.com/bethington/ghidra-mcp/pull/509))
 
