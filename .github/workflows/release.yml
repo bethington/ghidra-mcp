@@ -157,7 +157,7 @@ jobs:
         echo "Running offline Java tests..."
         mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
         echo "Running Python unit tests..."
-        uv run --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
+        uv run --locked --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
         echo "✅ Offline test gate passed"
 
     - name: Build with Maven
