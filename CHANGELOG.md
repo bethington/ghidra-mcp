@@ -8,6 +8,12 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — Scorecard push trigger follows the default dev branch
+
+Scorecard's push filter and its test constant still named `main` while the
+repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
+and the existing check against `origin/HEAD` passes on a fresh clone.
+
 ### Fixed — ARRAY classification honors numeric JSON counts
 
 `apply_data_classification` handled `count` only as an Integer or string,
