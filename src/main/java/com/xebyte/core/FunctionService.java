@@ -1253,7 +1253,8 @@ Map<String, Object> out = new LinkedHashMap<>();
     public Response listDecompilerVariables(
             @Param(value = "function_address", paramType = "address", defaultValue = "",
                    description = "Function entry point address") String functionAddrStr,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1347,7 +1348,8 @@ Map<String, Object> out = new LinkedHashMap<>();
             @Param(value = "remove", source = ParamSource.BODY, defaultValue = "false",
                    description = "Remove the local variable with this `name` instead of creating one "
                            + "(the undo path for a bad create; type/offset are ignored)") boolean removeFlag,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "",
+                   description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

@@ -8,6 +8,16 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Added — decompiler variable endpoints
+
+- `list_decompiler_variables` lists a function's decompiler symbols (SSA /
+  register temporaries) with their type and storage, so a DWARF
+  register-resident local can be matched to the temporary that has to be
+  renamed.
+- `apply_local_variable` creates a stack local at an explicit frame offset,
+  or retypes/renames the one already covering that offset. Reaches locals
+  `set_local_variable_type` cannot, because no symbol exists for them.
+
 ### Fixed — integer and object-array parameters no longer bind lossily
 
 - Integer parameters reject fractional, out-of-range and missing required values
