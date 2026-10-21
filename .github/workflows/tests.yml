@@ -277,7 +277,7 @@ jobs:
         # baseline is the point of a ratchet; a floor left far below actual
         # coverage does not make the gate safer, it widens the band in which a
         # stale-base run reports a number nobody should act on.
-        uv run --python ${{ matrix.python-version }} --group test \
+        uv run --locked --python ${{ matrix.python-version }} --group test \
           pytest tests/unit/ -v --tb=short --cov-fail-under=70
 
     - name: Upload coverage
@@ -320,7 +320,7 @@ jobs:
       # No coverage floor here — Windows skips a handful of POSIX-only tests,
       # so the ubuntu job owns the ratchet; this leg gates on pass/fail only.
       run: |
-        uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
+        uv run --locked --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
   offline-http-tier:
     # Issue #112. The integration tier needs a live Ghidra on :8089 with a
@@ -357,7 +357,7 @@ jobs:
       # measures tests/unit/ only. Folding this tier into that measurement
       # would move the baseline under PR #453's feet; it can be merged in
       # deliberately later (it would raise the number, not lower it).
-      run: uv run --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
+      run: uv run --locked --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
 
     - name: Replay the read-only integration tier against the fake
       # The same file that needs a live Ghidra on :8089, run with no Ghidra at
@@ -366,7 +366,7 @@ jobs:
       # the observed contract violations differ from the committed baseline in
       # EITHER direction.
       run: |
-        uv run --python 3.12 --group test pytest \
+        uv run --locked --python 3.12 --group test pytest \
           tests/integration/test_readonly_endpoints.py \
           -p tests.offline.replay_plugin -v --no-cov --tb=short
 
