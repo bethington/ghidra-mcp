@@ -40,6 +40,9 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for function-related operations: decompilation, renaming, prototype management,
