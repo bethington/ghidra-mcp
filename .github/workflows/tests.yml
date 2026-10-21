@@ -178,7 +178,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: java-test-results
         path: target/surefire-reports/
@@ -188,7 +188,7 @@ jobs:
       # above enforces the ratchet (pom.xml); this artifact is for inspecting
       # where the gaps are — open target/site/jacoco/index.html.
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: jacoco-coverage-report
         path: target/site/jacoco/
@@ -198,7 +198,7 @@ jobs:
     # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
     - name: Upload build artifact
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: GhidraMCP-artifact
         path: target/GhidraMCP-*.zip
@@ -448,7 +448,7 @@ jobs:
 
     - name: Upload Pester results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: pester-results
         path: tests/pester/pester-results.xml
