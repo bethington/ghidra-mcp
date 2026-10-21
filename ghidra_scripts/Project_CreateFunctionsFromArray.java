@@ -6,9 +6,9 @@
 // Output: Creates functions at each address in the pointer array.
 //
 // @author Ben Ethington
-// @category Diablo 2.Project
+// @category GhidraMCP.Project
 // @description Create functions from a function pointer array
-// @menupath Diablo 2.Project.Create Functions From Array
+// @menupath GhidraMCP.Project.Create Functions From Array
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.cmd.function.CreateFunctionCmd;

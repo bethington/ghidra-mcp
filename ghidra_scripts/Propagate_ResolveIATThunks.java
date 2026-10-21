@@ -6,9 +6,9 @@
 // Output: Renames IAT thunk functions to their resolved names.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Resolve IAT thunk functions from DLL ordinal maps
-// @menupath Diablo 2.Propagation.Resolve IAT Thunks
+// @menupath GhidraMCP.Propagation.Resolve IAT Thunks
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

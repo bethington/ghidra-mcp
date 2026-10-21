@@ -6,10 +6,10 @@
 #Useful for bulk namespace organization when functions are grouped by memory region.
 #
 #@author Ben Ethington
-#@category Diablo 2
+#@category GhidraMCP
 #@description Bulk assigns functions to the same namespace as the currently selected function
 #@keybinding
-#@menupath Diablo II.Namespacer
+#@menupath GhidraMCP.Namespacer
 
 c = 0
 n = currentProgram.functionManager.getFunctionAt(currentAddress).getParentNamespace()

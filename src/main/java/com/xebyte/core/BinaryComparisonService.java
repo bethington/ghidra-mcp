@@ -26,7 +26,7 @@ import java.util.*;
  * functions across binaries compiled by different compilers. All methods
  * are static, stateless, and thread-safe.
  *
- * Used by both GhidraMCPPlugin (GUI) and HeadlessEndpointHandler.
+ * Built once, by {@link CoreServices}, for both servers.
  */
 public class BinaryComparisonService {
 

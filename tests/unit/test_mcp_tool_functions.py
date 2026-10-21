@@ -49,10 +49,10 @@ class TestGetToolDispatch(unittest.TestCase):
             "properties": {"address": {"type": "string"}},
             "required": ["address"],
         }
-        fn = _build_tool_function("/decompile_function", "GET", schema)
+        fn = _build_tool_function("/get_functions", "GET", schema)
         result = fn(address="0x401000")
 
-        mock_get.assert_called_once_with("/decompile_function", params={"address": "0x401000"})
+        mock_get.assert_called_once_with("/get_functions", params={"address": "0x401000"})
         self.assertEqual(result, '{"result": "ok"}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
@@ -68,11 +68,12 @@ class TestGetToolDispatch(unittest.TestCase):
             },
             "required": [],
         }
-        fn = _build_tool_function("/list_functions", "GET", schema)
+        fn = _build_tool_function("/find_functions", "GET", schema)
         result = fn(offset=None, limit=None)
 
         # None values should be filtered out
-        mock_get.assert_called_once_with("/list_functions", params=None)
+        mock_get.assert_called_once_with("/find_functions", params=None)
+        self.assertEqual(result, '{"data": []}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_no_params(self, mock_get):
@@ -81,10 +82,11 @@ class TestGetToolDispatch(unittest.TestCase):
         mock_get.return_value = '{"version": "4.2.0"}'
 
         schema = {"properties": {}, "required": []}
-        fn = _build_tool_function("/get_version", "GET", schema)
+        fn = _build_tool_function("/mcp/health", "GET", schema)
         result = fn()
 
-        mock_get.assert_called_once_with("/get_version", params=None)
+        mock_get.assert_called_once_with("/mcp/health", params=None)
+        self.assertEqual(result, '{"version": "4.2.0"}')
 
 
 class TestPostToolDispatch(unittest.TestCase):
@@ -109,6 +111,7 @@ class TestPostToolDispatch(unittest.TestCase):
         mock_post.assert_called_once_with(
             "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
+        self.assertEqual(result, '{"success": true}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_filters_none_values(self, mock_post):
@@ -390,7 +393,7 @@ class TestProgramRequired(unittest.TestCase):
 
         self.bridge.state._require_selectors = True
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         result = fn(address="0x401000")
 
         mock_get.assert_not_called()
@@ -406,11 +409,11 @@ class TestProgramRequired(unittest.TestCase):
         mock_get.return_value = "{}"
         self.bridge.state._require_selectors = True
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000", program="game.exe")
 
         mock_get.assert_called_once_with(
-            "/decompile_function",
+            "/get_functions",
             params={"address": "0x401000", "program": "game.exe"},
         )
 
@@ -421,10 +424,10 @@ class TestProgramRequired(unittest.TestCase):
         mock_get.return_value = "{}"
         self.bridge.state._require_selectors = False
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000")
 
-        mock_get.assert_called_once_with("/decompile_function", params={"address": "0x401000"})
+        mock_get.assert_called_once_with("/get_functions", params={"address": "0x401000"})
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_no_refusal_for_tools_without_program_param(self, mock_get):
@@ -448,7 +451,7 @@ class TestProgramRequired(unittest.TestCase):
 
         # An empty string is filtered upstream of the strict check, so the
         # check should treat it as a missing program=.
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         result = fn(address="0x401000", program="")
 
         mock_get.assert_not_called()

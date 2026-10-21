@@ -31,13 +31,13 @@ public class VariableStorageWriteTest extends TestCase {
         return ProjectSource.readMainSource("core", "FunctionService.java");
     }
 
-    /** Extract just the setVariableStorage(4-arg) method body. */
+    /** Extract the annotated {@code /set_variable_storage} implementation. */
     private static String setVariableStorageBody() throws IOException {
         String src = functionServiceSource();
-        int start = src.indexOf("public Response setVariableStorage(");
-        assertTrue("setVariableStorage(...) not found", start > 0);
-        int end = src.indexOf("public Response setVariableStorage(String functionAddrStr", start + 1);
-        assertTrue("the 3-arg overload should follow the annotated method", end > start);
+        int start = src.indexOf("@McpTool(path = \"/set_variable_storage\"");
+        assertTrue("set_variable_storage tool not found", start > 0);
+        int end = src.indexOf("@McpTool(path = \"/batch_rename_function_components\"", start);
+        assertTrue("batch_rename_function_components should follow set_variable_storage", end > start);
         return src.substring(start, end);
     }
 

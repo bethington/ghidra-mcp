@@ -3,6 +3,8 @@ package com.xebyte.offline;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
+import static org.mockito.Mockito.mock;
 import junit.framework.TestCase;
 
 /**
@@ -11,6 +13,8 @@ import junit.framework.TestCase;
  * integration tests in tests/integration/test_clear_flow_and_repair.py.
  */
 public class FunctionServiceClearFlowAndRepairTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private FunctionService functions;
 
@@ -21,18 +25,10 @@ public class FunctionServiceClearFlowAndRepairTest extends TestCase {
     }
 
     public void testRejectsMissingStartAddress() {
-        Response r = functions.clearFlowAndRepair(null, "", "");
+        Response r = functions.clearFlowAndRepair(null, null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("start_address parameter required"));
 
-        r = functions.clearFlowAndRepair("", "", "");
-        assertTrue(r instanceof Response.Err);
     }
 
-    public void testDegradesGracefullyWithNoProgram() {
-        Response r = functions.clearFlowAndRepair("0x401000", "", "");
-        assertTrue(r instanceof Response.Err);
-        assertTrue("expected 'No program loaded', got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
 }

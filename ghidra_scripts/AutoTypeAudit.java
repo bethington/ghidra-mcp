@@ -295,7 +295,9 @@ public class AutoTypeAudit extends GhidraScript {
             case "wchar_t": return ghidra.program.model.data.WideChar16DataType.dataType;
             default:
                 // Try to find in data type manager
-                for (DataType dt : dtm.getAllDataTypes()) {
+                Iterator<DataType> it = dtm.getAllDataTypes();
+                while (it.hasNext()) {
+                    DataType dt = it.next();
                     if (dt.getName().equals(typeName)) return dt;
                 }
                 return null;

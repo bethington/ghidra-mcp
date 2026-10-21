@@ -14,7 +14,6 @@ No Ghidra required; everything binds loopback/tmp and tears down per class.
 
 import http.server
 import json
-import os
 import socket
 import socketserver
 import sys
@@ -28,7 +27,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-import bridge_mcp_ghidra as bridge  # noqa: E402
 from bridge_mcp_ghidra import dispatch, state, transport  # noqa: E402
 
 

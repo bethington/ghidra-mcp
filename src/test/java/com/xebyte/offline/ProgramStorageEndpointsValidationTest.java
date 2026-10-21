@@ -38,11 +38,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Offline coverage for the 11 program-storage MCP endpoints added to
- * {@link ProgramScriptService} in v5.17.0 — {@code list_option_groups},
- * {@code get_program_options}, {@code set_program_option},
- * {@code remove_program_option}, {@code list_property_maps},
- * {@code create_property_map}, {@code delete_property_map}, {@code set_property},
+ * Offline coverage for the 9 program-storage MCP endpoints added to
+ * {@link ProgramScriptService} in v5.17.0 — {@code get_program_options} (which also lists
+ * the option groups), {@code set_program_option},
+ * {@code remove_program_option}, {@code create_property_map}, {@code delete_property_map}, {@code set_property},
  * {@code get_property}, {@code remove_property}, {@code list_properties}.
  *
  * <p>Those ~690 lines shipped with zero Java tests. The existing
@@ -65,8 +64,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     private static final String GROUP = "Program Information";
     private static final String UNKNOWN_GROUP = "No Such Group";
     private static final String GOOD_ADDR = "0x401000";
-    private static final String BAD_ADDR = "zzzz";
-
     /**
      * Runs work inline (so real handler logic executes) while recording the
      * transaction names it was handed. Tests assert on {@code writes} to prove a
@@ -86,10 +83,6 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
             return action.call();
         }
 
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     }
 
     private Program program;
@@ -119,7 +112,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(program.getUsrPropertyManager()).thenReturn(propertyMaps);
 
         // Minimal single-space address factory so ServiceUtils.parseAddress can both
-        // succeed (GOOD_ADDR) and fail with its rich hint (BAD_ADDR).
+        // succeed (GOOD_ADDR).
         addressFactory = mock(AddressFactory.class);
         AddressSpace ram = mock(AddressSpace.class);
         when(ram.getName()).thenReturn("ram");
@@ -168,16 +161,16 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     }
 
     // ==================================================================
-    // list_option_groups / get_program_options
+    // get_program_options (with no group, it lists the groups)
     // ==================================================================
 
-    public void testListOptionGroupsReportsPerGroupOptionCounts() {
+    public void testGetProgramOptionsWithNoGroupReportsPerGroupOptionCounts() {
         Options analyzers = mock(Options.class);
         when(program.getOptions("Analyzers")).thenReturn(analyzers);
         when(options.getOptionNames()).thenReturn(List.of("Executable Format", "Created With"));
         when(analyzers.getOptionNames()).thenReturn(List.of("Stack"));
 
-        Map<String, Object> data = okOf(svc.listOptionGroups(""));
+        Map<String, Object> data = okOf(svc.getProgramOptions("", program));
         assertEquals(2, data.get("count"));
 
         @SuppressWarnings("unchecked")
@@ -188,14 +181,8 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         assertEquals(1, groups.get(1).get("option_count"));
     }
 
-    public void testGetProgramOptionsRequiresGroup() {
-        String err = errOf(svc.getProgramOptions("", ""));
-        assertTrue("should name the missing param and point at the discovery tool: " + err,
-                err.contains("group is required") && err.contains("list_option_groups"));
-    }
-
     public void testGetProgramOptionsRejectsUnknownGroup() {
-        String err = errOf(svc.getProgramOptions(UNKNOWN_GROUP, ""));
+        String err = errOf(svc.getProgramOptions(UNKNOWN_GROUP, program));
         assertTrue("should echo the bad group name: " + err,
                 err.contains("No such option group") && err.contains(UNKNOWN_GROUP));
     }
@@ -209,7 +196,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(options.isRegistered("Executable Format")).thenReturn(true);
         when(options.getDescription("Executable Format")).thenReturn("Loader used");
 
-        Map<String, Object> data = okOf(svc.getProgramOptions(GROUP, ""));
+        Map<String, Object> data = okOf(svc.getProgramOptions(GROUP, program));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> opts = (List<Map<String, Object>>) data.get("options");
         assertEquals(1, opts.size());
@@ -229,7 +216,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(options.getType("Custom")).thenReturn(null);
         when(options.getDescription("Custom")).thenReturn("");
 
-        Map<String, Object> data = okOf(svc.getProgramOptions(GROUP, ""));
+        Map<String, Object> data = okOf(svc.getProgramOptions(GROUP, program));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> opts = (List<Map<String, Object>>) data.get("options");
         assertEquals("NO_TYPE", opts.get(0).get("type"));
@@ -242,24 +229,24 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testSetProgramOptionRequiresGroup() {
-        assertEquals("group is required", errOf(svc.setProgramOption("", "k", "v", "string", "")));
+        assertEquals("group is required", errOf(svc.setProgramOption("", "k", "v", "string", program)));
         assertNoTransaction("blank group");
     }
 
     public void testSetProgramOptionRequiresName() {
-        assertEquals("name is required", errOf(svc.setProgramOption(GROUP, "", "v", "string", "")));
+        assertEquals("name is required", errOf(svc.setProgramOption(GROUP, "", "v", "string", program)));
         assertNoTransaction("blank name");
     }
 
     public void testSetProgramOptionRequiresValue() {
         // Null value (key absent from the JSON body) is rejected; empty string is a
         // legitimate string value and must NOT be caught by this guard.
-        assertEquals("value is required", errOf(svc.setProgramOption(GROUP, "k", null, "string", "")));
+        assertEquals("value is required", errOf(svc.setProgramOption(GROUP, "k", null, "string", program)));
         assertNoTransaction("null value");
     }
 
     public void testSetProgramOptionRejectsUnknownGroup() {
-        String err = errOf(svc.setProgramOption(UNKNOWN_GROUP, "k", "v", "string", ""));
+        String err = errOf(svc.setProgramOption(UNKNOWN_GROUP, "k", "v", "string", program));
         assertTrue(err.contains("No such option group"));
         assertNoTransaction("unknown group");
     }
@@ -268,22 +255,22 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         // The tool documents string|int|long|double|float|boolean. Each must reach the
         // matching typed Options setter with a correctly parsed value — a plain
         // "did it return ok?" assertion would pass even if every branch called setString.
-        assertTrue(svc.setProgramOption(GROUP, "s", "hello", "string", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "s", "hello", "string", program) instanceof Response.Ok);
         verify(options).setString("s", "hello");
 
-        assertTrue(svc.setProgramOption(GROUP, "i", "42", "int", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "i", "42", "int", program) instanceof Response.Ok);
         verify(options).setInt("i", 42);
 
-        assertTrue(svc.setProgramOption(GROUP, "l", "9999999999", "long", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "l", "9999999999", "long", program) instanceof Response.Ok);
         verify(options).setLong("l", 9999999999L);
 
-        assertTrue(svc.setProgramOption(GROUP, "d", "2.5", "double", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "d", "2.5", "double", program) instanceof Response.Ok);
         verify(options).setDouble("d", 2.5d);
 
-        assertTrue(svc.setProgramOption(GROUP, "f", "1.5", "float", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "f", "1.5", "float", program) instanceof Response.Ok);
         verify(options).setFloat("f", 1.5f);
 
-        assertTrue(svc.setProgramOption(GROUP, "b", "true", "boolean", "") instanceof Response.Ok);
+        assertTrue(svc.setProgramOption(GROUP, "b", "true", "boolean", program) instanceof Response.Ok);
         verify(options).setBoolean("b", true);
 
         assertEquals("every accepted type must run inside a transaction",
@@ -293,20 +280,20 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
 
     public void testSetProgramOptionTypeKeywordIsCaseAndWhitespaceInsensitive() {
         // resolved = type.trim().toLowerCase() — models sometimes send " Int ".
-        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "i", " 42 ", "  INT  ", ""));
+        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "i", " 42 ", "  INT  ", program));
         assertEquals("int", data.get("type"));
         verify(options).setInt("i", 42);
     }
 
     public void testSetProgramOptionRejectsUnsupportedType() {
-        String err = errOf(svc.setProgramOption(GROUP, "k", "v", "date", ""));
+        String err = errOf(svc.setProgramOption(GROUP, "k", "v", "date", program));
         assertTrue("must name the offending type and list the legal set: " + err,
                 err.contains("Unsupported type 'date'") && err.contains("boolean"));
         assertNoTransaction("unsupported type");
     }
 
     public void testSetProgramOptionRejectsUnparseableNumber() {
-        String err = errOf(svc.setProgramOption(GROUP, "k", "not-a-number", "int", ""));
+        String err = errOf(svc.setProgramOption(GROUP, "k", "not-a-number", "int", program));
         assertTrue("must report a parse failure, not leak a raw exception: " + err,
                 err.contains("is not a valid int"));
         assertNoTransaction("bad number is rejected before the transaction opens");
@@ -317,7 +304,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(options.contains("existing")).thenReturn(true);
         when(options.getType("existing")).thenReturn(OptionType.BOOLEAN_TYPE);
 
-        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "existing", "true", "", ""));
+        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "existing", "true", "", program));
         assertEquals("boolean", data.get("type"));
         verify(options).setBoolean("existing", true);
         verify(options, never()).setString(anyString(), anyString());
@@ -327,7 +314,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         // type omitted + option does not exist -> string.
         when(options.contains("brand_new")).thenReturn(false);
 
-        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "brand_new", "0x10", "", ""));
+        Map<String, Object> data = okOf(svc.setProgramOption(GROUP, "brand_new", "0x10", "", program));
         assertEquals("string", data.get("type"));
         verify(options).setString("brand_new", "0x10");
     }
@@ -338,7 +325,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(options.contains("Color")).thenReturn(true);
         when(options.getType("Color")).thenReturn(OptionType.COLOR_TYPE);
 
-        String err = errOf(svc.setProgramOption(GROUP, "Color", "#fff", "", ""));
+        String err = errOf(svc.setProgramOption(GROUP, "Color", "#fff", "", program));
         assertTrue("must say the type is unsettable and list what is: " + err,
                 err.contains("cannot be set via this tool") && err.contains("Settable types"));
         assertNoTransaction("unsettable existing option type");
@@ -349,13 +336,13 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testRemoveProgramOptionRequiresGroupAndName() {
-        assertEquals("group is required", errOf(svc.removeProgramOption("", "k", "")));
-        assertEquals("name is required", errOf(svc.removeProgramOption(GROUP, "", "")));
+        assertEquals("group is required", errOf(svc.removeProgramOption("", "k", program)));
+        assertEquals("name is required", errOf(svc.removeProgramOption(GROUP, "", program)));
         assertNoTransaction("blank required params");
     }
 
     public void testRemoveProgramOptionRejectsUnknownGroup() {
-        assertTrue(errOf(svc.removeProgramOption(UNKNOWN_GROUP, "k", "")).contains("No such option group"));
+        assertTrue(errOf(svc.removeProgramOption(UNKNOWN_GROUP, "k", program)).contains("No such option group"));
         assertNoTransaction("unknown group");
     }
 
@@ -364,7 +351,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         // cleanup scripts don't have to special-case it.
         when(options.contains("gone")).thenReturn(false);
 
-        Map<String, Object> data = okOf(svc.removeProgramOption(GROUP, "gone", ""));
+        Map<String, Object> data = okOf(svc.removeProgramOption(GROUP, "gone", program));
         assertEquals(Boolean.FALSE, data.get("success"));
         assertNoTransaction("missing option");
     }
@@ -372,17 +359,17 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     public void testRemoveProgramOptionRemovesExistingOption() {
         when(options.contains("custom")).thenReturn(true);
 
-        Map<String, Object> data = okOf(svc.removeProgramOption(GROUP, "custom", ""));
+        Map<String, Object> data = okOf(svc.removeProgramOption(GROUP, "custom", program));
         assertEquals(Boolean.TRUE, data.get("success"));
         verify(options).removeOption("custom");
         assertEquals(List.of("Remove Program Option"), threading.writes);
     }
 
     // ==================================================================
-    // list_property_maps / create_property_map / delete_property_map
+    // list_properties with no map (lists the maps) / create_property_map / delete_property_map
     // ==================================================================
 
-    public void testListPropertyMapsClassifiesValueTypes() {
+    public void testListPropertiesWithNoMapClassifiesValueTypes() {
         IntPropertyMap intMap = mock(IntPropertyMap.class);
         VoidPropertyMap voidMap = mock(VoidPropertyMap.class);
         when(intMap.getSize()).thenReturn(7);
@@ -391,7 +378,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("counts", intMap);
         stubMap("tags", voidMap);
 
-        Map<String, Object> data = okOf(svc.listPropertyMaps(""));
+        Map<String, Object> data = okOf(svc.listProperties("", null, null, 0, 100, program));
         assertEquals(2, data.get("count"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> maps = (List<Map<String, Object>>) data.get("property_maps");
@@ -401,30 +388,30 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     }
 
     public void testCreatePropertyMapRequiresName() {
-        assertEquals("name is required", errOf(svc.createPropertyMap("", "string", "")));
+        assertEquals("name is required", errOf(svc.createPropertyMap("", "string", program)));
         assertNoTransaction("blank map name");
     }
 
     public void testCreatePropertyMapAcceptsEveryDocumentedType() throws Exception {
         // int/long/string/void are the four documented kinds; each must hit its own
         // PropertyMapManager factory method.
-        assertTrue(svc.createPropertyMap("m_int", "int", "") instanceof Response.Ok);
+        assertTrue(svc.createPropertyMap("m_int", "int", program) instanceof Response.Ok);
         verify(propertyMaps).createIntPropertyMap("m_int");
 
-        assertTrue(svc.createPropertyMap("m_long", "long", "") instanceof Response.Ok);
+        assertTrue(svc.createPropertyMap("m_long", "long", program) instanceof Response.Ok);
         verify(propertyMaps).createLongPropertyMap("m_long");
 
-        assertTrue(svc.createPropertyMap("m_str", "string", "") instanceof Response.Ok);
+        assertTrue(svc.createPropertyMap("m_str", "string", program) instanceof Response.Ok);
         verify(propertyMaps).createStringPropertyMap("m_str");
 
-        assertTrue(svc.createPropertyMap("m_void", "VOID", "") instanceof Response.Ok);
+        assertTrue(svc.createPropertyMap("m_void", "VOID", program) instanceof Response.Ok);
         verify(propertyMaps).createVoidPropertyMap("m_void");
 
         assertEquals(4, threading.writes.size());
     }
 
     public void testCreatePropertyMapDefaultsToString() throws Exception {
-        Map<String, Object> data = okOf(svc.createPropertyMap("m", "", ""));
+        Map<String, Object> data = okOf(svc.createPropertyMap("m", "", program));
         assertEquals("string", data.get("value_type"));
         verify(propertyMaps).createStringPropertyMap("m");
     }
@@ -432,7 +419,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     public void testCreatePropertyMapRejectsObjectType() {
         // Object maps need a registered Saveable class, which MCP has no way to supply —
         // they're readable via list/get but cannot be created or written here.
-        String err = errOf(svc.createPropertyMap("m_obj", "object", ""));
+        String err = errOf(svc.createPropertyMap("m_obj", "object", program));
         assertTrue("must name the rejected type and list the supported ones: " + err,
                 err.contains("Unsupported map type 'object'") && err.contains("void"));
         assertNoTransaction("object map type");
@@ -441,17 +428,17 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     public void testCreatePropertyMapRejectsDuplicateName() {
         stubMap("dupe", mock(IntPropertyMap.class));
 
-        assertTrue(errOf(svc.createPropertyMap("dupe", "int", "")).contains("already exists"));
+        assertTrue(errOf(svc.createPropertyMap("dupe", "int", program)).contains("already exists"));
         assertNoTransaction("duplicate map name");
     }
 
     public void testDeletePropertyMapRequiresName() {
-        assertEquals("name is required", errOf(svc.deletePropertyMap("", "")));
+        assertEquals("name is required", errOf(svc.deletePropertyMap("", program)));
         assertNoTransaction("blank map name");
     }
 
     public void testDeletePropertyMapMissingMapIsSoftFailure() {
-        Map<String, Object> data = okOf(svc.deletePropertyMap("gone", ""));
+        Map<String, Object> data = okOf(svc.deletePropertyMap("gone", program));
         assertEquals(Boolean.FALSE, data.get("success"));
         assertNoTransaction("missing map");
     }
@@ -462,7 +449,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", mock(StringPropertyMap.class));
         when(propertyMaps.removePropertyMap("m")).thenReturn(true);
 
-        Map<String, Object> data = okOf(svc.deletePropertyMap("m", ""));
+        Map<String, Object> data = okOf(svc.deletePropertyMap("m", program));
         assertEquals(Boolean.TRUE, data.get("success"));
         assertEquals(List.of("Delete Property Map"), threading.writes);
     }
@@ -472,33 +459,23 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testSetPropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.setProperty("", GOOD_ADDR, "1", "")));
-        assertEquals("address is required", errOf(svc.setProperty("m", "", "1", "")));
+        assertEquals("map is required", errOf(svc.setProperty("", addr, "1", program)));
+        assertEquals("address is required", errOf(svc.setProperty("m", null, "1", program)));
         assertNoTransaction("blank required params");
     }
 
     public void testSetPropertyRejectsUnknownMap() {
-        String err = errOf(svc.setProperty("nope", GOOD_ADDR, "1", ""));
+        String err = errOf(svc.setProperty("nope", addr, "1", program));
         assertTrue("must point at the creation tool: " + err,
                 err.contains("No property map named 'nope'") && err.contains("create_property_map"));
         assertNoTransaction("unknown map");
-    }
-
-    public void testSetPropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(IntPropertyMap.class));
-
-        String err = errOf(svc.setProperty("m", BAD_ADDR, "1", ""));
-        assertNotNull("parse errors must not surface as a null message", err);
-        assertTrue("must be the ServiceUtils parse hint, not an exception: " + err,
-                err.contains("could not be resolved") && err.contains(BAD_ADDR));
-        assertNoTransaction("unparseable address");
     }
 
     public void testSetPropertyRejectsObjectMap() {
         ObjectPropertyMap<?> objMap = mock(ObjectPropertyMap.class);
         stubMap("obj", objMap);
 
-        String err = errOf(svc.setProperty("obj", GOOD_ADDR, "x", ""));
+        String err = errOf(svc.setProperty("obj", addr, "x", program));
         assertTrue("object maps are read-only over MCP: " + err,
                 err.contains("Object property maps cannot be written"));
         assertNoTransaction("object map write");
@@ -509,16 +486,16 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("longs", mock(LongPropertyMap.class));
 
         assertEquals("value is required for an int property map",
-                errOf(svc.setProperty("ints", GOOD_ADDR, "", "")));
+                errOf(svc.setProperty("ints", addr, "", program)));
         assertEquals("value is required for a long property map",
-                errOf(svc.setProperty("longs", GOOD_ADDR, "", "")));
+                errOf(svc.setProperty("longs", addr, "", program)));
         assertNoTransaction("missing value for a typed map");
     }
 
     public void testSetPropertyRejectsUnparseableNumericValue() {
         stubMap("ints", mock(IntPropertyMap.class));
 
-        String err = errOf(svc.setProperty("ints", GOOD_ADDR, "abc", ""));
+        String err = errOf(svc.setProperty("ints", addr, "abc", program));
         assertTrue("must blame the value and name the map: " + err,
                 err.contains("Value 'abc' is not valid for map 'ints'"));
         assertNoTransaction("bad numeric value is rejected before the transaction opens");
@@ -530,14 +507,14 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("ints", intMap);
         stubMap("strs", strMap);
 
-        Map<String, Object> intData = okOf(svc.setProperty("ints", GOOD_ADDR, " 42 ", ""));
+        Map<String, Object> intData = okOf(svc.setProperty("ints", addr, " 42 ", program));
         assertEquals("int", intData.get("value_type"));
         assertEquals(Integer.valueOf(42), intData.get("value"));
         // Cast to Object: the service calls the generic PropertyMap.add(Address, Object)
         // overload (Integer -> Object needs no unboxing), not IntPropertyMap.add(Address, int).
         verify(intMap).add(addr, (Object) Integer.valueOf(42));
 
-        Map<String, Object> strData = okOf(svc.setProperty("strs", GOOD_ADDR, " 42 ", ""));
+        Map<String, Object> strData = okOf(svc.setProperty("strs", addr, " 42 ", program));
         assertEquals("string", strData.get("value_type"));
         assertEquals("String maps must store the value verbatim, untrimmed", " 42 ", strData.get("value"));
         verify(strMap).add(addr, " 42 ");
@@ -547,7 +524,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         VoidPropertyMap voidMap = mock(VoidPropertyMap.class);
         stubMap("tags", voidMap);
 
-        Map<String, Object> data = okOf(svc.setProperty("tags", GOOD_ADDR, "", ""));
+        Map<String, Object> data = okOf(svc.setProperty("tags", addr, "", program));
         assertEquals("void", data.get("value_type"));
         assertNull("void maps store presence only", data.get("value"));
         verify(voidMap).add(addr);
@@ -559,20 +536,12 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // ==================================================================
 
     public void testGetPropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.getProperty("", GOOD_ADDR, "")));
-        assertEquals("address is required", errOf(svc.getProperty("m", "", "")));
+        assertEquals("map is required", errOf(svc.getProperty("", addr, program)));
+        assertEquals("address is required", errOf(svc.getProperty("m", null, program)));
     }
 
     public void testGetPropertyRejectsUnknownMap() {
-        assertTrue(errOf(svc.getProperty("nope", GOOD_ADDR, "")).contains("No property map named 'nope'"));
-    }
-
-    public void testGetPropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.getProperty("m", BAD_ADDR, ""));
-        assertNotNull(err);
-        assertTrue("must be the ServiceUtils parse hint: " + err, err.contains("could not be resolved"));
+        assertTrue(errOf(svc.getProperty("nope", addr, program)).contains("No property map named 'nope'"));
     }
 
     public void testGetPropertyReportsAbsentValueWithoutError() {
@@ -580,7 +549,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", strMap);
         when(strMap.hasProperty(addr)).thenReturn(false);
 
-        Map<String, Object> data = okOf(svc.getProperty("m", GOOD_ADDR, ""));
+        Map<String, Object> data = okOf(svc.getProperty("m", addr, program));
         assertEquals(Boolean.FALSE, data.get("has_value"));
         assertNull(data.get("value"));
         assertEquals("string", data.get("value_type"));
@@ -592,30 +561,21 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(strMap.hasProperty(addr)).thenReturn(true);
         when(strMap.get(addr)).thenReturn("stored");
 
-        Map<String, Object> data = okOf(svc.getProperty("m", GOOD_ADDR, ""));
+        Map<String, Object> data = okOf(svc.getProperty("m", addr, program));
         assertEquals(Boolean.TRUE, data.get("has_value"));
         assertEquals("stored", data.get("value"));
         assertEquals("00401000", data.get("address"));
     }
 
     public void testRemovePropertyRequiresMapAndAddress() {
-        assertEquals("map is required", errOf(svc.removeProperty("", GOOD_ADDR, "")));
-        assertEquals("address is required", errOf(svc.removeProperty("m", "", "")));
+        assertEquals("map is required", errOf(svc.removeProperty("", addr, program)));
+        assertEquals("address is required", errOf(svc.removeProperty("m", null, program)));
         assertNoTransaction("blank required params");
     }
 
     public void testRemovePropertyRejectsUnknownMap() {
-        assertTrue(errOf(svc.removeProperty("nope", GOOD_ADDR, "")).contains("No property map named 'nope'"));
+        assertTrue(errOf(svc.removeProperty("nope", addr, program)).contains("No property map named 'nope'"));
         assertNoTransaction("unknown map");
-    }
-
-    public void testRemovePropertyBadAddressReturnsCleanParseError() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.removeProperty("m", BAD_ADDR, ""));
-        assertNotNull(err);
-        assertTrue("must be the ServiceUtils parse hint: " + err, err.contains("could not be resolved"));
-        assertNoTransaction("unparseable address");
     }
 
     public void testRemovePropertyReportsMapResult() {
@@ -623,7 +583,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", strMap);
         when(strMap.remove(addr)).thenReturn(true);
 
-        Map<String, Object> data = okOf(svc.removeProperty("m", GOOD_ADDR, ""));
+        Map<String, Object> data = okOf(svc.removeProperty("m", addr, program));
         assertEquals(Boolean.TRUE, data.get("success"));
         assertEquals(List.of("Remove Property"), threading.writes);
     }
@@ -632,12 +592,8 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     // list_properties
     // ==================================================================
 
-    public void testListPropertiesRequiresMap() {
-        assertEquals("map is required", errOf(svc.listProperties("", "", "", 0, 100, "")));
-    }
-
     public void testListPropertiesRejectsUnknownMap() {
-        assertTrue(errOf(svc.listProperties("nope", "", "", 0, 100, ""))
+        assertTrue(errOf(svc.listProperties("nope", null, null, 0, 100, program))
                 .contains("No property map named 'nope'"));
     }
 
@@ -646,19 +602,9 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         stubMap("m", mock(StringPropertyMap.class));
 
         assertEquals("Provide both start and end to filter by range, or neither.",
-                errOf(svc.listProperties("m", GOOD_ADDR, "", 0, 100, "")));
+                errOf(svc.listProperties("m", addr, null, 0, 100, program)));
         assertEquals("Provide both start and end to filter by range, or neither.",
-                errOf(svc.listProperties("m", "", GOOD_ADDR, 0, 100, "")));
-    }
-
-    public void testListPropertiesReportsBadRangeEndpointsSeparately() {
-        stubMap("m", mock(StringPropertyMap.class));
-
-        String err = errOf(svc.listProperties("m", BAD_ADDR, GOOD_ADDR, 0, 100, ""));
-        assertTrue("bad start must be labelled 'start:': " + err, err.startsWith("start:"));
-
-        String err2 = errOf(svc.listProperties("m", GOOD_ADDR, BAD_ADDR, 0, 100, ""));
-        assertTrue("bad end must be labelled 'end:': " + err2, err2.startsWith("end:"));
+                errOf(svc.listProperties("m", null, addr, 0, 100, program)));
     }
 
     public void testListPropertiesPaginatesWithOffsetAndLimit() {
@@ -674,7 +620,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         when(strMap.getSize()).thenReturn(3);
         stubMap("m", strMap);
 
-        Map<String, Object> data = okOf(svc.listProperties("m", "", "", 1, 1, ""));
+        Map<String, Object> data = okOf(svc.listProperties("m", null, null, 1, 1, program));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> entries = (List<Map<String, Object>>) data.get("entries");
         assertEquals("offset=1,limit=1 must yield exactly the second entry", 1, entries.size());
@@ -689,11 +635,12 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         AddressIterator it = mock(AddressIterator.class);
         when(it.hasNext()).thenReturn(false);
         when(strMap.getPropertyIterator()).thenReturn(it);
+        when(strMap.getSize()).thenReturn(0);
         stubMap("m", strMap);
 
-        Map<String, Object> data = okOf(svc.listProperties("m", "", "", -5, 0, ""));
+        Map<String, Object> data = okOf(svc.listProperties("m", null, null, -5, 0, program));
         assertEquals("negative offset must clamp to 0", 0, data.get("offset"));
-        assertEquals("non-positive limit must fall back to the 100 default", 100, data.get("limit"));
+        assertFalse("explicit 0 means no limit, so limit is omitted", data.containsKey("limit"));
     }
 
     private static Address mockAddress(String rendered) {
@@ -703,46 +650,14 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
     }
 
     // ==================================================================
-    // No-program degradation
-    // ==================================================================
-
-    public void testAllStorageEndpointsDegradeGracefullyWithoutAProgram() {
-        // Every handler resolves the program first; with no program open each must
-        // return a clean error rather than NPE. NoopThreadingStrategy would throw loudly
-        // if any of them reached real transaction work.
-        ProgramScriptService bare =
-                new ProgramScriptService(ServiceFactory.stubProvider(), new NoopThreadingStrategy());
-        Response[] responses = {
-            bare.listOptionGroups(""),
-            bare.getProgramOptions(GROUP, ""),
-            bare.setProgramOption(GROUP, "k", "v", "string", ""),
-            bare.removeProgramOption(GROUP, "k", ""),
-            bare.listPropertyMaps(""),
-            bare.createPropertyMap("m", "string", ""),
-            bare.deletePropertyMap("m", ""),
-            bare.setProperty("m", GOOD_ADDR, "1", ""),
-            bare.getProperty("m", GOOD_ADDR, ""),
-            bare.removeProperty("m", GOOD_ADDR, ""),
-            bare.listProperties("m", "", "", 0, 100, ""),
-        };
-        for (Response r : responses) {
-            assertNotNull("handler returned null instead of an error Response", r);
-            assertTrue("expected a graceful 'No program loaded' error, got: " + r.toJson(),
-                    r.toJson().contains("No program loaded"));
-        }
-    }
-
-    // ==================================================================
     // Annotation contract
     // ==================================================================
 
-    /** The 11 storage tools, as (method name, HTTP method, expected tool path). */
+    /** The 9 storage tools, as (method name, HTTP method, expected tool path). */
     private static final String[][] STORAGE_TOOLS = {
-        {"listOptionGroups",    "GET",  "/list_option_groups"},
         {"getProgramOptions",   "GET",  "/get_program_options"},
         {"setProgramOption",    "POST", "/set_program_option"},
         {"removeProgramOption", "POST", "/remove_program_option"},
-        {"listPropertyMaps",    "GET",  "/list_property_maps"},
         {"createPropertyMap",   "POST", "/create_property_map"},
         {"deletePropertyMap",   "POST", "/delete_property_map"},
         {"setProperty",         "POST", "/set_property"},
@@ -762,7 +677,7 @@ public class ProgramStorageEndpointsValidationTest extends TestCase {
         return matches.get(0);
     }
 
-    public void testAllElevenStorageToolsAreRegistered() {
+    public void testAllNineStorageToolsAreRegistered() {
         for (String[] tool : STORAGE_TOOLS) {
             McpTool ann = storageMethod(tool[0]).getAnnotation(McpTool.class);
             assertEquals(tool[0] + " path", tool[2], ann.path());

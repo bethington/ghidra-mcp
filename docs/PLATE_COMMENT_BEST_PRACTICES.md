@@ -20,7 +20,7 @@ Ghidra's event system is asynchronous. When you set a plate comment:
 ```python
 # Step 1: Set plate comment
 result = batch_set_comments(
-    function_address="0x6fb6aef0",
+    address="0x6fb6aef0",
     plate_comment=comprehensive_comment,
     decompiler_comments=[...],
     disassembly_comments=[...]
@@ -51,7 +51,7 @@ functions_to_document = [
 for func_addr in functions_to_document:
     # Document the function
     batch_set_comments(
-        function_address=func_addr,
+        address=func_addr,
         plate_comment=generate_plate_comment(func_addr),
         decompiler_comments=generate_decompiler_comments(func_addr)
     )
@@ -78,7 +78,7 @@ async def document_and_verify(function_address, plate_comment):
 
     # Set comment
     result = batch_set_comments(
-        function_address=function_address,
+        address=function_address,
         plate_comment=plate_comment
     )
 
@@ -142,23 +142,23 @@ When you immediately call `analyze_function_completeness`:
 
 ```python
 # Set plate comment
-batch_set_comments(function_address="0x6fb6aef0", plate_comment=comment)
+batch_set_comments(address="0x6fb6aef0", plate_comment=comment)
 
 # Get decompiled code
-decompiled = get_decompiled_code(function_address="0x6fb6aef0")
+decompiled = get_functions(function="0x6fb6aef0", fields="decompiled_code")
 
 # Check if comment appears
 if "Algorithm:" in decompiled:
     print("Plate comment is present")
 ```
 
-**Why it fails:** The decompiled C code (`getDecompiledFunction().getC()`) does NOT include the plate comment. Plate comments only appear in Ghidra's UI header, not in the decompilation output.
+**Why it fails:** The decompiled C code (`getDecompiledFunction().getC()`) does NOT include the plate comment. Plate comments only appear in Ghidra's UI header, not in the decompilation output. To read one back, ask for it directly: `get_functions(function=..., fields="plate_comment")` or `get_comment(address)`.
 
 ✅ **Correct:**
 
 ```python
 # Set plate comment
-batch_set_comments(function_address="0x6fb6aef0", plate_comment=comment)
+batch_set_comments(address="0x6fb6aef0", plate_comment=comment)
 
 # Wait for propagation
 time.sleep(1.5)

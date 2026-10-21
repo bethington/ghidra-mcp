@@ -26,7 +26,24 @@
 
   "/mcp/health": {
     "status": "ok",
-    "program_open": true
+    "server_kind": "gui",
+    "version": {
+      "plugin_version": "7.0.0",
+      "plugin_name": "GhidraMCP",
+      "full_version": "7.0.0 (build 0, 0)",
+      "build_timestamp": "0",
+      "build_number": "0",
+      "ghidra_version": "12.1.3",
+      "java_version": "21",
+      "endpoint_count": 215
+    },
+    "connected": true,
+    "open_program_count": 1,
+    "uptime_seconds": 0,
+    "active_requests": 0,
+    "http_pool": {"configured_size": 10, "current_size": 10, "largest_size": 10,
+                  "queue_size": 0, "completed_tasks": 0},
+    "memory_mb": {"used": 0, "total": 0, "max": 0}
   },
 
   "/list_open_programs": {

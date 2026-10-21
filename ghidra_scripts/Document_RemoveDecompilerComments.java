@@ -6,9 +6,9 @@
 // Output: Removes auto-generated comments from the current function.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Remove auto-generated decompiler comments
-// @menupath Diablo 2.Documentation.Remove Decompiler Comments
+// @menupath GhidraMCP.Documentation.Remove Decompiler Comments
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
@@ -40,7 +40,7 @@ public class Document_RemoveDecompilerComments extends GhidraScript {
         Address minAddr = func.getBody().getMinAddress();
         Address maxAddr = func.getBody().getMaxAddress();
 
-        for (Address addr = minAddr; addr <= maxAddr && !monitor.isCancelled(); addr = addr.add(1)) {
+        for (Address addr = minAddr; addr.compareTo(maxAddr) <= 0 && !monitor.isCancelled(); addr = addr.add(1)) {
             CodeUnit cu = listing.getCodeUnitAt(addr);
             if (cu != null) {
                 totalCount++;

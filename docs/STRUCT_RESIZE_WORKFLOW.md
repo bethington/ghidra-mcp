@@ -10,7 +10,7 @@ Generic guidance for growing, shrinking, or rebuilding C/C++ structures in Ghidr
 | 1-byte demangler/placeholder blocks same name | `create_struct` with `replace_placeholder=true`, or `resolve_duplicate_type` then `create_struct` |
 | Grow/shrink total size, keep fields that still fit | `resize_struct` |
 | Replace entire layout (export → edit → re-import) | `recreate_struct` |
-| Change one field's type | `modify_struct_field_type` or `embed_struct_field` (by-value nested struct) |
+| Change one field's type (or embed a struct by value) | `modify_struct_field` with `new_type` |
 | Remove unused `/Demangler` stub | `resolve_duplicate_type` |
 | Fix `void * this` after member-function prototype | `set_function_this_type` |
 

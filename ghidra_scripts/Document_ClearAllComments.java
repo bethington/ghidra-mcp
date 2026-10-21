@@ -6,9 +6,9 @@
 // Output: Removes specified comment types from the program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Clear PRE, POST, and EOL comments from program
-// @menupath Diablo 2.Documentation.Clear All Comments
+// @menupath GhidraMCP.Documentation.Clear All Comments
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

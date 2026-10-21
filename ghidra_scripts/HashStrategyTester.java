@@ -4,7 +4,7 @@
 //@author GhidraMCP
 //@category Documentation
 //@keybinding
-//@menupath D2.Hash Strategy Tester
+//@menupath GhidraMCP.Hash Strategy Tester
 //@toolbar
 
 import ghidra.app.script.GhidraScript;

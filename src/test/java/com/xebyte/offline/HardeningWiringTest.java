@@ -30,36 +30,25 @@ public class HardeningWiringTest extends TestCase {
         return ProjectSource.readMainSource(parts);
     }
 
-    /** The TCP request wrapper must invoke the cross-origin guard. */
-    public void testTcpSafeHandlerCallsCrossOriginGuard() throws IOException {
-        String src = read("GhidraMCPPlugin.java");
-        assertTrue("safeHandler must call rejectCrossOriginRequest",
-                src.contains("rejectCrossOriginRequest("));
-    }
-
-    /** The headless request wrapper must invoke the cross-origin guard. */
-    public void testHeadlessSafeContextCallsCrossOriginGuard() throws IOException {
-        String src = read("headless", "GhidraMCPHeadlessServer.java");
-        assertTrue("safeContext must call rejectCrossOriginRequest",
-                src.contains("rejectCrossOriginRequest("));
-    }
-
     /**
-     * The UDS dispatch loop must enforce the bearer token before invoking the
-     * handler — otherwise a configured token silently doesn't apply on the
-     * socket transport.
+     * McpHttpServer's guard -- which every route on every transport of both the
+     * headless server and the GUI plugin goes through -- must apply the
+     * cross-origin guard (on TCP) and the bearer token before the handler runs.
      */
-    public void testUdsDispatchEnforcesBearerAuth() throws IOException {
-        String src = read("core", "UdsHttpServer.java");
-        assertTrue("UDS dispatch must check matchesBearerAuth",
+    public void testMcpHttpServerGuardsEveryRoute() throws IOException {
+        String src = read("core", "McpHttpServer.java");
+        assertTrue("guard must call rejectCrossOriginRequest",
+                src.contains("rejectCrossOriginRequest("));
+        assertTrue("guard must check matchesBearerAuth",
                 src.contains("matchesBearerAuth("));
-        assertTrue("UDS dispatch must exempt only health paths",
-                src.contains("isAuthExemptPath("));
-        // The auth check must sit before the handler is invoked, not after.
         int authIdx = src.indexOf("matchesBearerAuth(");
         int handleIdx = src.indexOf("handler.handle(exchange)");
         assertTrue("Bearer check must precede handler.handle()",
                 authIdx > 0 && handleIdx > 0 && authIdx < handleIdx);
+        assertTrue("UDS routes must be registered through the guard",
+                src.contains("uds.createContext(path, guard(handler, false))"));
+        assertTrue("TCP routes must be registered through the guard",
+                src.contains("guard(handler, true)"));
     }
 
     /** Destructive project ops must honor the project-scope containment guard. */
@@ -67,10 +56,13 @@ public class HardeningWiringTest extends TestCase {
         String src = read("core", "ProgramScriptService.java");
         String delete = body(src, "/delete_file");
         String create = body(src, "/create_folder");
-        assertTrue("deleteFile must call isPathInProjectScope",
-                delete.contains("isPathInProjectScope("));
-        assertTrue("createFolder must call isPathInProjectScope",
-                create.contains("isPathInProjectScope("));
+        // Scope lives in ProjectPaths.file/folder — one check for every site.
+        assertTrue("deleteFile must resolve through ProjectPaths.file or findFile",
+                delete.contains("ProjectPaths.file(") || delete.contains("ProjectPaths.findFile("));
+        assertTrue("createFolder must resolve through ProjectPaths.folder",
+                create.contains("ProjectPaths.folder("));
+        assertTrue("ProjectPaths.file/folder must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
     }
 
     /**
@@ -96,7 +88,7 @@ public class HardeningWiringTest extends TestCase {
         ProgramScriptService scripts = new ProgramScriptService(
                 ServiceFactory.stubProvider(), new NoopThreadingStrategy());
         Response r = scripts.runGhidraScript(
-                "AnyScript.java", "", "no-such-program-should-never-resolve", 0);
+                "AnyScript.java", "", null, 0);
         assertTrue("Sink must return an error when scripts are disabled",
                 r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
@@ -117,13 +109,84 @@ public class HardeningWiringTest extends TestCase {
         int sig = indexOfScriptPathOverload(src);
         assertTrue("Could not locate the runGhidraScript overload declaring the "
                 + "script_path @Param", sig >= 0);
-        // The areScriptsAllowed() gate must appear early in the method body,
-        // before the program is resolved.
         int gate = src.indexOf("areScriptsAllowed()", sig);
-        int resolve = src.indexOf("getProgramOrError", sig);
+        int usesProgram = src.indexOf("scriptState(", sig);
         assertTrue("runGhidraScript sink must check areScriptsAllowed()", gate >= 0);
-        assertTrue("Gate must precede program resolution", gate < resolve);
+        assertTrue("Sink must take a resolved Program", src.indexOf("Program program", sig) >= 0);
+        assertTrue("Gate must precede using the program in scriptState",
+                usesProgram >= 0 && gate < usesProgram);
     }
+
+
+    /** The dead, ungated /run_script route must stay unregistered.
+     *  (The old dead EndpointRegistry router was removed in 7.0.0.) */
+    public void testRunScriptRouteNotRegistered() throws IOException {
+        String plugin = read("GhidraMCPPlugin.java");
+        assertFalse("GhidraMCPPlugin must not register the ungated /run_script route",
+                plugin.contains("createContext(\"/run_script\""));
+    }
+
+    /** Request bodies must be bounded on every transport. */
+    public void testRequestBodiesAreBounded() throws IOException {
+        assertTrue("JsonHelper.parseBody must bound the read via readNBytes",
+                read("core", "JsonHelper.java").contains("readNBytes"));
+        assertTrue("GUI hand-coded routes must read bodies through the bounded JsonHelper.parseBody",
+                read("GhidraMCPPlugin.java").contains("JsonHelper.parseBody("));
+        assertTrue("McpHttpServer must reject an oversized Content-Length (413)",
+                read("core", "McpHttpServer.java").contains("exceedsMaxBody"));
+        assertTrue("UDS must reject oversized Content-Length (413)",
+                read("core", "UdsHttpServer.java").contains("MAX_REQUEST_BODY_BYTES"));
+    }
+
+    /**
+     * Top-level uncaught-exception handlers must not echo raw exception text
+     * to the client (path / class-name disclosure). Deliberate per-endpoint
+     * validation messages are unaffected.
+     */
+    public void testTopLevelErrorsAreGeneric() throws IOException {
+        assertTrue("McpHttpServer guard catch must return a generic message",
+                read("core", "McpHttpServer.java")
+                        .contains("Internal server error. See the Ghidra application log"));
+    }
+
+    /** Headless filesystem endpoints must honor GHIDRA_MCP_FILE_ROOT. */
+    public void testHeadlessFsEndpointsEnforceFileRoot() throws IOException {
+        String src = read("headless", "HeadlessManagementService.java");
+        // create_project, export_program, import_program, archive_project all
+        // route their path input through the containment helper.
+        int helperUses = countOccurrences(src, "resolveWithinRootOrLog(");
+        assertTrue("Expected create/export/import/archive to each call "
+                + "resolveWithinRootOrLog (>=4 uses incl. helper def), found " + helperUses,
+                helperUses >= 5);
+    }
+
+    /** /open_project takes a filesystem path on both servers, so both contain it. */
+    public void testOpenProjectEnforcesFileRootOnBothServers() throws IOException {
+        String headless = body(read("headless", "HeadlessManagementService.java"), "/open_project");
+        assertTrue("headless /open_project must resolve a local path within the file root",
+                headless.contains("resolveWithinRootOrLog("));
+        assertTrue("a ghidra:// URL is a repository, not a filesystem path",
+                headless.contains("ghidra://"));
+        String gui = read("GhidraMCPPlugin.java");
+        int at = gui.indexOf("openProject(String projectPath, boolean headless");
+        assertTrue("GUI openProject not found", at >= 0 && gui.lastIndexOf("private ", at) >= 0);
+        assertTrue("GUI /open_project must resolve the path within the file root",
+                gui.substring(at, at + 2500).contains("resolveWithinFileRoot("));
+    }
+
+    /** A scoped server must not check in outside its scope either. */
+    public void testCheckinEnforcesProjectFolderScope() throws IOException {
+        String src = read("core", "ProjectVersionControl.java");
+        int lookup = src.indexOf("private FileOrError file(String path)");
+        assertTrue("the file lookup must exist", lookup >= 0);
+        assertTrue("every operation that names a file goes through file() → ProjectPaths.file",
+                src.indexOf("ProjectPaths.file(", lookup) > lookup);
+        assertTrue("ProjectPaths.file must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
+        assertTrue("the folder walks must skip files outside the scope too",
+                src.split("isPathInProjectScope\\(", -1).length >= 3);
+    }
+
 
     /**
      * Locate the {@code runGhidraScript} overload whose first parameter is the
@@ -142,54 +205,7 @@ public class HardeningWiringTest extends TestCase {
     static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
             "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
                     + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
-            Pattern.MULTILINE | Pattern.DOTALL);
-
-    /** The dead, ungated /run_script route must stay unregistered.
-     *  (The old dead EndpointRegistry router was removed in 7.0.0.) */
-    public void testRunScriptRouteNotRegistered() throws IOException {
-        String plugin = read("GhidraMCPPlugin.java");
-        assertFalse("GhidraMCPPlugin must not register the ungated /run_script route",
-                plugin.contains("createContext(\"/run_script\""));
-    }
-
-    /** Request bodies must be bounded on every transport. */
-    public void testRequestBodiesAreBounded() throws IOException {
-        assertTrue("JsonHelper.parseBody must bound the read via readNBytes",
-                read("core", "JsonHelper.java").contains("readNBytes"));
-        assertTrue("TCP parsePostParams must bound the read",
-                read("GhidraMCPPlugin.java").contains("readNBytes")
-                        && read("GhidraMCPPlugin.java").contains("exceedsMaxBody"));
-        assertTrue("UDS must reject oversized Content-Length (413)",
-                read("core", "UdsHttpServer.java").contains("MAX_REQUEST_BODY_BYTES"));
-    }
-
-    /**
-     * Top-level uncaught-exception handlers must not echo raw exception text
-     * to the client (path / class-name disclosure). Deliberate per-endpoint
-     * validation messages are unaffected.
-     */
-    public void testTopLevelErrorsAreGeneric() throws IOException {
-        String plugin = read("GhidraMCPPlugin.java");
-        assertTrue("safeHandler catch must return a generic message",
-                plugin.contains("Internal server error. See the Ghidra application log"));
-        assertTrue("headless catch must return a generic message",
-                read("headless", "GhidraMCPHeadlessServer.java")
-                        .contains("Internal server error. See the Ghidra application log"));
-        assertTrue("UDS handler catch must return a generic message",
-                read("core", "ServerManager.java")
-                        .contains("Internal server error. See the Ghidra application log"));
-    }
-
-    /** Headless filesystem endpoints must honor GHIDRA_MCP_FILE_ROOT. */
-    public void testHeadlessFsEndpointsEnforceFileRoot() throws IOException {
-        String src = read("headless", "HeadlessManagementService.java");
-        // create_project, export_program, import_program, archive_project all
-        // route their path input through the containment helper.
-        int helperUses = countOccurrences(src, "resolveWithinRootOrLog(");
-        assertTrue("Expected create/export/import/archive to each call "
-                + "resolveWithinRootOrLog (>=4 uses incl. helper def), found " + helperUses,
-                helperUses >= 5);
-    }
+            java.util.regex.Pattern.MULTILINE | java.util.regex.Pattern.DOTALL);
 
     private static int countOccurrences(String s, String sub) {
         int n = 0, i = 0;

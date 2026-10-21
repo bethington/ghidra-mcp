@@ -55,15 +55,13 @@ public interface ProgramProvider {
     void setCurrentProgram(Program program);
 
     /**
-     * Close a program when the provider owns the program lifecycle.
-     *
-     * <p>GUI providers usually close through Ghidra's ProgramManager, so the
-     * default is a no-op. Headless providers should override this.
+     * Release this provider's handle on a program it holds.
      *
      * @param program The program to close
-     * @return true if the provider closed the program
+     * @param save    save unsaved changes first; false discards them
+     * @return true if the provider held the program and released it
      */
-    default boolean closeProgram(Program program) {
+    default boolean closeProgram(Program program, boolean save) {
         return false;
     }
 
@@ -93,16 +91,76 @@ public interface ProgramProvider {
     }
 
     /**
-     * Get a program by name, falling back to current program if name is null or empty.
+     * The analyst's windows (running CodeBrowsers and their program managers), when there
+     * are any. Headless has none and returns null, which is how GUI-only operations detect
+     * that they cannot run.
+     *
+     * @return The workbench, or null when running headless
+     */
+    default Workbench workbench() {
+        return null;
+    }
+
+    /**
+     * A ProgramManager from an open CodeBrowser, when one is running.
+     *
+     * <p>Distinct from walking the tool's own services: the FrontEnd tool has
+     * no ProgramManager, so a provider that can see CodeBrowsers answers here
+     * and spares the caller a second discovery pass.
+     *
+     * @return A ProgramManager, or null when none is reachable
+     */
+    default ghidra.app.services.ProgramManager findProgramManager() {
+        return null;
+    }
+
+    /**
+     * Close whatever is open for this project path, in whichever window holds it.
+     *
+     * <p>By project path rather than name on purpose — the caller is about to
+     * move or delete that DomainFile, and a name match would also close its
+     * namesakes.
+     *
+     * @param path The DomainFile path to close
+     * @return true if something was closed
+     */
+    default boolean closeProgramByPath(String path) {
+        return false;
+    }
+
+    /**
+     * Drop any handle this provider is holding for {@code nameOrPath}.
+     *
+     * <p>For providers that cache programs they opened themselves. A cached
+     * handle outlives the window that showed it, so closing in the GUI is not
+     * enough to release the file.
+     *
+     * @param nameOrPath Program name or project path
+     * @param save       save unsaved changes first; false discards them -- a close
+     *                   that was asked to discard must not have its edits saved on
+     *                   the way out by a cached handle
+     * @return true if a cached handle was released
+     */
+    default boolean releaseCachedProgram(String nameOrPath, boolean save) {
+        return false;
+    }
+
+    /**
+     * Resolve a program by name, or the current program when {@code name} is
+     * null or empty.
+     *
+     * <p>A non-blank name that misses must return null — falling back to the
+     * current program made a typo (or a closed program) silently operate on
+     * the wrong binary. Callers that need a hard error on miss should use
+     * {@link ServiceUtils#getProgramOrError}.
      *
      * @param name The program name (may be null)
-     * @return The resolved program
+     * @return The resolved program, or null when a non-blank name misses
      */
     default Program resolveProgram(String name) {
         if (name == null || name.isEmpty()) {
             return getCurrentProgram();
         }
-        Program program = getProgram(name);
-        return program != null ? program : getCurrentProgram();
+        return getProgram(name);
     }
 }

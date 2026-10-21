@@ -631,6 +631,37 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         self.assertEqual(bridge.state._active_socket, inst["socket"])
         self.assertIsNone(bridge.state._active_tcp)
 
+    def test_a_reconnect_keeps_the_groups_the_session_loaded(self):
+        """Found live: after a server restart the bridge re-registered only the default
+        groups, and the next call to a load_tool_group()-ed tool returned "Unknown tool"."""
+        import bridge_mcp_ghidra as bridge
+
+        inst = self._instance(url="http://127.0.0.1:8089")
+        st = bridge.state
+        saved = (st._lazy_mode, set(st._default_groups), set(st._loaded_groups))
+        st._lazy_mode = True
+        # In place: other code holds these set objects.
+        st._default_groups.clear()
+        st._default_groups.update({"listing", "function", "program"})
+        st._loaded_groups.clear()
+        st._loaded_groups.update({"listing", "function", "program", "decompile-checkout"})
+        try:
+            with (
+                patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
+                patch.object(bridge.transport, "uds_supported", return_value=True),
+                patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+                patch.object(bridge.registry, "register_tools_from_schema", return_value=0) as register,
+            ):
+                self.assertTrue(bridge.dispatch._try_reconnect())
+            self.assertEqual(register.call_args.kwargs["groups"],
+                             {"listing", "function", "program", "decompile-checkout"})
+        finally:
+            st._lazy_mode = saved[0]
+            st._default_groups.clear()
+            st._default_groups.update(saved[1])
+            st._loaded_groups.clear()
+            st._loaded_groups.update(saved[2])
+
     def test_reconnects_via_tcp_url_when_uds_unsupported(self):
         import bridge_mcp_ghidra as bridge
 
@@ -1289,12 +1320,12 @@ class TestGetTimeout(unittest.TestCase):
     def test_decompile_timeout(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function"), 75)
+        self.assertEqual(get_timeout("/get_functions"), 75)
 
     def test_requested_decompile_timeout_includes_transport_grace(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function", {"timeout": "120"}), 135)
+        self.assertEqual(get_timeout("/get_functions", {"timeout": "120"}), 135)
 
     def test_timeout_seconds_alias_uses_same_grace(self):
         from bridge_mcp_ghidra import get_timeout
@@ -1304,7 +1335,7 @@ class TestGetTimeout(unittest.TestCase):
     def test_requested_timeout_is_capped_with_grace_preserved(self):
         from bridge_mcp_ghidra import get_timeout
 
-        self.assertEqual(get_timeout("/decompile_function", {"timeout": "1800"}), 1815)
+        self.assertEqual(get_timeout("/get_functions", {"timeout": "1800"}), 1815)
 
     def test_script_timeout(self):
         from bridge_mcp_ghidra import get_timeout
@@ -1342,7 +1373,7 @@ class TestBuildToolFunction(unittest.TestCase):
             },
             "required": ["address"],
         }
-        fn = _build_tool_function("/decompile_function", "GET", schema)
+        fn = _build_tool_function("/get_functions", "GET", schema)
         self.assertTrue(callable(fn))
 
     def test_signature_has_correct_params(self):
@@ -1430,7 +1461,7 @@ class TestBuildToolFunction(unittest.TestCase):
         with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_dispatch_post:
             mock_dispatch_post.return_value = "ok"
             result = fn(
-                function_address="6FA26FD0",
+                function_address="0x6FA26FD0",
                 prototype="undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
                 program="/Vanilla/1.13d/D2MCPClient.dll",
             )
@@ -1649,9 +1680,54 @@ class TestParamAliases(unittest.TestCase):
         )
         with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
             mock_post.return_value = "ok"
-            fn(function_address="6FA26FD0", new_name="DrawFrame")
+            fn(function_address="0x6FA26FD0", new_name="DrawFrame")
         _, kwargs = mock_post.call_args
         self.assertEqual("0x6fa26fd0", kwargs["data"]["target"])
+
+    def test_a_function_name_through_an_address_alias_reaches_the_server_intact(self):
+        """A name passed through an address alias used to arrive as "0xsyna_..." and miss."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/analyze_function_completeness",
+            "GET",
+            {
+                "properties": {
+                    "function": {
+                        "type": "string",
+                        "source": "query",
+                        "param_type": "function_ref",
+                        "aliases": ["address", "name", "function_address", "function_name"],
+                    },
+                },
+                "required": [],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(name="syna_helper_180001000")
+        _, kwargs = mock_get.call_args
+        self.assertEqual("syna_helper_180001000", kwargs["params"]["function"])
+
+    def test_a_function_ref_is_not_rewritten_even_when_it_looks_like_an_address(self):
+        """function_ref values reach the server exactly as given; only param_type=address is normalised."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        fn = _build_tool_function(
+            "/analyze_function_completeness",
+            "GET",
+            {
+                "properties": {
+                    "function": {"type": "string", "source": "query", "param_type": "function_ref"},
+                },
+                "required": [],
+            },
+        )
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_get") as mock_get:
+            mock_get.return_value = "ok"
+            fn(function="0xABCDEF")
+        _, kwargs = mock_get.call_args
+        self.assertEqual("0xABCDEF", kwargs["params"]["function"])
 
     def test_tools_without_aliases_are_untouched(self):
         from bridge_mcp_ghidra import _build_tool_function
@@ -1941,58 +2017,124 @@ class TestUnixHTTPConnection(unittest.TestCase):
 
 
 class TestDebuggerEnabled(unittest.TestCase):
-    """_debugger_enabled gates the WinDbg debugger proxy tools.
+    """_debugger_enabled gates the 22 debugger proxy tools. OFF BY DEFAULT.
 
-    The standalone debugger server (d2-game-exe repo) wraps dbgeng and only
-    runs on Windows, so a *local* debugger URL can never serve on a non-Windows
-    host. Registration is gated accordingly to keep the tool list uncluttered.
+    The proxies forward to an external dbgeng debugger server that is not part
+    of this repo, so they register only when the operator asks for them:
+    GHIDRA_DEBUGGER_URL explicitly set, or GHIDRA_DEBUGGER_TOOLS truthy.
+    GHIDRA_DEBUGGER_TOOLS, when non-blank, decides outright. The host platform
+    plays no part -- being on Windows is not evidence a debugger server runs.
     """
 
-    def test_disabled_on_non_windows_with_local_url(self):
+    def test_disabled_with_nothing_set(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override=None))
+        self.assertFalse(_debugger_enabled(url_explicit=False, override=None))
 
-    def test_disabled_on_non_windows_with_localhost_name(self):
+    def test_disabled_on_windows_with_nothing_set(self):
+        """Windows used to enable the proxies by default. It no longer does."""
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(_debugger_enabled(url="http://localhost:8099", platform="darwin", override=None))
+        with patch.object(sys, "platform", "win32"), patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(_debugger_enabled(url_explicit=False))
 
-    def test_disabled_on_non_windows_with_ipv6_loopback(self):
+    def test_enabled_when_url_explicitly_set(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(_debugger_enabled(url="http://[::1]:8099", platform="linux", override=None))
+        self.assertTrue(_debugger_enabled(url_explicit=True, override=None))
 
-    def test_enabled_on_non_windows_with_remote_host(self):
-        """A remote Windows host running the server is reachable from Linux."""
+    def test_tools_flag_enables_without_url(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(_debugger_enabled(url="http://winbox.lan:8099", platform="linux", override=None))
+        self.assertTrue(_debugger_enabled(url_explicit=False, override="1"))
 
-    def test_enabled_on_windows_with_local_url(self):
+    def test_explicit_remote_url_does_not_register(self):
+        """A remote URL is refused at call time (loopback only), so it must not register."""
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(_debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override=None))
+        self.assertFalse(_debugger_enabled(url_explicit=True, url="http://winbox.lan:8099", override=None))
 
-    def test_override_forces_off_even_on_windows(self):
+    def test_override_enables_a_tunnelled_loopback_url(self):
+        """The supported route to another machine: forward the port to loopback, then opt in."""
+        from bridge_mcp_ghidra import _debugger_enabled
+        from bridge_mcp_ghidra.validation import validate_server_url
+
+        url = "http://127.0.0.1:18099"
+        self.assertTrue(_debugger_enabled(url_explicit=True, url=url, override=None))
+        self.assertTrue(_debugger_enabled(url_explicit=False, url=url, override="1"))
+        self.assertTrue(validate_server_url(url), "the call path must accept what registration enables")
+
+    def test_tools_flag_accepts_truthy_spellings(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="win32", override="0"))
+        for value in ("1", "true", "TRUE", "yes", "on", " On "):
+            with self.subTest(value=value):
+                self.assertTrue(_debugger_enabled(url_explicit=False, override=value))
 
-    def test_override_forces_on_even_on_linux_local(self):
+    def test_tools_flag_zero_wins_over_explicit_url(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertTrue(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override="1"))
+        self.assertFalse(_debugger_enabled(url_explicit=True, override="0"))
 
-    def test_blank_override_is_ignored(self):
-        """An empty string (e.g. unset-but-present env) falls back to auto-detect."""
+    def test_tools_flag_falsy_spellings_force_off(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        self.assertFalse(_debugger_enabled(url="http://127.0.0.1:8099", platform="linux", override=""))
+        for value in ("0", "false", "no", "off", "nonsense"):
+            with self.subTest(value=value):
+                self.assertFalse(_debugger_enabled(url_explicit=True, override=value))
+
+    def test_blank_tools_flag_is_ignored(self):
+        """An empty/whitespace GHIDRA_DEBUGGER_TOOLS falls back to the URL rule."""
+        from bridge_mcp_ghidra import _debugger_enabled
+
+        self.assertFalse(_debugger_enabled(url_explicit=False, override=""))
+        self.assertTrue(_debugger_enabled(url_explicit=True, override="   "))
+
+    def test_reads_tools_flag_from_environment(self):
+        from bridge_mcp_ghidra import _debugger_enabled
+
+        with patch.dict(os.environ, {"GHIDRA_DEBUGGER_TOOLS": "1"}):
+            self.assertTrue(_debugger_enabled(url_explicit=False))
+        with patch.dict(os.environ, {"GHIDRA_DEBUGGER_TOOLS": "0"}):
+            self.assertFalse(_debugger_enabled(url_explicit=True))
+
+
+def _bridge_in_subprocess(env_overrides: dict) -> dict:
+    """Import the bridge in a fresh interpreter and report what it registered.
+
+    Registration happens once, at import, from the environment -- so the only
+    honest way to test "the env var turns the tools on" is a new process.
+    """
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if k not in {"GHIDRA_DEBUGGER_URL", "GHIDRA_DEBUGGER_TOOLS"}}
+    env.update(env_overrides)
+    python_dir = str(Path(__file__).resolve().parent.parent.parent / "python")
+    env["PYTHONPATH"] = python_dir + os.pathsep + env.get("PYTHONPATH", "")
+    probe = (
+        "import json, bridge_mcp_ghidra as b\n"
+        "tools = b.mcp._tool_manager._tools\n"
+        "dbg = sorted(n for n in b.DEBUGGER_TOOL_NAMES if n in tools)\n"
+        "unannotated = sorted(n for n in dbg if tools[n].annotations is None\n"
+        "                     or tools[n].annotations.readOnlyHint is None)\n"
+        "print(json.dumps({'active': b._DEBUGGER_ACTIVE, 'registered': dbg,\n"
+        "  'in_static': sorted(b.DEBUGGER_TOOL_NAMES & b.STATIC_TOOL_NAMES),\n"
+        "  'url': b.DEBUGGER_URL, 'unannotated': unannotated}))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"bridge import failed:\n{result.stderr}")
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
 class TestDebuggerToolRegistration(unittest.TestCase):
-    """Debugger proxy tools register conditionally; their functions always exist."""
+    """Debugger proxy tools register only on request; their functions always exist."""
 
     def test_debugger_function_always_defined(self):
         """The proxy functions stay importable/callable even when not registered."""
@@ -2006,29 +2148,109 @@ class TestDebuggerToolRegistration(unittest.TestCase):
         self.assertTrue(bridge.DEBUGGER_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES))
         self.assertTrue(bridge.STATIC_TOOL_NAMES.issubset(bridge._ALL_STATIC_TOOL_NAMES))
 
-    @unittest.skipIf(sys.platform.startswith("win"), "proxies active on Windows")
+    def test_in_process_registration_matches_active_flag(self):
+        """Whatever this process decided, the tool table agrees with it."""
+        import bridge_mcp_ghidra as bridge
+
+        registered = bridge.DEBUGGER_TOOL_NAMES & set(bridge.mcp._tool_manager._tools)
+        if bridge._DEBUGGER_ACTIVE:
+            self.assertEqual(registered, bridge.DEBUGGER_TOOL_NAMES)
+            self.assertTrue(bridge.DEBUGGER_TOOL_NAMES.issubset(bridge.STATIC_TOOL_NAMES))
+        else:
+            self.assertEqual(registered, set())
+            self.assertFalse(bridge.DEBUGGER_TOOL_NAMES & bridge.STATIC_TOOL_NAMES)
+
+    def test_management_tools_always_registered(self):
+        import bridge_mcp_ghidra as bridge
+
+        self.assertIn("list_instances", bridge.mcp._tool_manager._tools)
+        self.assertIn("list_instances", bridge.STATIC_TOOL_NAMES)
+
+    @unittest.skipIf(
+        __import__("bridge_mcp_ghidra")._DEBUGGER_ACTIVE,
+        "debugger proxies enabled by this environment",
+    )
     def test_inactive_proxy_frees_clean_name_for_trace_rmi_tool(self):
-        """With the WinDbg proxies inactive (non-Windows local), Ghidra's own
-        TraceRmi /debugger/status (System B) gets the clean name, not _2."""
+        """With the WinDbg proxies off (the default), Ghidra's own TraceRmi
+        /debugger/status gets the clean name, not _2."""
         import bridge_mcp_ghidra as bridge
 
         schema = bridge._parse_schema({"tools": [{"path": "/debugger/status", "method": "GET", "params": []}]})
         self.assertEqual(schema[0]["name"], "debugger_status")
         self.assertFalse(schema[0]["name_collided"])
 
-    @unittest.skipIf(sys.platform.startswith("win"), "debugger tools active on Windows")
-    def test_debugger_tools_not_registered_on_non_windows(self):
+    def test_active_proxy_suffixes_trace_rmi_tool_so_both_stay_reachable(self):
+        """With the WinDbg proxies on, a TraceRmi tool sharing a proxy's name
+        registers as <name>_2, so both stay reachable (#554). Real /mcp/schema
+        entries carry no `name`, so the raw name is the path ("debugger/status"),
+        which is never an exact match for a static tool."""
         import bridge_mcp_ghidra as bridge
 
-        self.assertNotIn("debugger_attach", bridge.mcp._tool_manager._tools)
-        self.assertNotIn("debugger_attach", bridge.STATIC_TOOL_NAMES)
+        active = set(bridge.MANAGEMENT_TOOL_NAMES) | set(bridge.DEBUGGER_TOOL_NAMES)
+        with (
+            patch.object(bridge.schema, "STATIC_TOOL_NAMES", active),
+            patch.object(bridge.registry, "STATIC_TOOL_NAMES", active),
+        ):
+            schema = bridge._parse_schema(
+                {"tools": [{"path": "/debugger/status", "method": "GET", "params": []}]}
+            )
+            self.assertEqual(schema[0]["name"], "debugger_status_2")
+            self.assertTrue(schema[0]["name_collided"])
+            try:
+                self.assertTrue(bridge.registry._register_tool_def(schema[0]))
+                self.assertIn("debugger_status_2", bridge.mcp._tool_manager._tools)
+            finally:
+                bridge.mcp._tool_manager._tools.pop("debugger_status_2", None)
+                if "debugger_status_2" in bridge.state._dynamic_tool_names:
+                    bridge.state._dynamic_tool_names.remove("debugger_status_2")
 
-    @unittest.skipIf(sys.platform.startswith("win"), "debugger tools active on Windows")
-    def test_management_tools_still_registered_on_non_windows(self):
+    def test_exact_management_name_is_still_left_to_the_bridge_tool(self):
+        """A server endpoint named exactly like a bridge management tool keeps
+        the clean name and is skipped at registration — the bridge's own
+        wrapper (e.g. import_file) is the one clients should see."""
         import bridge_mcp_ghidra as bridge
 
-        self.assertIn("list_instances", bridge.mcp._tool_manager._tools)
-        self.assertIn("list_instances", bridge.STATIC_TOOL_NAMES)
+        schema = bridge._parse_schema(
+            {"tools": [{"path": "/import_file", "method": "POST", "params": []}]}
+        )
+        self.assertEqual(schema[0]["name"], "import_file")
+        self.assertFalse(bridge.registry._register_tool_def(schema[0]))
+
+    def test_nothing_set_registers_no_debugger_tools(self):
+        """The default, on every platform including Windows: zero proxy tools."""
+        report = _bridge_in_subprocess({})
+        self.assertFalse(report["active"])
+        self.assertEqual(report["registered"], [])
+        self.assertEqual(report["in_static"], [])
+
+    def test_explicit_url_registers_all_22(self):
+        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_URL": "http://127.0.0.1:9123"})
+        self.assertTrue(report["active"])
+        self.assertEqual(len(report["registered"]), 22)
+        self.assertEqual(len(report["in_static"]), 22)
+        self.assertEqual(report["url"], "http://127.0.0.1:9123")
+        # Every registered proxy must carry access annotations, or plan mode
+        # prompts for each one. Only checkable here, where they are registered.
+        self.assertEqual(report["unannotated"], [])
+
+    def test_tools_flag_registers_with_default_url(self):
+        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_TOOLS": "1"})
+        self.assertTrue(report["active"])
+        self.assertEqual(len(report["registered"]), 22)
+        self.assertEqual(report["url"], "http://127.0.0.1:8099")
+
+    def test_tools_flag_zero_overrides_explicit_url(self):
+        report = _bridge_in_subprocess(
+            {"GHIDRA_DEBUGGER_URL": "http://127.0.0.1:9123", "GHIDRA_DEBUGGER_TOOLS": "0"}
+        )
+        self.assertFalse(report["active"])
+        self.assertEqual(report["registered"], [])
+
+    def test_blank_url_counts_as_unset(self):
+        """`GHIDRA_DEBUGGER_URL=` (present but empty) must not switch the tools on."""
+        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_URL": "  "})
+        self.assertFalse(report["active"])
+        self.assertEqual(report["url"], "http://127.0.0.1:8099")
 
 
 if __name__ == "__main__":

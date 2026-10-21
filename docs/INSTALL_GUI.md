@@ -80,16 +80,19 @@ Ghidra unpacks the zip into your user profile:
 | Linux | `~/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/` |
 | macOS | `~/Library/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/` |
 
-## 4. Enable the plugin in CodeBrowser
+## 4. Enable the plugin in the project window
 
-After the restart, open a program in **CodeBrowser**. On the first launch after
-installing an extension Ghidra usually asks whether to configure the new
-plugins; answering yes lands you in the same dialog as below. If it did not
-ask, or you said no, open **File > Configure**.
+Enable it in the **project window**, the same window you installed it from. The
+plugin then runs whenever the project is open, with or without a CodeBrowser,
+and its menu appears under that window's **Tools**. This is also where
+`python -m tools.setup deploy` puts it.
 
-![CodeBrowser File menu with Configure](images/install/05-codebrowser-file-configure.png)
+After the restart, open **File > Configure** in the project window. It is the
+**Configure** item in the File menu shown in step 2.
 
-GhidraMCP is a **Utility** plugin. Click **Configure** under Utility.
+GhidraMCP is a **Utility** plugin. Click **Configure** under Utility. The
+screenshots below were taken from CodeBrowser's copy of the dialog, which looks
+the same.
 
 ![Configure Tool dialog showing the Utility package](images/install/06-configure-tool-utility.png)
 
@@ -98,6 +101,11 @@ Tick **GhidraMCPPlugin** and press **OK**, then **Close**.
 ![Configure Utility Plugins with GhidraMCPPlugin checked](images/install/07-utility-plugins-ghidramcp.png)
 
 Save the tool when Ghidra asks on exit, or the plugin is off again next time.
+
+Enabling it in CodeBrowser instead also works, but then the server only runs
+while a CodeBrowser is open and the menu moves to CodeBrowser's **Tools**. If
+both windows host it, the second one shares the running server: its status bar
+says so.
 
 ## 5. Check the server
 
@@ -120,7 +128,8 @@ curl http://127.0.0.1:8089/check_connection
 ```
 
 To change the port or turn a transport off: **Edit > Tool Options > GhidraMCP
-HTTP Server** in CodeBrowser, then **Tools > GhidraMCP > Restart Server**.
+HTTP Server** in the window that hosts the plugin, then **Tools > GhidraMCP >
+Restart Server**.
 
 ## Next
 
@@ -136,7 +145,11 @@ the client sees no tools.
   command above and rebuild or download the matching asset.
 - **No Tools > GhidraMCP menu.** The plugin is installed but not enabled in this
   tool. Repeat step 4, and save the tool.
-- **Server Status says TCP is not running.** Another process holds port 8089.
-  The plugin falls back to the next free port in its range; the status dialog
-  shows the one it bound. `netstat -ano | findstr :8089` on Windows or
+- **Server Status shows a port other than 8089.** Another process holds 8089,
+  so the plugin bound the next free port in its range (it tries the configured
+  port and the 15 after it). `netstat -ano | findstr :8089` on Windows or
   `lsof -i :8089` elsewhere names the other process.
+- **Server Status says `TCP: Disabled`.** Either **Enable TCP Transport** is
+  off in **Edit > Tool Options > GhidraMCP HTTP Server**, or every port in that
+  range was taken. The Unix socket transport can still be up; the bridge finds
+  it on its own.

@@ -55,6 +55,12 @@ SCANNED_SERVICES = (
     "HeadlessManagementService",
     "DebuggerService",
     "PromptPolicyService",
+    "FunctionBundleService",
+    "VersionControlService",
+    "ServerLifecycleService",
+    "GuiToolService",
+    "DocumentationApplyService",
+    "ProjectLifecycleService",
 )
 
 # Hand-registered routes get their descriptors from ManualToolDescriptors, which
