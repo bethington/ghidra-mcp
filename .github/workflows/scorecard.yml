@@ -12,7 +12,7 @@
 # config change (CODEOWNERS, branch protection, workflow hardening)
 # reflects in the badge within minutes instead of waiting a week.
 #
-# The push branch MUST be this repo's DEFAULT branch, currently `main`.
+# The push branch MUST be this repo's DEFAULT branch, currently `dev`.
 # scorecard-action validates this itself and hard-fails with
 # "validating options: only the default branch main is supported" on
 # anything else -- it is not a warning and not skippable.
@@ -38,7 +38,7 @@ on:
   schedule:
     - cron: '17 8 * * 1'   # Mondays 08:17 UTC
   push:
-    branches: [main]
+    branches: [dev]
   # Manual trigger so the score can be refreshed without forcing a
   # dummy commit (useful after enabling repo Settings toggles like
   # Dependabot security alerts or branch protection rulesets, which
