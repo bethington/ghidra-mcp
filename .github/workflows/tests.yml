@@ -178,7 +178,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: java-test-results
         path: target/surefire-reports/
@@ -188,7 +188,7 @@ jobs:
       # above enforces the ratchet (pom.xml); this artifact is for inspecting
       # where the gaps are — open target/site/jacoco/index.html.
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: jacoco-coverage-report
         path: target/site/jacoco/
@@ -198,7 +198,7 @@ jobs:
     # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
     - name: Upload build artifact
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: GhidraMCP-artifact
         path: target/GhidraMCP-*.zip
@@ -215,7 +215,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -277,7 +277,7 @@ jobs:
         # baseline is the point of a ratchet; a floor left far below actual
         # coverage does not make the gate safer, it widens the band in which a
         # stale-base run reports a number nobody should act on.
-        uv run --python ${{ matrix.python-version }} --group test \
+        uv run --locked --python ${{ matrix.python-version }} --group test \
           pytest tests/unit/ -v --tb=short --cov-fail-under=70
 
     - name: Upload coverage
@@ -300,7 +300,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -320,7 +320,7 @@ jobs:
       # No coverage floor here — Windows skips a handful of POSIX-only tests,
       # so the ubuntu job owns the ratchet; this leg gates on pass/fail only.
       run: |
-        uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
+        uv run --locked --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
   offline-http-tier:
     # Issue #112. The integration tier needs a live Ghidra on :8089 with a
@@ -345,7 +345,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -357,7 +357,7 @@ jobs:
       # measures tests/unit/ only. Folding this tier into that measurement
       # would move the baseline under PR #453's feet; it can be merged in
       # deliberately later (it would raise the number, not lower it).
-      run: uv run --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
+      run: uv run --locked --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
 
     - name: Replay the read-only integration tier against the fake
       # The same file that needs a live Ghidra on :8089, run with no Ghidra at
@@ -366,7 +366,7 @@ jobs:
       # the observed contract violations differ from the committed baseline in
       # EITHER direction.
       run: |
-        uv run --python 3.12 --group test pytest \
+        uv run --locked --python 3.12 --group test pytest \
           tests/integration/test_readonly_endpoints.py \
           -p tests.offline.replay_plugin -v --no-cov --tb=short
 
@@ -381,7 +381,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -448,7 +448,7 @@ jobs:
 
     - name: Upload Pester results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: pester-results
         path: tests/pester/pester-results.xml
