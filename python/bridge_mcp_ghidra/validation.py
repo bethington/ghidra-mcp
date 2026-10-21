@@ -150,7 +150,15 @@ def sanitize_address(address: str) -> str:
     - space::0xHEX -> space::HEX  (overlay; '::' separator and case preserved)
     - SPACE:HEX    -> SPACE:HEX   (preserve case — AddressFactory is case-sensitive; see #184)
     - 0xHEX        -> 0xhex       (lowercase)
-    - HEX          -> 0xHEX       (add 0x prefix)
+    - anything else -> unchanged
+
+    Everything else passes through untouched. Most ``address``-typed parameters
+    also accept a function NAME, and the server resolves both. Ghidra reads bare
+    hex as an address, and ``resolveFunction`` falls back to a name lookup.
+    Prefixing ``0x`` onto every value turned ``syna_helper_180001000`` into
+    ``0xsyna_helper_180001000`` and a function named ``add`` into ``0xadd``, so
+    get_functions and every other name-or-address tool could not find a function
+    by name through the bridge.
     """
     if not address:
         return address
@@ -166,7 +174,8 @@ def sanitize_address(address: str) -> str:
     if SEGMENT_ADDRESS_PATTERN.match(address):
         return address
 
-    # Step 3: plain hex normalization (unchanged logic)
-    if not address.startswith(("0x", "0X")):
-        address = "0x" + address
-    return address.lower()
+    # Step 3: 0x-hex is lowercased; a bare token (a name, or hex the server parses
+    # as-is) is the server's to resolve.
+    if HEX_ADDRESS_PATTERN.match(address.lower()):
+        return address.lower()
+    return address

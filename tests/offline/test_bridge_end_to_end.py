@@ -109,16 +109,16 @@ class TestSchemaRegistration:
     def test_schema_is_fetched_and_parsed_over_http(self, connected):
         defs = _tool_defs(connected)
         assert len(defs) == SCHEMA_TOOL_COUNT
-        assert "/decompile_function" in defs
+        assert "/get_xrefs_to" in defs
         assert defs["/add_function_tag"]["http_method"] == "POST"
 
     def test_every_tool_registers(self, connected, clean_registry):
         count = registry._fetch_and_register_schema(load_all=True)
         # Static bridge tools (list_instances, import_file, ...) win any name
         # collision, so a handful of schema tools are deliberately skipped.
-        assert count > 200
+        assert count >= 195
         assert count == len(state._dynamic_tool_names)
-        assert "decompile_function" in mcp._tool_manager._tools
+        assert "get_xrefs_to" in mcp._tool_manager._tools
 
     def test_lazy_mode_registers_only_the_default_groups(self, connected, clean_registry):
         state._lazy_mode = True
@@ -141,11 +141,11 @@ class TestSchemaRegistration:
 
 class TestWireFormat:
     def test_get_parameters_go_in_the_query_string(self, connected):
-        handler = _handler_for(_tool_defs(connected), "/decompile_function")
+        handler = _handler_for(_tool_defs(connected), "/get_xrefs_to")
         connected.reset()
         handler(address="0x10001000", program="Benchmark.dll")
 
-        call = connected.calls_to("/decompile_function")[0]
+        call = connected.calls_to("/get_xrefs_to")[0]
         assert call.method == "GET"
         assert call.query["program"] == ["Benchmark.dll"]
         assert call.body is None
@@ -173,10 +173,10 @@ class TestWireFormat:
         assert call.body["tags"] == "crc"
 
     def test_addresses_are_sanitised_before_dispatch(self, connected):
-        handler = _handler_for(_tool_defs(connected), "/decompile_function")
+        handler = _handler_for(_tool_defs(connected), "/get_xrefs_to")
         connected.reset()
         handler(address="  0x10001000  ", program="Benchmark.dll")
-        sent = connected.calls_to("/decompile_function")[0].query["address"][0]
+        sent = connected.calls_to("/get_xrefs_to")[0].query["address"][0]
         assert sent == "0x10001000"
 
     def test_empty_strings_are_dropped_unless_the_param_allows_them(self, connected):
@@ -186,10 +186,10 @@ class TestWireFormat:
         allow_empty, because clearing a comment IS the empty string."""
         defs = _tool_defs(connected)
 
-        dropped = _handler_for(defs, "/decompile_function")
+        dropped = _handler_for(defs, "/get_xrefs_to")
         connected.reset()
         dropped(address="0x10001000", program="")
-        assert "program" not in connected.calls_to("/decompile_function")[0].query
+        assert "program" not in connected.calls_to("/get_xrefs_to")[0].query
 
         # /set_comment declares allow_empty on `comment` -- clearing a comment
         # is unreachable through MCP if the bridge filters it out.
@@ -210,7 +210,7 @@ class TestWireFormat:
         assert "dry_run" not in (call.body or {})
 
     def test_strict_selector_mode_refuses_before_reaching_the_wire(self, connected):
-        handler = _handler_for(_tool_defs(connected), "/decompile_function")
+        handler = _handler_for(_tool_defs(connected), "/get_xrefs_to")
         connected.reset()
         state._require_selectors = True
         try:
@@ -218,7 +218,7 @@ class TestWireFormat:
         finally:
             state._require_selectors = False
         assert "Missing required program selector" in result
-        assert connected.calls_to("/decompile_function") == []
+        assert connected.calls_to("/get_xrefs_to") == []
 
 
 # ---------------------------------------------------------------------------

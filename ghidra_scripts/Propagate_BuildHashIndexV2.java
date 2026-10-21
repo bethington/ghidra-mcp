@@ -6,9 +6,9 @@
 // Output: V2 hash index with multi-phase matching signals.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Build hash index V2 with multi-phase matching
-// @menupath Diablo 2.Propagation.Build Hash Index V2
+// @menupath GhidraMCP.Propagation.Build Hash Index V2
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

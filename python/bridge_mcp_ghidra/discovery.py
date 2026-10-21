@@ -207,7 +207,7 @@ def _scan_tcp_for_project(
     None if no match found.
 
     Project matching mirrors connect_instance's UDS match order so the same
-    `connect_instance("D2Common")` call selects the same instance regardless
+    `connect_instance("MyProject")` call selects the same instance regardless
     of which transport found it.
     """
     if not project:

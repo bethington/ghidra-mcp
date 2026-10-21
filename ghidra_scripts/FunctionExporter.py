@@ -1,16 +1,16 @@
 #Function Exporter
 #
-#This script exports all Diablo 2 functions to JSON format with complete metadata including
+#This script exports all functions in the current program to JSON format with complete metadata including
 #function names, addresses, parameter counts, return types, disassembly snippets (first 5 bytes),
 #jumpback addresses for hooking, and detailed parameter information (name, type, location, size).
-#Outputs both formatted (game.json) and minified (game_minify.json) versions.
+#Outputs both formatted (functions.json) and minified (functions_minify.json) versions.
 #Useful for creating function hooking frameworks or external analysis tools.
 #
 #@author Ben Ethington
-#@category Diablo 2
+#@category GhidraMCP
 #@description Exports all functions to JSON with metadata, parameters, addresses, and hooking information
 #@keybinding
-#@menupath Diablo II.Function Exporter
+#@menupath GhidraMCP.Function Exporter
 
 import json
 
@@ -24,7 +24,7 @@ def minify(file_name):
     new_file_name = "{0}_minify.json".format(file_name)
     open(new_file_name, "w+", 1).write(json_string) # open and write json_string to file
     
-def write_json(data, filename='game.json'):
+def write_json(data, filename='functions.json'):
     with open(filename,'w') as f:
         json.dump(data, f, indent=2)
 
@@ -32,8 +32,6 @@ try:
     data = []
     o = 0
     for func in currentProgram.functionManager.getFunctions(1):
-        if "{}".format(func.getEntryPoint()) == "00681a48":
-            break
         o = o + 1
         e = {
             "name" : func.getName(),
@@ -74,7 +72,7 @@ try:
             t.append(w)
         data.append(e)
     write_json(data)
-    minify('game.json')
+    minify('functions.json')
     print("Exported {} functions".format(o))
 except CancelledException:
     pass

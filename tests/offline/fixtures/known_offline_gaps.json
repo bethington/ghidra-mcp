@@ -44,6 +44,11 @@
       "reason": "asserts 'high_pcodes' is ABSENT at default granularity; the only recorded /get_function_pcode response was captured with high_pcodes present."
     },
     {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionAnalysis::test_get_functions_decompiled_code",
+      "cause": "recording_gap",
+      "reason": "asserts the decompile actually produced code. No /get_functions response has ever been recorded -- every get_functions case in the conformance corpus is snapshot: false -- so the fake synthesizes a body with no decompiled_code. Only a recording or a live server can answer whether Ghidra decompiled the function; the stamp on that output is covered in CI by DecompileVariantLabellingGhidraTest instead."
+    },
+    {
       "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_by_name",
       "cause": "bad_fixture",
       "reason": "tests/conformance/snapshots/search_functions.snap is a recorded ERROR ('Search term is required'), not a successful response, so there is no `functions` list to assert on -- measured: AssertionError: assert 'functions' in {'error': 'Search term is required'}. The TEST is now correct: it called /search_functions_by_name, which is not an endpoint, and now calls /search_functions with the declared `name_pattern`. Re-record the snapshot with a real search term to unblock it."
@@ -72,6 +77,26 @@
       "node_id": "tests/integration/test_readonly_endpoints.py::TestSearchInstructions::test_rejects_empty_filters",
       "cause": "recording_gap",
       "reason": "asserts the endpoint REFUSES a call with no filters. The only recorded /search_instructions response was that refusal itself, which #466 deleted as a false golden -- a server's error is not a snapshot of its behaviour. With no recording the fake synthesizes a body, which has no 'error' key, so the assertion cannot be answered offline. Note this test only passed before because the recorded ERROR body happened to contain the key it looks for: it was asserting on the refusal, not on the endpoint. Re-record /search_instructions with a valid mnemonic and the sibling cases unblock too; this one needs a recorded refusal shape."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_list_functions_with_offset",
+      "cause": "recording_gap",
+      "reason": "asserts limit=5 returns at most 5; the one recorded /find_functions response was captured with limit=10, and the fake serves recordings rather than applying the limit."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_find_functions_filters_by_name_pattern",
+      "cause": "recording_gap",
+      "reason": "asserts every hit matches pattern=FUN_; the one recorded /find_functions response is unfiltered (the benchmark's functions are named), and the fake does not filter."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFunctionListing::test_search_functions_enhanced",
+      "cause": "recording_gap",
+      "reason": "asserts every hit matches name_pattern=FUN_; same single unfiltered /find_functions recording as test_find_functions_filters_by_name_pattern."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestStringsAndData::test_list_program_items_data_items",
+      "cause": "recording_gap",
+      "reason": "asserts kind=data_items echoes back; /list_program_items has one recording, taken with kind=segments (test_list_program_items_segments answers from it). A second kind needs a second recording, which one-response-per-endpoint cannot hold."
     }
   ]
 }

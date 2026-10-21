@@ -9,6 +9,7 @@ import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
 /**
@@ -40,10 +41,10 @@ public class AnnotationScanner {
     /**
      * Fallback used only by the constructors that predate {@link ThreadingStrategy}
      * support (kept so existing callers and offline test fixtures compile
-     * unchanged). Runs directly on the calling thread with no EDT dispatch and
-     * no locking -- adequate for single-threaded offline scanning, never used
-     * by the real plugin or headless server, both of which always pass their
-     * own strategy through the three-argument constructor below.
+     * unchanged). Runs directly on the calling thread with no locking --
+     * adequate for single-threaded offline scanning, never used by the real
+     * plugin or headless server, both of which always pass their own strategy
+     * through the three-argument constructor below.
      */
     private static final ThreadingStrategy DIRECT_NO_LOCK = new ThreadingStrategy() {
         @Override
@@ -65,11 +66,6 @@ public class AnnotationScanner {
             } finally {
                 program.endTransaction(tx, success);
             }
-        }
-
-        @Override
-        public boolean isHeadless() {
-            return true;
         }
     };
 
@@ -102,10 +98,9 @@ public class AnnotationScanner {
      *
      * @param programProvider  provider for resolving programs (enables dry-run support)
      * @param threadingStrategy strategy the dry-run wrapper uses to run the wrapped
-     *                          write on the same thread Ghidra's own threading model
-     *                          requires (the Swing EDT in GUI mode); pass the same
-     *                          instance the scanned services themselves were built
-     *                          with, e.g. {@link SwingThreadingStrategy}
+     *                          write under the same locking rules as a real write
+     *                          ({@code executeWrite}); pass the same instance the
+     *                          scanned services themselves were built with
      * @param services          service objects to scan
      */
     public AnnotationScanner(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
@@ -118,6 +113,11 @@ public class AnnotationScanner {
         // Sort by path for deterministic ordering
         endpoints.sort(Comparator.comparing(EndpointDef::path));
         descriptors.sort(Comparator.comparing(ToolDescriptor::path));
+    }
+
+    /** The provider every scanned endpoint resolves programs through; null for a bare scanner. */
+    public ProgramProvider getProgramProvider() {
+        return programProvider;
     }
 
     /** Returns all discovered endpoints. */
@@ -141,20 +141,42 @@ public class AnnotationScanner {
      * dynamic tool discovery) instead of being live-but-invisible.
      */
     public void addManualDescriptor(ToolDescriptor descriptor) {
+        // A path is advertised once. Adding the same manual list twice listed every
+        // hand-coded route twice in /mcp/schema. Where a route is both annotated and
+        // hand-described -- the catalog regenerator scans both servers' services in one
+        // bag, and /open_project is annotated headless but hand-coded with two extra
+        // GUI parameters -- the annotated descriptor stays and gains whatever
+        // parameters only the other one declares, so neither server's are lost.
+        for (int i = 0; i < descriptors.size(); i++) {
+            ToolDescriptor existing = descriptors.get(i);
+            if (!existing.path().equals(descriptor.path())) {
+                continue;
+            }
+            List<ParamDescriptor> merged = new ArrayList<>(existing.params());
+            Set<String> names = new HashSet<>();
+            for (ParamDescriptor p : merged) names.add(p.name());
+            for (ParamDescriptor p : descriptor.params()) {
+                if (names.add(p.name())) merged.add(p);
+            }
+            descriptors.set(i, new ToolDescriptor(existing.path(), existing.method(),
+                existing.description(), existing.category(), existing.categoryDescription(),
+                existing.access(), merged));
+            return;
+        }
         descriptors.add(descriptor);
         descriptors.sort(Comparator.comparing(ToolDescriptor::path));
     }
 
     /** Generate a JSON schema string describing all discovered tools. */
     public String generateSchema() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"tools\": [");
-        for (int i = 0; i < descriptors.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(descriptors.get(i).toJson());
+        List<Map<String, Object>> tools = new ArrayList<>();
+        for (ToolDescriptor d : descriptors) {
+            tools.add(d.toMap());
         }
-        sb.append("], \"count\": ").append(descriptors.size()).append("}");
-        return sb.toString();
+        return JsonHelper.toJson(JsonHelper.mapOf(
+            "tools", tools,
+            "count", descriptors.size()
+        ));
     }
 
     // ==================================================================
@@ -217,12 +239,29 @@ public class AnnotationScanner {
             McpTool tool, ParamBinding[] bindings) {
         boolean isWrite = "POST".equalsIgnoreCase(tool.method());
         return (query, body) -> {
+            // Pooled HTTP threads: clear on entry so a prior request that somehow
+            // skipped its finally cannot stamp this response with a stale program.
+            ServiceUtils.clearResolvedProgramName();
             try {
                 Object[] args = new Object[bindings.length];
+                IllegalArgumentException bindFailure = null;
                 for (int i = 0; i < bindings.length; i++) {
-                    if (bindings[i] != null) {
-                        args[i] = resolveParam(bindings[i], query, body);
+                    if (bindings[i] == null) {
+                        continue;
                     }
+                    // A malformed value is reported after the program and entities resolve,
+                    // so a missing program is still the first thing a caller hears about.
+                    try {
+                        args[i] = resolveParam(bindings[i], query, body);
+                    } catch (IllegalArgumentException e) {
+                        if (bindFailure == null) {
+                            bindFailure = e;
+                        }
+                    }
+                }
+                Function resolvedFunction = EntityParams.resolve(bindings, args, programProvider);
+                if (bindFailure != null) {
+                    throw bindFailure;
                 }
 
                 // Dry-run support: wrap POST endpoints in a transaction that always rolls back.
@@ -233,27 +272,38 @@ public class AnnotationScanner {
                 // rollback branch never ran and every dry_run body param fell through to
                 // method.invoke(...) unguarded. Confirmed live 2026-08-09 on /batch_set_comments
                 // (see reference_dry_run_silently_writes.md).
+                if (isWrite && isDryRunRequested(query, body) && !tool.dryRun()
+                        && !declaresParam(bindings, "dry_run")) {
+                    return Response.err("dry_run is not supported by " + tool.path() + ": its effect "
+                        + "is not a change to the program database (it saves, closes, checks in, or "
+                        + "works on files, the server or another service), so a rollback could not undo "
+                        + "it. Nothing was done.");
+                }
                 if (isWrite && isDryRunRequested(query, body) && programProvider != null) {
                     Program program = resolveProgramForDryRun(bindings, query, body);
                     if (program != null) {
-                        // The transaction must be opened on the same thread Ghidra's
-                        // threading model actually runs the write on -- the Swing EDT
-                        // in GUI mode. Opening it directly here left it on the calling
-                        // HTTP thread, while the wrapped service method's own
-                        // threadingStrategy.executeWrite dispatched the real work to
-                        // the EDT through a SEPARATE SwingUtilities.invokeAndWait,
-                        // nesting a transaction opened by one thread inside one opened
-                        // by another. That mismatched-thread nesting threw its own
-                        // ConcurrentModificationException on every dry run, independent
-                        // of any bug in the wrapped method itself. Routing the whole
-                        // thing through executeWrite keeps every transaction on one
-                        // thread: the service method's own executeWrite call sees it is
-                        // already on the EDT and just nests its transaction in place,
-                        // no second dispatch.
+                        // Ghidra nests by counting entries on ONE transaction, so an inner
+                        // rollback aborts the whole thing — with an ambient transaction open,
+                        // "undo just my part" is not something this can honour, and trying
+                        // would silently discard the outer owner's work. Refuse instead:
+                        // a clear error beats destroying an in-progress edit or script run.
+                        if (program.getCurrentTransactionInfo() != null) {
+                            return Response.err("dry_run cannot run while another transaction is "
+                                + "open on " + program.getName() + " (a GUI edit or a script). Its "
+                                + "rollback would abort that transaction too. Retry once the "
+                                + "in-progress operation finishes.");
+                        }
+                        // Opened inside executeWrite so the dry run holds the write lock
+                        // like the write it previews; the wrapped method's own
+                        // executeWrite re-enters that lock on this thread and nests its
+                        // transaction in this one, which the rollback then discards.
                         return threadingStrategy.executeWrite(program, "[DRY RUN] " + tool.path(), () -> {
                             int tx = program.startTransaction("[DRY RUN] " + tool.path());
                             try {
-                                Response result = (Response) method.invoke(service, args);
+                                // Inject before dry-run wrap so the program label survives
+                                // the Text conversion; wrapDryRun prefixes into the same object.
+                                Response result = stampResolvedFunction(injectResolvedProgram(
+                                        (Response) method.invoke(service, args)), resolvedFunction);
                                 return wrapDryRunResponse(result);
                             } finally {
                                 program.endTransaction(tx, false); // Always rollback
@@ -262,17 +312,140 @@ public class AnnotationScanner {
                     }
                 }
 
-                return (Response) method.invoke(service, args);
+                Response result = stampResolvedFunction(
+                        injectResolvedProgram((Response) method.invoke(service, args)), resolvedFunction);
+                return isWrite && tool.dryRun() ? warnIfUnsaveable(result) : result;
+            } catch (Refusal refusal) {
+                // A parameter that names nothing (no such program, no function there).
+                return Response.err(refusal.getMessage());
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
-                String msg = cause != null ? cause.getMessage() : e.getMessage();
-                LOG.log(Level.WARNING, "Error in " + tool.path() + ": " + msg, cause != null ? cause : e);
+                if (cause instanceof Refusal refusal) {
+                    return Response.err(refusal.getMessage());
+                }
+                Throwable fault = cause != null ? cause : e;
+                String msg = ServiceUtils.failureMessage(fault);
+                LOG.log(Level.WARNING, "Error in " + tool.path() + ": " + msg, fault);
                 return Response.err("Error in " + tool.path() + ": " + msg);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Invocation error for " + tool.path() + ": " + e.getMessage(), e);
-                return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
+                String msg = ServiceUtils.failureMessage(e);
+                LOG.log(Level.WARNING, "Invocation error for " + tool.path() + ": " + msg, e);
+                return Response.err("Error invoking " + tool.path() + ": " + msg);
+            } finally {
+                ServiceUtils.clearResolvedProgramName();
             }
         };
+    }
+
+    /**
+     * Append a warning to a successful program edit that can never be saved. The edit
+     * applied, so the response is right to say success; what it does not say is that the
+     * edit lives only in memory, because the program is an in-memory copy of a versioned
+     * file that is not checked out ({@link ProgramSaves#unsaveableReason}). Without this, every edit reported success
+     * and the loss surfaced only at close.
+     */
+    static Response warnIfUnsaveable(Response response) {
+        Program program = ServiceUtils.peekResolvedProgram();
+        if (program == null || !(response instanceof Response.Ok ok)
+                || !(ok.data() instanceof Map<?, ?> map) || !program.isChanged()) {
+            return response;
+        }
+        String reason = ProgramSaves.unsaveableReason(program);
+        if (reason == null) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        List<Object> warnings = new ArrayList<>();
+        Object existing = out.get("warnings");
+        if (existing instanceof Collection<?> c) {
+            warnings.addAll(c);
+        } else if (existing != null) {
+            warnings.add(existing);
+        }
+        warnings.add(reason);
+        out.put("warnings", warnings);
+        return Response.ok(out);
+    }
+
+    /**
+     * Name the function a call acted on: {@code resolved_function: {name, address}}. A function
+     * parameter accepts a name or any address inside the function, so the caller may not know
+     * which one it got until the response says.
+     */
+    static Response stampResolvedFunction(Response response, Function function) {
+        if (function == null || !(response instanceof Response.Ok ok) || !(ok.data() instanceof Map<?, ?> map)
+                || map.containsKey("resolved_function")) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            out.put(String.valueOf(e.getKey()), e.getValue());
+        }
+        out.put("resolved_function", JsonHelper.mapOf("name", function.getName(),
+            "address", AddressKeys.of(function)));
+        return Response.ok(out);
+    }
+
+    /**
+     * Stamp {@code "program": "<resolved>"} on object payloads that do not already
+     * name their subject. Skip Text/array/scalar and never overwrite
+     * {@code program}/{@code program_name} — get_metadata and get_function_count
+     * already speak for themselves.
+     */
+    static Response injectResolvedProgram(Response response) {
+        String name = ServiceUtils.peekResolvedProgramName();
+        if (name == null || name.isEmpty() || response == null) {
+            return response;
+        }
+        if (!(response instanceof Response.Ok ok)) {
+            return response;
+        }
+        Object data = ok.data();
+        if (data instanceof Map<?, ?> map) {
+            if (map.containsKey("program") || map.containsKey("program_name")) {
+                return response;
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("program", name);
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return Response.ok(out);
+        }
+        if (data == null
+                || data instanceof CharSequence
+                || data instanceof Number
+                || data instanceof Boolean
+                || data instanceof Collection
+                || data.getClass().isArray()) {
+            return response;
+        }
+        // Non-Map objects that still serialize as JSON objects (rare).
+        String json = response.toJson();
+        if (json == null || !json.startsWith("{")) {
+            return response;
+        }
+        Map<String, Object> parsed = JsonHelper.parseJson(json);
+        if (parsed.containsKey("program") || parsed.containsKey("program_name")) {
+            return response;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("program", name);
+        out.putAll(parsed);
+        return Response.ok(out);
+    }
+
+    /** A tool that takes {@code dry_run} itself implements its own preview. */
+    private static boolean declaresParam(ParamBinding[] bindings, String name) {
+        for (ParamBinding b : bindings) {
+            if (b != null && b.param != null && name.equals(b.param.value())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -319,12 +492,16 @@ public class AnnotationScanner {
      * Wrap a response to indicate it was a dry-run (no changes were committed).
      */
     private static Response wrapDryRunResponse(Response response) {
-        String json = response.toJson();
-        if (json.startsWith("{")) {
-            // Inject dry_run flag into the JSON object
-            return Response.text("{\"dry_run\":true," + json.substring(1));
+        Object data = response.asEmbeddable();
+        if (data instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("dry_run", true);
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), e.getValue());
+            }
+            return Response.ok(out);
         }
-        return Response.text("{\"dry_run\":true,\"result\":" + json + "}");
+        return Response.ok(JsonHelper.mapOf("dry_run", true, "result", data));
     }
 
     // ==================================================================
@@ -343,8 +520,8 @@ public class AnnotationScanner {
      * is not a missing argument but a WRONG TARGET: resolution falls through to the
      * current program, so a bookmark, comment or rename addressed to one program
      * lands in whichever program happens to be active, and the response says
-     * success. That is how 16442 bookmarks describing D2Common were written into
-     * D2Game without a single error.
+     * success. That is how 16442 bookmarks describing one DLL were written into
+     * a different DLL without a single error.
      *
      * This generalises what {@code isDryRunRequested} already does by hand for
      * {@code dry_run}, and for the same reason it gives: the Python bridge
@@ -401,8 +578,7 @@ public class AnnotationScanner {
 
         } else if (type == int.class) {
             int defaultVal = hasDef ? parseIntSafe(def, 0) : 0;
-            if (value == null || value.isEmpty()) return defaultVal;
-            return parseIntSafe(value, defaultVal);
+            return exactInt(value, defaultVal, hasDef, binding.param.value());
 
         } else if (type == Integer.class) {
             if (value == null || value.isEmpty()) {
@@ -438,6 +614,8 @@ public class AnnotationScanner {
             long defaultVal = hasDef ? parseLongSafe(def, 0L) : 0L;
             if (value == null || value.isEmpty()) return defaultVal;
             return parseLongSafe(value, defaultVal);
+        } else if (type == List.class) {
+            return requireMapList(value);
         }
         return value;
     }
@@ -458,7 +636,7 @@ public class AnnotationScanner {
 
         // Special: fieldsJson conversion (serialize complex objects to JSON string)
         if (binding.param.fieldsJson()) {
-            return convertFieldsJson(raw);
+            return raw == null && hasDef ? def : convertFieldsJson(raw);
         }
 
         if (type == String.class) {
@@ -467,7 +645,7 @@ public class AnnotationScanner {
 
         } else if (type == int.class) {
             int defaultVal = hasDef ? parseIntSafe(def, 0) : 0;
-            return JsonHelper.getInt(raw, defaultVal);
+            return exactInt(raw, defaultVal, hasDef, binding.param.value());
 
         } else if (type == Integer.class) {
             if (raw == null) {
@@ -511,7 +689,7 @@ public class AnnotationScanner {
             return convertStringMap(body, binding.param.value());
 
         } else if (type == List.class) {
-            return ServiceUtils.convertToMapList(raw);
+            return requireMapList(raw);
 
         } else if (type == Object.class) {
             return raw;
@@ -523,11 +701,43 @@ public class AnnotationScanner {
     // Type conversion helpers
     // ==================================================================
 
+    private static int exactInt(Object value, int defaultValue, boolean hasDefault, String name) {
+        // An empty query value ("?limit=") means "not given", as it always did.
+        boolean absent = value == null || value instanceof String text && text.isEmpty();
+        if (absent && hasDefault) return defaultValue;
+        try {
+            if (value instanceof Number || value instanceof String) {
+                return new java.math.BigDecimal(value.toString()).intValueExact();
+            }
+        } catch (NumberFormatException | ArithmeticException ignored) {
+        }
+        throw new IllegalArgumentException(name + " must be a signed 32-bit integer");
+    }
+
+    private static List<Map<String, String>> requireMapList(Object value) {
+        if (value == null) return null;
+        if (value instanceof String text) {
+            com.google.gson.JsonElement parsed = com.google.gson.JsonParser.parseString(text);
+            if (!parsed.isJsonArray()) throw new IllegalArgumentException("Expected an array of objects");
+            int index = 0;
+            for (com.google.gson.JsonElement item : parsed.getAsJsonArray()) {
+                if (!item.isJsonObject()) throw new IllegalArgumentException("Item " + index + " must be an object");
+                index++;
+            }
+            return JsonHelper.toMapStringList(parsed);
+        }
+        if (!(value instanceof List<?> items)) throw new IllegalArgumentException("Expected an array of objects");
+        for (int index = 0; index < items.size(); index++) {
+            if (!(items.get(index) instanceof Map<?, ?>))
+                throw new IllegalArgumentException("Item " + index + " must be an object");
+        }
+        return ServiceUtils.convertToMapList(value);
+    }
+
     private static String convertFieldsJson(Object obj) {
         if (obj == null) return null;
         if (obj instanceof String s) return s;
-        if (obj instanceof List<?> list) return ServiceUtils.serializeListToJson(list);
-        if (obj instanceof Map<?, ?>) return ServiceUtils.serializeMapToJson((Map<?, ?>) obj);
+        if (obj instanceof List<?> || obj instanceof Map<?, ?>) return JsonHelper.toJson(obj);
         return obj.toString();
     }
 
@@ -560,6 +770,21 @@ public class AnnotationScanner {
     // Schema generation
     // ==================================================================
 
+    /**
+     * What every {@code program} parameter means unless its tool says otherwise; it
+     * states what resolution accepts ({@link ServiceUtils#getProgramOrError}).
+     */
+    static final String PROGRAM_PARAM_DESCRIPTION = "Target program: its project path "
+        + "(/folder/name) or a name unique in the project; it is opened on first use. Omit it "
+        + "only when exactly one program is open.";
+
+    private static String describe(Param param) {
+        if (param.description().isEmpty() && "program".equals(param.value())) {
+            return PROGRAM_PARAM_DESCRIPTION;
+        }
+        return param.description();
+    }
+
     private ToolDescriptor buildDescriptor(McpTool tool, Method method, ParamBinding[] bindings,
             String category, String categoryDescription) {
         List<ParamDescriptor> params = new ArrayList<>();
@@ -571,7 +796,7 @@ public class AnnotationScanner {
                 binding.param.source().name().toLowerCase(),
                 !NO_DEFAULT.equals(binding.param.defaultValue()),
                 NO_DEFAULT.equals(binding.param.defaultValue()) ? null : binding.param.defaultValue(),
-                binding.param.description(),
+                describe(binding.param),
                 binding.param.paramType(),
                 binding.param.allowEmpty(),
                 // Declared alternative spellings. resolveQueryParam / resolveBodyParam
@@ -581,7 +806,7 @@ public class AnnotationScanner {
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
-            category, categoryDescription, params);
+            category, categoryDescription, tool.access(), params);
     }
 
     private static String jsonType(Class<?> type, boolean fieldsJson) {
@@ -602,29 +827,41 @@ public class AnnotationScanner {
 
     /** Describes an MCP tool for schema generation. */
     public record ToolDescriptor(String path, String method, String description,
-            String category, String categoryDescription, List<ParamDescriptor> params) {
+            String category, String categoryDescription, ToolAccess access,
+            List<ParamDescriptor> params) {
 
-        /** Serialize to JSON. */
-        public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"path\": ").append(jsonStr(path));
-            sb.append(", \"method\": ").append(jsonStr(method));
+        /** Map form used by {@link #toJson()} and by {@link AnnotationScanner#generateSchema()}. */
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("path", path);
+            out.put("method", method);
             if (description != null && !description.isEmpty()) {
-                sb.append(", \"description\": ").append(jsonStr(description));
+                out.put("description", description);
             }
             if (category != null && !category.isEmpty()) {
-                sb.append(", \"category\": ").append(jsonStr(category));
+                out.put("category", category);
             }
             if (categoryDescription != null && !categoryDescription.isEmpty()) {
-                sb.append(", \"category_description\": ").append(jsonStr(categoryDescription));
+                out.put("category_description", categoryDescription);
             }
-            sb.append(", \"params\": [");
-            for (int i = 0; i < params.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(params.get(i).toJson());
+            // Emitted only when classified, so an unclassified tool carries no
+            // hints and the client keeps its own defaults. The bridge turns
+            // these into MCP's readOnlyHint / destructiveHint annotations.
+            if (access != null && access != ToolAccess.UNSPECIFIED) {
+                out.put("read_only", access.isReadOnly());
+                out.put("destructive", access.isDestructive());
             }
-            sb.append("]}");
-            return sb.toString();
+            List<Map<String, Object>> paramMaps = new ArrayList<>();
+            for (ParamDescriptor p : params) {
+                paramMaps.add(p.toMap());
+            }
+            out.put("params", paramMaps);
+            return out;
+        }
+
+        /** Serialize to JSON via Gson. */
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
         }
     }
 
@@ -654,45 +891,39 @@ public class AnnotationScanner {
                  allowEmpty, List.of());
         }
 
-        /** Serialize to JSON. */
-        public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{\"name\": ").append(jsonStr(name));
-            sb.append(", \"type\": ").append(jsonStr(type));
-            sb.append(", \"source\": ").append(jsonStr(source));
-            sb.append(", \"required\": ").append(!optional);
+        /** Map form used by {@link #toJson()} and by {@link ToolDescriptor#toMap()}. */
+        public Map<String, Object> toMap() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("name", name);
+            out.put("type", type);
+            out.put("source", source);
+            out.put("required", !optional);
             if (defaultValue != null) {
-                sb.append(", \"default\": ").append(jsonStr(defaultValue));
+                out.put("default", defaultValue);
             }
             if (description != null && !description.isEmpty()) {
-                sb.append(", \"description\": ").append(jsonStr(description));
+                out.put("description", description);
             }
             if (paramType != null && !paramType.isEmpty()) {
-                sb.append(", \"param_type\": ").append(jsonStr(paramType));
+                out.put("param_type", paramType);
             }
             // Only emitted when the parameter actually declares alternatives, so the
-            // 200-odd tools that declare none keep byte-identical schema output.
+            // 200-odd tools that declare none keep schema output without an aliases key.
             if (aliases != null && !aliases.isEmpty()) {
-                sb.append(", \"aliases\": [");
-                for (int i = 0; i < aliases.size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(jsonStr(aliases.get(i)));
-                }
-                sb.append("]");
+                out.put("aliases", aliases);
             }
             // Only emitted when true: the bridge drops "" arguments unless a
             // parameter declares that empty carries meaning.
             if (allowEmpty) {
-                sb.append(", \"allow_empty\": true");
+                out.put("allow_empty", true);
             }
-            sb.append("}");
-            return sb.toString();
+            return out;
         }
-    }
 
-    private static String jsonStr(String s) {
-        if (s == null) return "null";
-        return "\"" + ServiceUtils.escapeJson(s) + "\"";
+        /** Serialize to JSON via Gson. */
+        public String toJson() {
+            return JsonHelper.toJson(toMap());
+        }
     }
 
     // ==================================================================
@@ -702,8 +933,27 @@ public class AnnotationScanner {
     /** Package-private so AnnotationScannerParamSourceTest can build one directly. */
     record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
         ParamBinding(Param param, Class<?> javaType) {
-            this(param, javaType, param.aliases());
+            this(param, javaType, effectiveAliases(param));
         }
+    }
+
+    /** The spellings a {@link Param#FUNCTION_REF} parameter accepts besides its own name. */
+    private static final List<String> FUNCTION_REF_ALIASES =
+        List.of("address", "name", "function_address", "function_name", "function");
+
+    /**
+     * The alias spellings of a parameter: those it declares, plus, for a function
+     * reference, the standard set. Declared once here instead of on the 26 endpoints that
+     * used to repeat the list, in two different orders.
+     */
+    static String[] effectiveAliases(Param param) {
+        if (!Param.FUNCTION_REF.equals(param.paramType())) {
+            return param.aliases();
+        }
+        Set<String> all = new LinkedHashSet<>(List.of(param.aliases()));
+        all.addAll(FUNCTION_REF_ALIASES);
+        all.remove(param.value());
+        return all.toArray(new String[0]);
     }
 }
 

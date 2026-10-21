@@ -4,6 +4,13 @@
 **Audience**: Ghidra MCP users, contributors, automation operators, and sponsors  
 **Scope**: Endpoint, workflow, and operational parity between GUI and headless modes
 
+> **Status note, 2026-10-07.** The first deliverable shipped in a narrower form:
+> every entry in `tests/endpoints.json` now carries a `servers` field (`gui`,
+> `headless`, or both), derived from the two servers' own wiring by
+> `tools/audit_server_scope.py` and checked by
+> `tests/unit/test_audit_server_scope.py`. The richer per-endpoint compatibility
+> metadata proposed below is still open.
+
 ## Summary
 
 Ghidra MCP supports both GUI and headless operation, but the two modes do not yet have a crisp public parity contract. This makes it harder for users to know which workflows can run unattended, harder for contributors to add endpoints safely, and harder for maintainers to prevent regressions.

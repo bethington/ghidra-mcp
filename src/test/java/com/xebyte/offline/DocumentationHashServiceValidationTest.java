@@ -4,6 +4,8 @@ import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.DocumentationHashService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
+import static org.mockito.Mockito.mock;
 import junit.framework.TestCase;
 
 /**
@@ -12,6 +14,8 @@ import junit.framework.TestCase;
  * access, plus the no-program degradation path.
  */
 public class DocumentationHashServiceValidationTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private DocumentationHashService docs;
 
@@ -24,35 +28,15 @@ public class DocumentationHashServiceValidationTest extends TestCase {
     // --- validate-first branches (run before the program lookup) ---
 
     public void testFindUndocumentedByStringRequiresAddress() {
-        Response r = docs.findUndocumentedByString("", "");
+        Response r = docs.findUndocumentedByString(null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("String address is required"));
     }
 
-    public void testBulkFuzzyMatchRequiresSourceProgram() {
-        Response r = docs.handleBulkFuzzyMatch("", "Target.dll", 0.7, 0, 50, null);
+    public void testMergeProgramDocumentationRefusesSameProgram() {
+        Response r = docs.mergeProgramDocumentation(programStub, programStub, false);
         assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("source_program parameter is required"));
+        assertTrue(((Response.Err) r).message().contains("same Program object"));
     }
 
-    public void testMergeProgramDocumentationRequiresSource() {
-        Response r = docs.mergeProgramDocumentation("", "Target.dll", false);
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("source is required"));
-    }
-
-    public void testMergeProgramDocumentationRequiresTarget() {
-        Response r = docs.mergeProgramDocumentation("Source.dll", "", false);
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("target is required"));
-    }
-
-    // --- graceful degradation past validation, with no program loaded ---
-
-    public void testFindUndocumentedByStringDegradesGracefullyWithValidAddress() {
-        Response r = docs.findUndocumentedByString("0x401000", "");
-        assertNotNull(r);
-        assertTrue("expected 'No program loaded', got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
 }

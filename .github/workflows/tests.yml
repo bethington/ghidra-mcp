@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [ main, dev, develop ]
+    branches: [ main, dev, develop, 'release/**' ]
   pull_request:
-    branches: [ main, dev, develop ]
+    branches: [ main, dev, develop, 'release/**' ]
 
 # OSSF Scorecard Token-Permissions: default to read-only so any job
 # without an explicit permissions block can only read repo contents.
@@ -25,7 +25,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Set up Java
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         java-version: ${{ matrix.java-version }}
         distribution: 'temurin'
@@ -36,14 +36,14 @@ jobs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: /tmp/ghidra
-        key: ghidra-12.1.3-PUBLIC-20260817
+        key: ghidra-12.1.4-PUBLIC-20260921
 
     - name: Download Ghidra
       if: steps.cache-ghidra.outputs.cache-hit != 'true'
       run: |
-        echo "Downloading Ghidra 12.1.3..."
+        echo "Downloading Ghidra 12.1.4..."
         curl -sL -o /tmp/ghidra.zip \
-          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip"
+          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip"
         mkdir -p /tmp/ghidra
         unzip -q /tmp/ghidra.zip -d /tmp/ghidra
         rm /tmp/ghidra.zip
@@ -51,7 +51,7 @@ jobs:
     - name: Install Ghidra JARs to Maven local repository
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
-        GHIDRA_VERSION="12.1.3"
+        GHIDRA_VERSION="12.1.4"
         echo "Using Ghidra directory: $GHIDRA_DIR"
 
         # Install Framework JARs
@@ -178,7 +178,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: java-test-results
         path: target/surefire-reports/
@@ -188,7 +188,7 @@ jobs:
       # above enforces the ratchet (pom.xml); this artifact is for inspecting
       # where the gaps are — open target/site/jacoco/index.html.
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: jacoco-coverage-report
         path: target/site/jacoco/
@@ -198,7 +198,7 @@ jobs:
     # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
     - name: Upload build artifact
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: GhidraMCP-artifact
         path: target/GhidraMCP-*.zip
@@ -215,7 +215,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -277,12 +277,12 @@ jobs:
         # baseline is the point of a ratchet; a floor left far below actual
         # coverage does not make the gate safer, it widens the band in which a
         # stale-base run reports a number nobody should act on.
-        uv run --python ${{ matrix.python-version }} --group test \
+        uv run --locked --python ${{ matrix.python-version }} --group test \
           pytest tests/unit/ -v --tb=short --cov-fail-under=70
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v5
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v5
       with:
         files: ./coverage.xml,./tests/coverage.xml
         flags: unittests
@@ -290,7 +290,7 @@ jobs:
 
   python-tests-windows:
     # The bridge has real platform forks (no AF_UNIX in Windows CPython, the
-    # drive-letter socket sweep, debugger proxy gating). The ubuntu matrix job
+    # drive-letter socket sweep). The ubuntu matrix job
     # only ever executes the POSIX half — this leg executes the Windows half
     # so both sides of every `os.name == "nt"` branch run on each PR.
     name: Python Tests (pytest, Windows)
@@ -300,7 +300,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -308,7 +308,7 @@ jobs:
       # A unit test shells out to `gradlew deploy --dry-run`, which needs a Java
       # 21 toolchain; windows-latest doesn't provide one Gradle can auto-detect
       # (the ubuntu runner ships JAVA_HOME_21 by default, Windows does not).
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
       with:
         java-version: '21'
         distribution: 'temurin'
@@ -320,7 +320,7 @@ jobs:
       # No coverage floor here — Windows skips a handful of POSIX-only tests,
       # so the ubuntu job owns the ratchet; this leg gates on pass/fail only.
       run: |
-        uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
+        uv run --locked --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
   offline-http-tier:
     # Issue #112. The integration tier needs a live Ghidra on :8089 with a
@@ -345,7 +345,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -357,7 +357,7 @@ jobs:
       # measures tests/unit/ only. Folding this tier into that measurement
       # would move the baseline under PR #453's feet; it can be merged in
       # deliberately later (it would raise the number, not lower it).
-      run: uv run --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
+      run: uv run --locked --python 3.12 --group test pytest tests/offline/ -v --no-cov --tb=short
 
     - name: Replay the read-only integration tier against the fake
       # The same file that needs a live Ghidra on :8089, run with no Ghidra at
@@ -366,25 +366,27 @@ jobs:
       # the observed contract violations differ from the committed baseline in
       # EITHER direction.
       run: |
-        uv run --python 3.12 --group test pytest \
+        uv run --locked --python 3.12 --group test pytest \
           tests/integration/test_readonly_endpoints.py \
           -p tests.offline.replay_plugin -v --no-cov --tb=short
 
   code-quality:
-    # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
-    # fallback), so this job surfaces lint/format drift without ever failing CI.
-    # It is intentionally NOT a gate — `build-status` does not depend on it. To make
-    # it gating, drop the `|| true` once the tree is verified flake8/black-clean.
-    name: Code Quality (advisory, non-blocking)
+    # flake8/black remain advisory (`|| true` / echo fallback) and do not gate.
+    # Ruff F (pyflakes) is gating: the tree is F-clean and `build-status` depends
+    # on this job so a new unused import / undefined name fails the build.
+    name: Code Quality (ruff F gating; flake8/black advisory)
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
+
+    - name: Ruff pyflakes (F)
+      run: uvx ruff check --select F python tests tools
 
     - name: Run flake8
       run: uvx flake8 python/bridge_mcp_ghidra/ --max-line-length=120 --ignore=E501,W503 || true
@@ -446,7 +448,7 @@ jobs:
 
     - name: Upload Pester results
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: pester-results
         path: tests/pester/pester-results.xml
@@ -454,13 +456,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint ]
+    needs: [ java-build, python-tests, python-tests-windows, offline-http-tier, pester-tests, markdown-lint, code-quality ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.offline-http-tier.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ] && [ "${{ needs.markdown-lint.result }}" = "success" ] && [ "${{ needs.code-quality.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

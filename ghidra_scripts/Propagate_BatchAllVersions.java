@@ -6,9 +6,9 @@
 // Output: Propagates function names, signatures, and comments to all versions.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Batch propagate documentation to all binary versions
-// @menupath Diablo 2.Propagation.Batch All Versions
+// @menupath GhidraMCP.Propagation.Batch All Versions
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

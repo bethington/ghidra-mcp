@@ -47,12 +47,15 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 # The repository's default branch. scorecard-action accepts no other push
 # trigger. Cross-checked against git's own `origin/HEAD` below wherever that
 # is resolvable, so this constant cannot quietly go stale on a dev machine.
-DEFAULT_BRANCH = "main"
+DEFAULT_BRANCH = "dev"
 
 # Branches that must be covered by the test + code-scanning workflows. `main` is
-# the release branch; `dev` is where the work happens and is the default branch,
-# so it is the one whose coverage gap is silent.
-REQUIRED_BRANCHES = ("main", "dev")
+# the release branch; `dev` is where the work happens, so it is the one whose
+# coverage gap is silent. `release/**` holds a release line while dev moves on
+# (7.0.0-rc.3 was cut from `release/7.0`): when it was added, the PR merged into
+# it had been checked against dev and the merge commit itself was never built.
+# Matched as the literal glob string, the same spelling the workflows use.
+REQUIRED_BRANCHES = ("main", "dev", "release/**")
 
 # Workflows that gate correctness and must therefore see every working branch.
 GATING_WORKFLOWS = ("tests.yml", "codeql.yml")

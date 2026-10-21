@@ -2,8 +2,8 @@
 
 `./gradlew.bat compileJava -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.2_PUBLIC`
 currently succeeds, but emits deprecation/removal warnings from Ghidra 12.1.
-These are not release blockers for v5.11.x, but they are compatibility work
-that should be paid down before the next Ghidra major/minor retarget.
+They are not release blockers, but they are compatibility work that should be
+paid down before the next Ghidra major/minor retarget.
 
 Priority order:
 

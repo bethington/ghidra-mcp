@@ -1,5 +1,6 @@
 """The FastMCP server singleton and its initialization-options patch."""
 
+from mcp import types
 from mcp.server.fastmcp import FastMCP, Context  # noqa: F401  (Context re-exported)
 from mcp.server.lowlevel.server import NotificationOptions
 
@@ -16,9 +17,66 @@ _orig_init_options = mcp._mcp_server.create_initialization_options
 
 
 def _patched_init_options(**kwargs):
-    return _orig_init_options(
+    options = _orig_init_options(
         notification_options=NotificationOptions(tools_changed=True), **kwargs
     )
+    _drop_unimplemented_capabilities(options)
+    return options
+
+
+def _drop_unimplemented_capabilities(options) -> None:
+    """Stop advertising `prompts` and `resources` while there are none.
+
+    FastMCP registers handlers for both unconditionally, so the handshake
+    claimed both capabilities and then answered `prompts/list` and
+    `resources/list` with empty arrays — clients render dead sections for
+    features this bridge does not provide. Gated on emptiness rather than
+    hardcoded off, so the capability reappears by itself if a prompt or
+    resource is ever registered.
+    """
+    capabilities = getattr(options, "capabilities", None)
+    if capabilities is None:  # pragma: no cover - SDK shape changed
+        return
+    if not mcp._prompt_manager.list_prompts():
+        capabilities.prompts = None
+    resources = mcp._resource_manager.list_resources()
+    templates = mcp._resource_manager.list_templates()
+    if not resources and not templates:
+        capabilities.resources = None
+
+
+def enable_tool_pagination(page_size: int) -> None:
+    """Serve `tools/list` in pages of ``page_size``.
+
+    Off unless asked for, and that is not timidity: pagination is optional in the
+    spec, a client that ignores ``nextCursor`` sees only the first page, and this
+    server exposes ~250 tools. Claude Code, for instance, has explicit cursor
+    loops for ``resources/list`` and ``skills/list`` but none for ``tools/list``,
+    so defaulting this on would hide most of the toolset from it. Turn it on for
+    a client that cannot take a single ~100KB response (159 tools measured at
+    98,834 bytes).
+
+    The cursor is the last name returned, over a name-sorted list, rather than an
+    index: the tool list is not fixed here — ``load_tool_group`` and a reconnect
+    both rewrite it — and an index cursor would then skip or repeat entries.
+    Resuming after a name works even if that tool has since been unloaded, so a
+    stale cursor degrades to a correct continuation instead of an error.
+    """
+
+    @mcp._mcp_server.list_tools()
+    async def _list_tools_paginated(
+        request: types.ListToolsRequest,
+    ) -> types.ListToolsResult:
+        tools = sorted(await mcp.list_tools(), key=lambda t: t.name)
+        cursor = request.params.cursor if request.params else None
+        if cursor:
+            tools = [tool for tool in tools if tool.name > cursor]
+        page = tools[:page_size]
+        remaining = len(tools) > page_size
+        return types.ListToolsResult(
+            tools=page,
+            nextCursor=page[-1].name if (page and remaining) else None,
+        )
 
 
 mcp._mcp_server.create_initialization_options = _patched_init_options

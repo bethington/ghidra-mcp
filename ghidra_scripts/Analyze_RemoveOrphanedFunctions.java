@@ -6,9 +6,9 @@
 // Output: Removes erroneously created functions from the program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Remove functions without proper padding before them
-// @menupath Diablo 2.Analysis.Remove Orphaned Functions
+// @menupath GhidraMCP.Analysis.Remove Orphaned Functions
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

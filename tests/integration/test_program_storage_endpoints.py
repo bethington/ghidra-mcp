@@ -5,13 +5,13 @@ metadata" (partial) and "Property maps" (missing) gaps in Ghidra's
 per-program / per-address storage surface:
 
   Program options
-    * list_option_groups     (GET)
+    * get_program_options (no group)     (GET)
     * get_program_options    (GET)
     * set_program_option     (POST)
     * remove_program_option  (POST)
 
   Property maps (typed per-address key -> value stores)
-    * list_property_maps     (GET)
+    * list_properties (no map)     (GET)
     * create_property_map    (POST)
     * delete_property_map     (POST)
     * set_property           (POST)
@@ -60,14 +60,14 @@ def require_server_and_program(server_available, program_loaded):
 def require_storage_endpoints(server_url, http_session):
     """Skip when the running plugin doesn't yet expose the storage tools.
 
-    Before this feature lands, /list_option_groups returns 404; after a
+    Before this feature lands, /get_program_options returns 404; after a
     deploy it returns 200. The tests are committed either way so the suite
     improves regardless; they only execute when the live build matches.
     """
-    response = http_session.get(f"{server_url}/list_option_groups", timeout=5)
+    response = http_session.get(f"{server_url}/get_program_options", timeout=5)
     if response.status_code == 404:
         pytest.skip(
-            "list_option_groups endpoint not registered on running server "
+            "get_program_options (no group) endpoint not registered on running server "
             "(feature not deployed yet — deploy the new JAR then re-run)"
         )
 
@@ -99,8 +99,8 @@ def _json(response):
 
 
 class TestProgramOptions:
-    def test_list_option_groups(self, http_client):
-        data = _json(http_client.get("/list_option_groups"))
+    def test_get_program_options_groups(self, http_client):
+        data = _json(http_client.get("/get_program_options"))
         assert "groups" in data
         names = [g["name"] for g in data["groups"]]
         assert PROGRAM_INFO_GROUP in names, f"expected '{PROGRAM_INFO_GROUP}' in {names}"
@@ -186,9 +186,9 @@ class TestPropertyMaps:
             assert created["success"] is True
             assert created["value_type"] == "string"
 
-            listing = _json(http_client.get("/list_property_maps"))
+            listing = _json(http_client.get("/list_properties"))
             entry = [m for m in listing["property_maps"] if m["name"] == name]
-            assert entry, f"'{name}' not in list_property_maps"
+            assert entry, f"'{name}' not in list_properties (no map)"
             assert entry[0]["value_type"] == "string"
             assert entry[0]["size"] == 0
 
@@ -219,7 +219,7 @@ class TestPropertyMaps:
         finally:
             deleted = _json(http_client.post("/delete_property_map", json_data={"name": name}))
             assert deleted["success"] is True
-            listing = _json(http_client.get("/list_property_maps"))
+            listing = _json(http_client.get("/list_properties"))
             assert not [m for m in listing["property_maps"] if m["name"] == name]
 
     def test_int_map_roundtrip(self, http_client, base_address):
