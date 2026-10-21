@@ -1252,7 +1252,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                     + "type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident "
                     + "local to the temporary that has to be renamed (rename_variables + "
                     + "set_decompiler_variable_type).",
-            category = "function")
+            category = "function", access = ToolAccess.READ_ONLY)
     public Response listDecompilerVariables(
             @Param(value = "function_address", paramType = "address", defaultValue = "",
                    description = "Function entry point address") String functionAddrStr,
@@ -1336,7 +1336,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                     + "replace=true overwrites whatever occupies the slot; remove=true deletes the local with "
                     + "the given name (the undo path). dry_run=true previews (the framework rolls the transaction "
                     + "back).",
-            category = "function")
+            category = "function", access = ToolAccess.WRITE)
     public Response applyLocalVariable(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Function containing the variable (0x-prefixed, or space:offset)") String functionAddrStr,
