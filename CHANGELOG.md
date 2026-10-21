@@ -32,6 +32,155 @@ the 235-tool schema recording); the figures above are the current ones.
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
 
+### Fixed — native JSON values reach Java Object parameters through MCP ([#598](https://github.com/bethington/ghidra-mcp/pull/598))
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted. The two parameters are now
+advertised to MCP clients with an untyped schema (`{}`); clients with a strict
+schema dialect may need to skip those two tools.
+
+### Fixed — parameter aliases take precedence over omitted defaults ([#599](https://github.com/bethington/ghidra-mcp/pull/599))
+
+FastMCP inserted a canonical parameter's default before the bridge folded
+aliases, so `get_functions(call_context_window=9)` silently sent
+`call_context_lines=3`. Defaults for aliased parameters are now applied after
+alias resolution. An explicitly supplied canonical value still wins, and
+omitting both spellings keeps the upstream default. Array aliases such as
+`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
+
+### Fixed — ARRAY classification honors numeric JSON counts ([#600](https://github.com/bethington/ghidra-mcp/pull/600))
+
+`apply_data_classification` handled `count` only as an Integer or string,
+but Gson represents JSON numbers as Double. A request with `count: 64`
+therefore applied a one-element array and reported success; numeric zero and
+negative counts also became one. Numeric counts now use Number conversion
+before the existing positive-count validation. String counts still work.
+
+### Added — decompiled C says which language variant produced it ([#509](https://github.com/bethington/ghidra-mcp/pull/509))
+
+Ghidra's language picker has five columns — processor, endian, size, **variant**,
+compiler. The first three come off the file header and the loader gets them
+right; the variant is the column it *guesses*, and it is the one that changes
+what the bytes mean. `PowerPC:BE:32:default` and `PowerPC:BE:64:VLE-32addr` (VLE)
+decode the same bytes into different instruction streams, so a VLE image opened
+as classic PowerPC decompiles into C that is syntactically perfect and entirely
+fictional. The decompiler reports success, the pseudocode reads plausibly, and
+nothing in the response said which of eleven dialects produced it.
+
+This server never exposed that choice at all. Now:
+
+- **Every response carrying decompiler C is stamped** with `language_id` and
+  `variant` — unconditionally, on every processor. On `get_functions` that is
+  any bundle carrying `decompiled_code` or `call_context` (the callers' decompiled
+  call sites), and in bulk mode **every entry** carries its own stamp, so a
+  bundle lifted out of a bulk response still says what produced it. The stamp is
+  applied in `FunctionFacts.build`, the single producer behind `get_functions`,
+  so any surface that renders that map inherits it. `force_decompile` and both
+  composites are stamped too. A read asking only for metadata
+  (`fields=signature,callers`) carries no stamp: the label travels with
+  decompiler output, not with every read of a function.
+- **A processor whose variants load more than one SLEIGH *decoder* also gets an
+  advisory**: `variant_ambiguous`, `variant_candidates`, and a `variant_notice`
+  sentence built from that processor's own candidates, saying the loader guessed
+  and what to do if the guess is wrong. Absent, not false, on unambiguous
+  processors — a field that is always present and almost always false is one
+  readers learn to skip.
+- **`variant=` is optional on all four C-returning endpoints** — `get_functions`,
+  `force_decompile`, `analyze_function_complete`, `analyze_for_documentation` —
+  **and checked when supplied.** Naming a variant the program is not loaded
+  under is refused (`variant_mismatch`), never answered: the decompiler decodes
+  with the language the program was imported under and cannot be asked for
+  another, so answering would return one dialect's output under a label the
+  caller chose — worse than no answer, because the label makes it look checked.
+  On `get_functions` the check runs ahead of the bulk dispatch and of field
+  selection, so `functions=` is not an unchecked way around it, and a
+  contradicted claim is refused even on a read that asks for no C: every field
+  that endpoint returns was decoded under the program's own language. A full
+  language id (`PowerPC:BE:64:VLE-32addr`) is accepted as well as a bare variant
+  name, and is compared whole, so `PowerPC:BE:64:default` cannot satisfy a 32-bit
+  program on a variant-column match. An unknown name is `unknown_variant`.
+- **`get_language_metadata` reports `variant_ambiguous`, `variant_enumeration_failed`
+  and `available_variants`** (each with `variant`, `language_id`, `description`,
+  the `decoder` it loads, and a `loaded` flag). This is where the legal values
+  are enumerated.
+- **`analyze_function_complete` and `analyze_for_documentation` stamp their
+  pseudocode too, and withhold only that field** on a contradicted claim
+  (`decompiled_code_withheld` says why). Both return `decompiled_code`, so
+  labelling just `get_functions` would have left the same C reachable one tool
+  over with nothing on it — the exact shape of the eviction-guard bypass in
+  `set_global`. Endpoints that decompile internally to derive a score or a
+  field-usage map (`analyze_function_completeness`, `analyze_struct_field_usage`)
+  are untouched: they hand back no pseudocode.
+
+**Why a label and not a required parameter.** The first implementation made
+`variant=` *mandatory* whenever the processor offered more than one variant row.
+Two measurements sank that. It fires on x86 at every width — `default` vs
+`System Management Mode` at 32-bit, `default` vs `compat32` at 64-bit — so every
+ordinary PE and ELF would have had to answer a question about a mode nothing
+loads, on the most-called tool in the catalog. And the confirmation is
+unenforceable: a refusal has to enumerate the legal values or it is an outage,
+which means it names the answer, and the caller — usually a model — re-sends the
+value it was just shown and records a confirmation it never performed. This
+repository already learned that shape from the eviction guard, whose refusal text
+must never name `allow_evict` because a model read the suggestion and used the
+override within one turn; here the override *is* the parameter, so the same fix
+was not available. What remains is the half that carries information rather than
+ceremony.
+
+**Ambiguity counts decoders, not variant rows.** Measured against Ghidra
+12.1.2's `.ldefs` files: of 83 processor/endian/size buckets, 30 hold more than
+one variant but only **19 hold more than one `.sla`**, covering **96 of 177
+non-deprecated languages** rather than 124. All three x86 buckets are in the
+difference (`x86.sla` for `default` and `System Management Mode`; `x86-64.sla`
+for `default` and `compat32`), along with MIPS/64, tricore, Z80, Z180, HC05,
+HC08 and HCS08. What stays flagged is what is worth flagging: PowerPC/BE/32 (ten
+decoders across eleven variants, VLE among them), PowerPC/LE/32, both ARM/32
+buckets, PIC-16, PIC-24, MIPS/32, AARCH64, SuperH, 68000, RISCV and Dalvik. The
+bucket key is `(processor, endian, getSize())` — `getSize()` is the *address*
+size, not the id's middle field, which is why `PowerPC:BE:64:VLE-32addr` (size
+32) shares a bucket with `PowerPC:BE:32:default`.
+
+**The honest limit**, stated rather than left to be found: a shared `.sla` is a
+proxy for "the loader was not choosing between two decoders", not a proof that
+decoding is identical. `x86-16.pspec` sets `addrsize`/`opsize` context defaults
+and `mips64micro.pspec` sets `RELP`, so those same-decoder variants really do
+decode differently — they are simply modes no PE/ELF loader auto-selects.
+Widening the rule to catch them re-admits x86, which is the trade being made;
+the unconditional stamp is what covers the gap. `LanguageVariantsTest` pins both
+directions so the trade cannot be undone by accident. This is detection by the
+reader, not prevention: what would actually prevent a VLE-as-classic-PowerPC
+mistake is a coherence heuristic on the loaded program, which is a separate and
+much larger feature.
+
+Internal Java callers are not checked: the check sits on the MCP boundary, where
+a caller states a belief (`FunctionService.forceDecompileAt` and the internal
+`forceDecompile` overloads). Their output is still stamped, and so are the two
+unrouted C-returning helpers `decompileFunctionByAddress` and
+`batchDecompileFunctions` — the latter now nests its results under `functions`
+beside the stamp, because its keys are references the caller chose.
+
+**Tested at three levels.** The decision table is pure and Ghidra-free in
+`LanguageVariants`, covered offline by `LanguageVariantsTest` (28 cases). The
+measurement is covered by `LanguageVariantDecoderGhidraTest`, which asks Ghidra's
+real language table rather than a reading of its `.ldefs`: a release that gave
+`System Management Mode` its own `.sla` would put the advisory back on every
+32-bit Windows binary, and nothing else would notice. What a caller actually
+receives is covered by `DecompileVariantLabellingGhidraTest`, which drives
+`get_functions` (single, bulk, `call_context`), `force_decompile`, both
+composites and `get_language_metadata` on real x86 and PowerPC programs with the
+real decompiler — in CI's real-Ghidra tier, without a deploy. And
+`DecompiledOutputIsStampedTest` ratchets, from source, every method in the tree
+that obtains decompiler C: a new one fails until someone declares whether it
+reaches a caller and, if it does, stamps it. Its first version listed the two
+files it knew about, which is exactly how the C moving into `FunctionFacts`
+would have walked past it; it now reads every main source file. Live behaviour
+is pinned by `tests/integration/test_decompile_variant_labelling.py`
+(skips itself against a server built before this) and by three curated
+conformance cases on the Benchmark fixture.
+
 ### Changed — Diablo II–specific content removed (#562)
 
 This project is a generic Ghidra MCP server; game-specific tooling lives elsewhere.

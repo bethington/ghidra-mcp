@@ -3,31 +3,18 @@
 Run GhidraMCP in Docker: the headless REST API server on `:8089`, and the
 MCP bridge on `:8081` for MCP clients.
 
-> **⚠️ `GHIDRA_MCP_AUTH_TOKEN` is required to run this stack at all.**
-> `entrypoint.sh` binds `0.0.0.0` by default and
-> `SecurityConfig.requireAuthForNonLoopbackBind` **refuses a non-loopback bind
-> without this token**, so an unset token is not a weaker deployment — it is a
-> container that starts and dies. The API exposes file import, project mutation
-> and — if `GHIDRA_MCP_ALLOW_SCRIPTS=1` — arbitrary code, so that refusal is
-> the right default.
+> **`GHIDRA_MCP_AUTH_TOKEN` is required.** The container listens on all
+> interfaces, and the server will not start on a non-loopback address without a
+> token. Set one before `docker compose up` and send it as
+> `Authorization: Bearer <token>`:
 >
 > ```bash
 > export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-> # compose passes it to BOTH containers; send it as
-> #   Authorization: Bearer <token>   on every request
 > ```
->
-> The compose files take it with `${GHIDRA_MCP_AUTH_TOKEN:?...}`, so forgetting
-> it is a one-line compose error rather than a failure you have to read a
-> container log to find. Both images run as non-root (`ghidra`, `bridge`).
 
 ## Quick Start
 
 ### Single Instance
-
-`GHIDRA_MCP_AUTH_TOKEN` is **required**, not optional — see the box above. The
-compose file uses the `${VAR:?}` form, so a missing token is one line at the
-prompt rather than a container that builds, starts and dies in its own log.
 
 ```bash
 cd docker

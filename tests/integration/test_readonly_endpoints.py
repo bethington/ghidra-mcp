@@ -464,11 +464,19 @@ class TestFunctionAnalysis:
             params={"address": first_function_address, "fields": "decompiled_code"},
         )
         assert response.status_code == 200
+        # An error is also HTTP 200, so assert on the body rather than the
+        # status: this must produce code, not a structured refusal.
+        try:
+            data = response.json()
+        except ValueError:
+            pytest.skip("server predates the 7.0.0 JSON response contract")
+        assert not data.get("error"), data
+        assert data.get("decompiled_code"), data
 
     # test_get_decompiled_code removed: /get_decompiled_code is not an
     # endpoint. It accepted [200, 404] and so passed on the permanent 404,
-    # asserting nothing. The real route is /decompile_function, already
-    # covered by test_decompile_function directly above.
+    # asserting nothing. The real route is get_functions(fields=decompiled_code),
+    # covered by test_get_functions_decompiled_code directly above.
 
     def test_disassemble_function(self, http_client, first_function_address):
         """Disassemble a function."""
@@ -988,3 +996,4 @@ class TestShadowedGlobalsConsistency:
                    if s["address"].lower().lstrip("0") not in untyped]
         assert not missing, (
             f"shadowed globals not selected by type_filter=undefined: {missing[:5]}")
+

@@ -171,6 +171,15 @@ public final class FunctionFacts {
         boolean needsCallContext = wantsField(fields, "call_context")
             && includeCallContext && callContextLimit > 0;
 
+        // Decompiled C is only as right as the SLEIGH variant the program was loaded
+        // under, and the loader guessed that column. A bundle carrying C -- its own or
+        // its callers' call sites -- says which dialect produced it. Stamped here, in
+        // the producer, so every surface rendering this map inherits the label rather
+        // than each having to remember it; in bulk mode that puts it on every entry.
+        if (wantsField(fields, "decompiled_code") || needsCallContext) {
+            ServiceUtils.putLanguageSelection(out, program);
+        }
+
         if (wantsField(fields, "signature")) {
             out.put("signature", func.getSignature().toString());
         }

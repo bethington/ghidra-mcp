@@ -167,6 +167,10 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("name", func.getName());
             out.put("address", func.getEntryPoint().toString(false));
+            // Stamped although nothing routes here today: an unlabelled C-returning
+            // helper kept ready for reuse is the hole pre-dug, and whoever wires it up
+            // next inherits pseudocode with no record of the dialect that decoded it.
+            ServiceUtils.putLanguageSelection(out, program);
             out.put("decompiled", decompResult.getDecompiledFunction().getC());
             return Response.ok(out);
         } catch (Throwable e) {
@@ -314,6 +318,12 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
 
         try {
             String[] functionRefs = functionsParam.split(",");
+            // The stamp goes on an envelope with the results nested under "functions",
+            // never into resultMap itself: its keys are references the CALLER chose, so
+            // a flat map would put the stamp's reserved names in the same namespace as
+            // user input, and a function named language_id would travel unlabelled.
+            Map<String, Object> out = new LinkedHashMap<>();
+            ServiceUtils.putLanguageSelection(out, program);
             Map<String, Object> resultMap = new LinkedHashMap<>();
             final int MAX_FUNCTIONS = 20; // Limit to prevent overload
 
@@ -349,7 +359,8 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                 }
             }
 
-            return Response.ok(resultMap);
+            out.put("functions", resultMap);
+            return Response.ok(out);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -362,7 +373,7 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
     public Response forceDecompile(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -372,11 +383,33 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+                               + "when multiple programs are open)") String programName,
+            @Param(value = "variant", defaultValue = "",
+                   description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.") String variant) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // The same check get_functions runs, and like it this fires only on a variant
+        // the caller named that the program contradicts. This endpoint is reached for
+        // when ordinary decompile output looks wrong, which is the moment a caller is
+        // most likely to be staring at wrong-variant C and treating it as a stale-cache
+        // problem -- so a mismatch here is worth catching more than anywhere else.
+        Response variantReject = ServiceUtils.variantGate(program, variant);
+        if (variantReject != null) return variantReject;
+
+        return forceDecompileAt(program, functionAddrStr);
+    }
+
+    /**
+     * The forced decompile itself, with no variant check.
+     *
+     * <p>The check belongs on the MCP boundary, where a caller states a belief about
+     * which dialect it is reading. Internal Java callers never cross that boundary and
+     * never pass a variant, so routing them through it would make them answer a
+     * question nobody asked them. Output is still stamped: the label is unconditional.
+     */
+    private Response forceDecompileAt(Program program, String functionAddrStr) {
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
             return Response.err("Function address is required");
         }
@@ -457,8 +490,21 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
         out.put("status", "success");
         out.put("address", functionAddrStr);
         out.put("name", functionName.get());
+        // The dialect that produced the code travels with it. Pseudocode with no
+        // record of the variant that decoded it cannot be audited after the fact,
+        // which is how a VLE-as-classic-PowerPC mistake survives review.
+        ServiceUtils.putLanguageSelection(out, program);
         out.put("decompiled", decompiledCode.get());
         return Response.ok(out);
+    }
+
+    // Backward compatible overloads for internal callers. They go to forceDecompileAt,
+    // not the annotated method, so the exemption from the check is one the code
+    // performs rather than one that holds only because variant= happens to be empty.
+    public Response forceDecompile(String functionAddrStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        return forceDecompileAt(pe.program(), functionAddrStr);
     }
 
     public Response forceDecompile(String functionAddrStr) {

@@ -24,6 +24,57 @@
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **209 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
+## Quickstart: install a release (no clone, no build)
+
+Every [release](https://github.com/bethington/ghidra-mcp/releases) ships the two
+pieces you need: the Ghidra extension (`GhidraMCP-<version>.zip`) and the MCP
+bridge (`ghidra_mcp_bridge-<version>-py3-none-any.whl`).
+
+1. **Install the prerequisites:** [Ghidra 12.1.4](https://github.com/NationalSecurityAgency/ghidra/releases),
+   Java 21 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+   The extension only loads in the exact Ghidra version it was built for.
+2. **Install the extension:** in Ghidra's project window, **File > Install
+   Extensions**, click **+**, pick the `GhidraMCP-<version>.zip` you downloaded,
+   and restart Ghidra.
+3. **Enable the plugin:** in the project window, **File > Configure >
+   Utility > Configure**, tick **GhidraMCPPlugin**. Check it answers:
+
+   ```bash
+   curl http://127.0.0.1:8089/check_connection
+   # {"status": "ok", "server_kind": "gui", "version": "7.0.0"}
+   ```
+
+4. **Install the bridge** (copy the wheel's link from the same release page):
+
+   ```bash
+   uv tool install https://github.com/bethington/ghidra-mcp/releases/download/v7.0.0/ghidra_mcp_bridge-7.0.0-py3-none-any.whl
+   ```
+
+5. **Point your MCP client at it**, using the absolute path (`which
+   bridge-mcp-ghidra`, or `where.exe bridge-mcp-ghidra` on Windows):
+
+   ```json
+   {
+     "mcpServers": {
+       "ghidra-mcp": { "command": "/home/<you>/.local/bin/bridge-mcp-ghidra" }
+     }
+   }
+   ```
+
+   On Windows: `"command": "C:\\Users\\<you>\\.local\\bin\\bridge-mcp-ghidra.exe"`.
+   A client launched from a GUI or a service does not see your shell's PATH,
+   so a bare `bridge-mcp-ghidra` fails with `spawn ENOENT`.
+
+Open a program in Ghidra and ask your AI tool to list its functions. Screenshots
+of steps 2-3: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md). Building from source,
+Docker, the HTTP transports and every bridge flag are further down.
+
+**Which version should I run?** Tagged releases (7.0.0, 7.1.0, ...) are
+stable. Release candidates and `main` are beta: feature-complete and
+live-tested, but shapes can still change before final. `dev` is experimental:
+tools are merged, renamed and refactored there freely, so build nothing on its
+API.
+
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
@@ -101,7 +152,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Project & Version Control** — Create projects, manage files, Ghidra Server integration
 - **Analysis Control** — List, configure, and trigger Ghidra analyzers programmatically
 
-## 🚀 Quick Start
+## 🚀 Install from source
+
+The [Quickstart](#quickstart-install-a-release-no-clone-no-build) above needs
+none of this. Build from source to run `dev`, to contribute, or to use
+`python -m tools.setup deploy`, which installs, configures and restarts Ghidra
+for you.
 
 ### Prerequisites
 
@@ -999,7 +1055,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation
+- `force_decompile` - Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)
 - `get_functions` - Everything about one or many functions in a single call
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
@@ -1079,7 +1135,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `analyze_control_flow` - Analyze control flow
 - `analyze_data_region` - Analyze data region
 - `analyze_dataflow` - Trace value propagation through a function (PCode graph, forward/backward)
-- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness)
+- `analyze_for_documentation` - Composite RE documentation analysis (decompile + classify + variables + completeness); decompiled_code is stamped with language_id + variant, and withheld if a supplied variant= contradicts the program
 - `analyze_function_complete` - Comprehensive single-call function analysis
 - `analyze_function_completeness` - Analyze documentation completeness
 - `apply_documentation` - Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...])

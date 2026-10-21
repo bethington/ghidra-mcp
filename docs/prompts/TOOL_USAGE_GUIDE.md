@@ -23,6 +23,135 @@ rename_symbol(address, "dwName")          # Step 2: Rename with Hungarian notati
 set_comment(address, "comment", type='pre')  # Step 3: Add documentation
 ```
 
+## Decompiling: read the language stamp
+
+Ghidra's language picker chooses processor, endian, size, **variant** and
+compiler. The first three come off the file header; the variant is the column
+the loader *guesses*, and it decides what the bytes mean. `PowerPC:BE:32:default`
+and `PowerPC:BE:64:VLE-32addr` (VLE) decode the same bytes into different
+instruction streams, so a VLE image opened as classic PowerPC decompiles into C
+that is syntactically perfect and entirely fictional — the decompiler reports
+success and the pseudocode reads plausibly.
+
+Every response carrying decompiler C is therefore **stamped** with `language_id`
+and `variant`, so you can tell afterwards which dialect produced it. On a
+processor whose variants load more than one SLEIGH *decoder*, the response also
+carries `variant_ambiguous`, the candidate names, and a sentence saying the
+loader guessed.
+
+```python
+get_functions(function="0x00020000", fields="decompiled_code")
+# -> {"name": ..., "address": ...,
+#     "language_id": "PowerPC:BE:64:VLE-32addr",
+#     "variant": "PowerISA-VLE-64-32addr",
+#     "variant_ambiguous": true,
+#     "variant_candidates": ["default", "4xx", ..., "PowerISA-VLE-64-32addr"],
+#     "variant_notice": "This processor offers 11 SLEIGH variants ...",
+#     "decompiled_code": "..."}
+```
+
+A bundle is stamped when it carries decompiler output: `decompiled_code`, or
+`call_context` (the callers' decompiled call sites). A read that asks only for
+metadata — `fields=signature,callers` — is not.
+
+`variant_ambiguous` counts **decoders, not rows**. Measured against Ghidra
+12.1.2's `.ldefs`: 30 of 83 processor/endian/size buckets hold more than one
+variant, but only **19** hold more than one decoder (96 of 177 non-deprecated
+languages). All three x86 buckets are in the difference — `default` and
+`System Management Mode` are both `x86.sla`, differing only in processor spec —
+so ordinary PE and ELF work never sees the advisory. PowerPC/BE/32 (eleven
+variants, ten decoders), both ARM/32 buckets, PIC-16, PIC-24, MIPS/32, SuperH,
+68000, AARCH64 and Dalvik do.
+
+In bulk mode every entry carries its own stamp, and the entries sit under
+`functions`, so the stamp never shares a namespace with the function references
+you chose:
+
+```python
+get_functions(functions="calc_crc16,compute_gcd", fields="decompiled_code")
+# -> {"functions": {
+#       "calc_crc16":  {"language_id": ..., "variant": ..., "decompiled_code": "..."},
+#       "compute_gcd": {"language_id": ..., "variant": ..., "decompiled_code": "..."}},
+#     "count": 2, "requested": 2}
+```
+
+### Asserting the variant
+
+`variant=` is **optional everywhere**. Pass it when you have established which
+dialect the binary targets and want that assumption checked rather than assumed:
+
+```python
+get_functions(function="0x00020000", fields="decompiled_code",
+              variant="PowerISA-VLE-64-32addr")
+```
+
+If the program is not loaded under that variant the call is **refused**, not
+answered — returning the loaded variant's C under a label you chose would be
+worse than no answer, because the label makes it look verified. That holds in
+bulk mode and for reads that ask for no C at all: every field `get_functions`
+returns was decoded under the program's own language. A full language id works
+in place of the bare name (`variant="PowerPC:BE:64:VLE-32addr"`), and matching
+is case-insensitive.
+
+Look the legal values up with:
+
+```python
+get_language_metadata(include_registers=False, include_default_symbols=False)
+# -> {"language_id": "PowerPC:BE:64:VLE-32addr",
+#     "variant": "PowerISA-VLE-64-32addr",
+#     "variant_ambiguous": true,
+#     "available_variants": [
+#        {"variant": "default", "language_id": "PowerPC:BE:32:default",
+#         "decoder": "ppc_32_be.sla", "loaded": false, ...}, ...]}
+```
+
+**Asserting is not a formality.** It is only worth anything if you checked
+something first: ELF `e_flags` / PE machine type, the vendor's core
+documentation, or whether disassembly at known entry points is coherent. Echoing
+back the variant the server just told you is not a check, and the server cannot
+tell the difference — which is exactly why the parameter is optional rather than
+mandatory.
+
+### What the refusals mean
+
+| `error` | Meaning | What to do |
+| --- | --- | --- |
+| `variant_mismatch` | You named a real variant, but not the loaded one | Decompile what is loaded, or change the program's language first (below) |
+| `unknown_variant` | The name is not a variant of this processor | Check `available_variants`; you may be talking to a different program than you think |
+
+A refusal comes back with `status: "rejected"` and is reported to the MCP client
+as a tool error. Each one carries `loaded_variant`, the full
+`available_variants` list, and a `suggestion`.
+
+### Known limits
+
+- The decoder test is a proxy for "the loader made a guess", not a proof that
+  two variants decode identically. x86's `System Management Mode` and MIPS/64's
+  `micro` select a different decode mode through the processor spec while
+  sharing a `.sla`, so they are not flagged. The stamp still tells you what ran.
+- `disassemble_function` and `get_function_pcode` are equally variant-dependent
+  and are not stamped. Use `get_language_metadata` alongside them.
+
+### When the loaded variant is wrong
+
+The decompiler always decodes with the language the program was imported under
+and cannot be asked for another — that is why a mismatch is refused instead of
+answered. `force_decompile` does not help either: flushing the cache re-runs the
+same language and re-derives the same wrong C. Fixing it is a program-level
+operation:
+
+- re-import with an explicit language: `import_file(file_path=..., language="PowerPC:BE:64:VLE-32addr")`, or
+- change it in Ghidra: **Language > Set Language** (re-disassembles; do this
+  deliberately, not mid-pass).
+
+### Composite analyses
+
+`force_decompile`, `analyze_function_complete` and `analyze_for_documentation`
+also return pseudocode, stamped the same way, and accept the same optional
+`variant=`. `force_decompile` refuses a contradicted one like `get_functions`
+does. The two composites instead return everything else with `decompiled_code`
+replaced by `decompiled_code_withheld`, rather than failing the whole call.
+
 ## Complete Workflow Pattern
 
 ### Type Application (Step 3)
