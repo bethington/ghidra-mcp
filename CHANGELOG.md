@@ -16,6 +16,23 @@ therefore applied a one-element array and reported success; numeric zero and
 negative counts also became one. Numeric counts now use Number conversion
 before the existing positive-count validation. String counts still work.
 
+### Fixed — parameter aliases take precedence over omitted defaults
+
+FastMCP inserted a canonical parameter's default before the bridge folded
+aliases, so `get_functions(call_context_window=9)` silently sent
+`call_context_lines=3`. Defaults for aliased parameters are now applied after
+alias resolution. An explicitly supplied canonical value still wins, and
+omitting both spellings keeps the upstream default. Array aliases such as
+`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
+
+### Fixed — native JSON values reach Java Object parameters through MCP
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for

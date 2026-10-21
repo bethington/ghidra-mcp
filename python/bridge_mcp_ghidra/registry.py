@@ -66,6 +66,11 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     # after folding, so it still fails loudly but on the real condition.
     aliased_required = {c for c in required if c in set(alias_to_canonical.values())}
     signature_required = required - aliased_required
+    aliased_defaults = {
+        c: properties[c]["default"]
+        for c in alias_to_canonical.values()
+        if "default" in properties[c]
+    }
     # Parameters where "" is itself the intent (see the filtering note in
     # handler). Hoisted out of the handler so alias folding shares one answer.
     allow_empty = {name for name, pdef in properties.items() if pdef.get("allow_empty")}
@@ -108,6 +113,12 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 continue
             if is_absent(kwargs.get(canonical), canonical):
                 kwargs[canonical] = value
+        # FastMCP fills signature defaults before calling us. Defer defaults on
+        # aliased parameters until after folding, or an omitted canonical name
+        # (e.g. call_context_lines=3) masks an explicit alias (window=9).
+        for canonical, default in aliased_defaults.items():
+            if is_absent(kwargs.get(canonical), canonical):
+                kwargs[canonical] = default
         # Required-but-aliased params are optional in the signature (an alias may
         # be carrying the value), so enforce them here instead.
         unfilled = sorted(c for c in aliased_required if is_absent(kwargs.get(c), c))
@@ -194,6 +205,9 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         json_type = pdef.get("type", "string")
         py_type = _TYPE_MAP.get(json_type, str)
         default = pdef.get("default", inspect.Parameter.empty)
+        if pname in aliased_defaults:
+            default = None
+            py_type = py_type | None
         if pname not in signature_required and default is inspect.Parameter.empty:
             default = None
             py_type = py_type | None if py_type != str else str | None
