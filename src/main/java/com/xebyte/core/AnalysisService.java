@@ -193,7 +193,7 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/list_analyzers", description = "List available analyzers with their enabled state and description (the analyzer's own explanation; an extension may have turned one off on purpose and replaced it, so read the description and get_program_options before re-enabling)", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response listAnalyzers(
             @Param(value = "program", defaultValue = "") Program program) {
         try {
@@ -203,7 +203,11 @@ public class AnalysisService {
             for (String name : names) {
                 try {
                     boolean enabled = options.getBoolean(name, false);
-                    entries.add(JsonHelper.mapOf("name", name, "enabled", enabled));
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("name", name);
+                    entry.put("enabled", enabled);
+                    putDescription(entry, options, name);
+                    entries.add(entry);
                 } catch (Exception ignored) {
                     // Not a boolean option -- skip non-analyzer properties
                 }
@@ -211,6 +215,13 @@ public class AnalysisService {
             return ServiceUtils.listed("analyzers", entries);
         } catch (Exception e) {
             return ServiceUtils.fail(e);
+        }
+    }
+
+    private static void putDescription(Map<String, Object> entry, Options options, String name) {
+        String description = options.getDescription(name);
+        if (description != null && !description.isBlank()) {
+            entry.put("description", description);
         }
     }
 
@@ -222,7 +233,7 @@ public class AnalysisService {
      * program-options code, so both servers serve it now.
      */
     @McpTool(path = "/configure_analyzer", method = "POST",
-            description = "Enable or disable one analyzer (a name exactly as list_analyzers reports it) on a program.",
+            description = "Enable or disable one analyzer (a name exactly as list_analyzers reports it) on a program. The response includes the analyzer's description.",
             category = "analysis", access = ToolAccess.WRITE)
     public Response configureAnalyzer(
             @Param(value = "name", source = ParamSource.BODY,
@@ -245,11 +256,13 @@ public class AnalysisService {
                     return null;
                 });
             }
-            return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "analyzer", analyzerName,
-                "enabled", options.getBoolean(analyzerName, false),
-                "changed", enabled != null));
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("analyzer", analyzerName);
+            result.put("enabled", options.getBoolean(analyzerName, false));
+            result.put("changed", enabled != null);
+            putDescription(result, options, analyzerName);
+            return Response.ok(result);
         } catch (Exception e) {
             return ServiceUtils.fail("configure analyzer", e);
         }
