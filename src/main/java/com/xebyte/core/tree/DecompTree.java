@@ -43,14 +43,42 @@ public final class DecompTree {
      * The program state the tree's progress numbers belong to. Modification numbers start over
      * on every open, so they compare only within one {@code epoch}
      * ({@link com.xebyte.core.ProgramRevision}); {@code savedTime}/{@code fileVersion} name the
-     * saved program the tree reflects, and survive restarts.
+     * saved program the tree reflects, and survive restarts. {@code memoryMap} is the block
+     * layout the tree was decompiled against: no input fingerprint covers it.
      */
-    public record Session(String epoch, long savedTime, Integer fileVersion, boolean unsavedEdits) {
+    public record Session(String epoch, long savedTime, Integer fileVersion, boolean unsavedEdits,
+            String memoryMap) {
         public static Session of(ghidra.program.model.listing.Program program) {
             return new Session(com.xebyte.core.ProgramRevision.epoch(program),
                     com.xebyte.core.ProgramRevision.savedTime(program),
                     com.xebyte.core.ProgramRevision.fileVersion(program),
-                    program.isChanged());
+                    program.isChanged(), memoryMapOf(program));
+        }
+
+        /** The saved program another open of it shows, unless this one held unsaved edits. */
+        public boolean sameSavedState(ghidra.program.model.listing.Program program) {
+            return !unsavedEdits && !program.isChanged()
+                    && savedTime == com.xebyte.core.ProgramRevision.savedTime(program)
+                    && Objects.equals(fileVersion, com.xebyte.core.ProgramRevision.fileVersion(program));
+        }
+
+        /** Short hash of {@link #memoryMap}, as STATUS.md records it across restarts. */
+        public static String memoryMapHash(String memoryMap) {
+            return InputFingerprint.shortHash(memoryMap, 6);
+        }
+
+        /** Each block's name, range and permissions: what decides how every load decompiles. */
+        public static String memoryMapOf(ghidra.program.model.listing.Program program) {
+            ghidra.program.model.mem.Memory memory = program.getMemory();
+            if (memory == null) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (ghidra.program.model.mem.MemoryBlock b : memory.getBlocks()) {
+                sb.append(b.getName()).append('@').append(b.getStart()).append('-').append(b.getEnd())
+                        .append(':').append(b.getFlags()).append(b.isInitialized() ? 'i' : 'u').append(';');
+            }
+            return sb.toString();
         }
     }
 

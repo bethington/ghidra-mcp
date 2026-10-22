@@ -64,6 +64,12 @@ public final class TreeObserver implements DomainObjectListener {
             TreeRegistry.getInstance().detachObserver(treeId);
             return;
         }
+        if (ev.contains(DomainObjectEvent.RESTORED) && program != null) {
+            DecompTree decompTree = TreeRegistry.getInstance().byId(treeId);
+            if (decompTree != null) {
+                TreeRegistry.getInstance().checkProgramReplaced(decompTree, program, "was restored");
+            }
+        }
         if (ev.contains(DomainObjectEvent.SAVED) && program != null) {
             TreeRegistry.getInstance().noteSaved(treeId, program.getModificationNumber());
         }

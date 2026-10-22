@@ -201,6 +201,16 @@ public final class TreeRegistry {
             observerPrograms.put(id, program);
             // A program that opens unchanged is its saved state.
             decompTree.setSavedAtModification(program.isChanged() ? null : program.getModificationNumber());
+            DecompTree.Session seen = decompTree.session();
+            if (seen != null && !seen.epoch().equals(com.xebyte.core.ProgramRevision.epoch(program))) {
+                checkProgramReplaced(decompTree, program, "reopened");
+                if (!seen.sameSavedState(program)) {
+                    // Another revision (a checkout of a newer version closes and reopens the
+                    // program), or a file changed while nothing observed it. No event says
+                    // what moved; a full pass re-checks every block's fingerprint.
+                    dirtyQueue.markNeedsReconcile(id);
+                }
+            }
             if (decompTree.recoverOnReattach()) {
                 // Closed while the tree held discarded edits or missed saved ones: re-diff
                 // against the program as it reopened instead of waiting for the next edit.
@@ -213,6 +223,20 @@ public final class TreeRegistry {
         } catch (Exception e) {
             Msg.warn(this, "Failed to attach tree observer for " + id
                     + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * The program was replaced wholesale: reopened, or restored in place (undo/redo, a server
+     * update of an open checkout). The reconcile that follows re-checks every block, but no
+     * fingerprint covers the memory map, so a different one leaves the tree stale until a
+     * resweep.
+     */
+    public void checkProgramReplaced(DecompTree decompTree, Program program, String how) {
+        DecompTree.Session seen = decompTree.session();
+        if (seen != null && !seen.memoryMap().equals(DecompTree.Session.memoryMapOf(program))) {
+            markStale(decompTree.id(), "the program " + how + " with a different memory map; every "
+                    + "function may decompile differently, so resweep (decompile_tree_run action=start)");
         }
     }
 

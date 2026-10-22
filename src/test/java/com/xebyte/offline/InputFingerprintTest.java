@@ -4,12 +4,16 @@ import com.xebyte.core.tree.InputFingerprint;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.data.DataTypeComponent;
+import ghidra.program.model.data.Pointer;
+import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.InstructionIterator;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.listing.Variable;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
@@ -157,6 +161,38 @@ public class InputFingerprintTest {
 
         String after = InputFingerprint.of(func);
         assertNotEquals(before, after);
+    }
+
+    /**
+     * A reopen on another revision is caught only by a full pass over the fingerprints, so
+     * they must cover what a revision changes without renaming anything: a local, or a
+     * field of a struct the function uses.
+     */
+    @Test
+    public void movesWhenALocalOrAFieldOfItsTypeChanges() {
+        // Mocks, not StructureDataType: the data type classes need an initialised Ghidra.
+        AtomicReference<String> field = new AtomicReference<>("count");
+        DataTypeComponent member = mock(DataTypeComponent.class);
+        when(member.getFieldName()).thenAnswer(inv -> field.get());
+        Structure ctx = mock(Structure.class);
+        when(ctx.getPathName()).thenReturn("/Ctx");
+        when(ctx.getDefinedComponents()).thenReturn(new DataTypeComponent[]{member});
+        Pointer ptr = mock(Pointer.class);
+        when(ptr.getPathName()).thenReturn("/Ctx *");
+        when(ptr.getDataType()).thenReturn(ctx);
+        AtomicReference<String> localName = new AtomicReference<>("ctx");
+        Variable local = mock(Variable.class);
+        when(local.getName()).thenAnswer(inv -> localName.get());
+        when(local.getDataType()).thenReturn(ptr);
+        when(func.getLocalVariables()).thenReturn(new Variable[]{local});
+
+        String before = InputFingerprint.of(func);
+        localName.set("pCtx");
+        String renamedLocal = InputFingerprint.of(func);
+        assertNotEquals(before, renamedLocal);
+
+        field.set("total");
+        assertNotEquals(renamedLocal, InputFingerprint.of(func));
     }
 
     @Test

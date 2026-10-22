@@ -72,6 +72,7 @@ public final class TreeStatusMd {
                 sb.append("file_version: ").append(session.fileVersion()).append('\n');
             }
             sb.append("includes_unsaved_edits: ").append(session.unsavedEdits()).append('\n');
+            sb.append("memory_map: ").append(DecompTree.Session.memoryMapHash(session.memoryMap())).append('\n');
         }
         p.appendStatusFields((k, v) -> sb.append(k).append(": ").append(v).append('\n'), false);
         p.appendStatusFields((k, v) -> sb.append(k).append(": ").append(v).append('\n'), true);

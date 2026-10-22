@@ -281,12 +281,16 @@ public final class TreeReconciler {
                 .reconciledAt(reconcilingAt, rewritten, structural);
         if (addresses == null && decompTree.recoverOnReattach()) {
             // The full pass after a stale close re-diffed every block against the program
-            // as it reopened: the divergence that made it stale is gone.
+            // as it reopened: the divergence that made it stale is gone, unless the memory
+            // map moved too, which only a resweep follows.
             decompTree.setRecoverOnReattach(false);
-            after = after
-                    .withPhase(after.sweptAtModification() != null
-                            ? SweepProgress.Phase.COMPLETE : SweepProgress.Phase.IDLE)
-                    .withLastError(null);
+            DecompTree.Session seen = decompTree.session();
+            if (seen == null || seen.memoryMap().equals(DecompTree.Session.memoryMapOf(program))) {
+                after = after
+                        .withPhase(after.sweptAtModification() != null
+                                ? SweepProgress.Phase.COMPLETE : SweepProgress.Phase.IDLE)
+                        .withLastError(null);
+            }
         }
         decompTree.noteSession(program);
         decompTree.publish(after, TreeStatusMd.settledState(after));

@@ -658,6 +658,14 @@ created; one under the default root, whose parent every server on the machine sh
 for a `decompile_tree_create` call, which stamps it. `create` refuses a tree that names
 another project's program.
 
+**A new revision reaches the tree.** Checking out a newer version closes and reopens the
+program, and an update of an open checkout restores it in place; neither says what changed.
+If the program reopens on a different saved state (another `file_version` or `saved_time`)
+than the tree was built from, a full reconcile re-checks every block. Each block's input
+fingerprint covers what such a change can move without renaming anything: locals, the types
+of the data the function reads, and the members of every struct, union and enum it reaches.
+A different memory map marks the tree `stale`, because only a resweep follows that.
+
 **Every route ends at the same tree.** A tree that is `in_sync` is byte for byte what a fresh
 sweep would write at that point, apart from the `dts` stamps, the status files and
 the tree's own root and id, whether it got there by a sweep, by splices after edits, by a
