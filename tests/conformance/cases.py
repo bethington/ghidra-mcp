@@ -51,6 +51,21 @@ GATE_REASONS = {
     "headless": "needs the standalone headless server (Phase 2 fixture)",
 }
 
+# Environment-gated, with a reason specific to each tool. These calls are
+# refused (or meaningless) without configuration or a session that a plain GUI
+# recording run does not have -- the archive tools need GHIDRA_MCP_ARCHIVE_URL
+# pointed at a running archive exchange, and the GUI cursor tools need a live
+# CodeBrowser window.
+#
+# They are skipped rather than recorded. Recording them made the refusal
+# itself the golden, so the case asserted that the tool stays broken and
+# reported green (see #474). A skip says plainly: this was not proven here.
+ENVIRONMENT_GATED = {
+    "archive_ingest_function": "archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
+    "archive_ingest_program": "archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
+    "tool_goto_address": "needs a live GUI CodeBrowser session",
+}
+
 # Tools whose output describes the *operator's session* rather than the program
 # under test: which programs happen to be open, the project name, the Ghidra
 # Server address, file counts. Snapshotting these is wrong twice over -- the
@@ -202,6 +217,8 @@ def synthesize_args(tool: dict[str, Any], facts: ProgramFacts) -> tuple[dict[str
 
 
 def gate_reason(tool_name: str, category: str) -> str | None:
+    if tool_name in ENVIRONMENT_GATED:
+        return ENVIRONMENT_GATED[tool_name]
     if category in GATE_REASONS:
         return GATE_REASONS[category]
     if tool_name in GATED_EXACT:
