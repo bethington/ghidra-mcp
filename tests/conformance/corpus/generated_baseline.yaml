@@ -132,22 +132,12 @@ tool_cases:
   snapshot: true
 - tool: archive_ingest_function
   tier: write
-  args:
-    address: '0x10001000'
-    program: Benchmark.dll
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
+  snapshot: false
+  skip: archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)
 - tool: archive_ingest_program
   tier: write
-  args:
-    program: Benchmark.dll
-    limit: 5
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
+  snapshot: false
+  skip: archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)
 - tool: audit_global
   tier: read
   args:
@@ -1245,12 +1235,8 @@ tool_cases:
   skip: 'destructive: covered by the opt-in --destructive tier'
 - tool: tool_goto_address
   tier: write
-  args:
-    address: '0x10001000'
-  assert:
-    is_error: false
-    nonempty: true
-  snapshot: true
+  snapshot: false
+  skip: needs a live GUI CodeBrowser session
 - tool: tool_running_tools
   tier: read
   assert:

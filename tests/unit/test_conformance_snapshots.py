@@ -63,10 +63,10 @@ KNOWN_ERROR_PAYLOAD_GOLDENS = {
     # --- the call is a no-op against already-existing state -----------------
     "create_function.snap": "a function already exists at that address",
     "create_property_map.snap": "the property map already exists",
-    # --- environment-gated: belongs in a skip, not a snapshot ---------------
-    "archive_ingest_function.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
-    "archive_ingest_program.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
-    "tool_goto_address.snap": "needs a GUI CodeBrowser session",
+    # The environment-gated tools that used to be here are now skipped by the
+    # generator (see ENVIRONMENT_GATED in tests/conformance/cases.py), so they
+    # no longer produce a golden at all:
+    #   archive_ingest_function, archive_ingest_program, tool_goto_address
 }
 
 
