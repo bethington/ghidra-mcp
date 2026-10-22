@@ -786,6 +786,18 @@ public class DecompTreeService {
                     .withLastError(why != null ? why
                             : "previous sweep did not finish (STATUS.md state=" + state + ")"));
         }
+        String sweptMemoryMap = statusFile.fields().get("memory_map");
+        if (!stale && sweptMemoryMap != null && !sweptMemoryMap.equals(
+                DecompTree.Session.memoryMapHash(DecompTree.Session.memoryMapOf(program)))) {
+            // Another revision, or an edit made while no tree watched: a full reconcile
+            // re-checks every block's inputs, but none of them covers the memory map.
+            stale = true;
+            decompTree.setProgress(decompTree.progress()
+                    .withPhase(SweepProgress.Phase.STALE)
+                    .withLastError("the program opened with a different memory map than the tree was "
+                            + "swept against; every function may decompile differently, so resweep "
+                            + "(decompile_tree_run action=start)"));
+        }
 
         // The tree may have been moved or copied: tree.json names this tree from
         // now on, as the derived files will after the reconcile below.

@@ -11,13 +11,22 @@ import com.xebyte.headless.DirectThreadingStrategy;
 import com.xebyte.core.tree.ExclusionRule;
 import com.xebyte.core.tree.SweepJob;
 import com.xebyte.core.tree.TreeReconciler;
+import com.xebyte.core.tree.TreeRegistry;
+import com.xebyte.headless.DirectThreadingStrategy;
 import ghidra.GhidraApplicationLayout;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.program.database.ProgramBuilder;
 import ghidra.program.database.ProgramDB;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.data.ByteDataType;
+import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.IntegerDataType;
+import ghidra.program.model.data.ShortDataType;
+import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.StructureDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.task.TaskMonitor;
@@ -312,6 +321,61 @@ public class TreeConvergenceGhidraTest {
 
         assertSameTree("targeted reconcile", swept("b", TreeConfig.defaults()), a);
         assertSameTree("full reconcile", swept("c", TreeConfig.defaults()), reconciledFully(a));
+    }
+
+    /**
+     * Found live: a checkout of a newer revision reopens the program with changes no event
+     * reported, and only a full pass over the fingerprints finds them. Retyping a named
+     * global, or a field of the struct it holds, changes the function reading it without
+     * renaming anything.
+     */
+    @Test
+    public void aFullReconcileFollowsChangesNoEventReported() throws Exception {
+        // The last function returns what it loads; with .data read-only the load folds to 0.
+        Address global = builder.addr("0x3014");
+        edit(() -> {
+            program.getMemory().getBlock(".data").setWrite(true);
+            program.getFunctionManager().getFunctionAt(builder.addr("0x1500"))
+                .setReturnType(IntegerDataType.dataType, SourceType.USER_DEFINED);
+            program.getSymbolTable().createLabel(global, "g_count", SourceType.USER_DEFINED);
+            program.getListing().createData(global, IntegerDataType.dataType);
+        });
+        DecompTree a = swept("a", TreeConfig.defaults());
+
+        edit(() -> retype(global, ShortDataType.dataType));
+        assertSameTree("full reconcile after retyping a global", swept("b", TreeConfig.defaults()),
+            reconciledFully(a));
+
+        StructureDataType pair = new StructureDataType("Pair", 0);
+        pair.add(ShortDataType.dataType, "lo", null);
+        pair.add(ShortDataType.dataType, "hi", null);
+        edit(() -> retype(global, program.getDataTypeManager().addDataType(pair, null)));
+        assertSameTree("full reconcile after giving it a struct", swept("c", TreeConfig.defaults()),
+            reconciledFully(a));
+
+        edit(() -> ((Structure) program.getDataTypeManager().getDataType("/Pair"))
+            .replace(0, ByteDataType.dataType, 1, "lo", null));
+        assertSameTree("full reconcile after retyping a field", swept("d", TreeConfig.defaults()),
+            reconciledFully(a));
+    }
+
+    private interface Edit {
+        void run() throws Exception;
+    }
+
+    private void edit(Edit e) {
+        builder.withTransaction(() -> {
+            try {
+                e.run();
+            } catch (Exception ex) {
+                throw new AssertionError(ex);
+            }
+        });
+    }
+
+    private void retype(Address at, DataType type) throws Exception {
+        program.getListing().clearCodeUnits(at, at.add(3), false);
+        program.getListing().createData(at, type);
     }
 
     private DecompTree reconciledFully(DecompTree c) throws IOException {

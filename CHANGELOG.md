@@ -148,6 +148,11 @@ routed through the server's threading strategy, not filesystem-only.
   session epoch, not the modification counter that restarts at every open; trees are
   re-adopted and reconciled when their program first opens, matched by `program_url`
   so two projects holding `/fw.bin` never share one.
+- **It follows a new revision.** A checkout of a newer version reopens the program; a
+  reopen on a different saved state reconciles in full, and a different memory map marks
+  the tree stale. The input fingerprint now covers locals, the types of data a function
+  reads and the members of the types it reaches, so a retype that renames nothing is
+  found too.
 - **Exclusions** keep library code out: `tag:` (function tags, FID), `partition:` (a
   whole compartment) and `range:` (works on stripped binaries). Narrowing deletes the
   excluded files immediately so Grep cannot lie. Measured full sweeps: a 677-function
