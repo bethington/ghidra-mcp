@@ -197,7 +197,7 @@ public class AnalysisService {
     public Response listAnalyzers(
             @Param(value = "program", defaultValue = "") Program program) {
         try {
-            Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+            Options options = analysisOptions(program);
             List<String> names = options.getOptionNames();
             List<Map<String, Object>> entries = new ArrayList<>();
             for (String name : names) {
@@ -216,6 +216,17 @@ public class AnalysisService {
         } catch (Exception e) {
             return ServiceUtils.fail(e);
         }
+    }
+
+    /**
+     * The program's analysis options with every analyzer registered. Ghidra stores only values
+     * that were set; the analyzers, their defaults and descriptions are registered when an
+     * {@link AutoAnalysisManager} is created for the program. Without one, a program nothing
+     * has analysed lists no analyzers and configure_analyzer finds none.
+     */
+    private static Options analysisOptions(Program program) {
+        AutoAnalysisManager.getAnalysisManager(program);
+        return program.getOptions(Program.ANALYSIS_PROPERTIES);
     }
 
     private static void putDescription(Map<String, Object> entry, Options options, String name) {
@@ -244,7 +255,7 @@ public class AnalysisService {
         if (analyzerName == null || analyzerName.isBlank()) {
             return Response.err("name is required");
         }
-        Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+        Options options = analysisOptions(program);
         if (!options.contains(analyzerName)) {
             return Response.err("Analyzer not found: " + analyzerName
                 + " (list_analyzers shows the exact names)");
