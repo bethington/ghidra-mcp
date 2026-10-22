@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 209,
+  "total_endpoints": 213,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -330,6 +330,25 @@
         "headless"
       ],
       "description": "Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...]). Per function, every step is optional and independent and the response reports each one: rename, signature, variable types and renames, comments, labels, then a completeness score. It accepts what get_function_documentation exports (with target_address), so documentation copied between versions applies as it is. The signature is applied before the comments on purpose, because setting a prototype wipes the plate comment."
+    },
+    {
+      "path": "/apply_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "name",
+        "value",
+        "address",
+        "operand_index",
+        "function_address",
+        "max_hits",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Create an equate (if it does not exist yet) and attach it to scalar operand(s). Use it to give magic constants a readable name: value 404 -> \"sizeof(tagIecTaskNode)\", value 3 -> \"TASKSTAT_SUSPEND\". Select one instruction with `address` (plus `operand_index`; -1 = every operand of that instruction) or a whole function with `function_address`; `value` filters which scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see the targets without writing (the framework rolls the transaction back)."
     },
     {
       "path": "/archive_ingest_function",
@@ -2036,6 +2055,25 @@
       "description": "List data sorted by xref count"
     },
     {
+      "path": "/list_equates",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "value",
+        "name_contains",
+        "address",
+        "include_references",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "List equate definitions (name/value/reference count) with optional filters, optionally expanded into their (address, operand_index) references. Equate names are printed verbatim by the decompiler."
+    },
+    {
       "path": "/list_function_tags",
       "method": "GET",
       "category": "function",
@@ -2372,6 +2410,25 @@
       "description": "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced."
     },
     {
+      "path": "/remove_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "name",
+        "value",
+        "address",
+        "operand_index",
+        "function_address",
+        "delete_definition",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Detach an equate from operand(s) and optionally delete the definition itself. Operand selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` and `value` filters); with neither selector every reference of `name` is removed. Pass dry_run=true to preview (the framework rolls the transaction back)."
+    },
+    {
       "path": "/remove_function_tag",
       "method": "POST",
       "category": "function",
@@ -2466,6 +2523,21 @@
         "headless"
       ],
       "description": "Rename a data type (struct, union, enum, typedef) in place, preserving existing applications of it"
+    },
+    {
+      "path": "/rename_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "old_name",
+        "new_name",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Rename an equate definition; every operand reference is preserved (the GUI cannot do this once an equate has been applied). Pass dry_run=true to preview (the framework rolls the transaction back)."
     },
     {
       "path": "/rename_function",
