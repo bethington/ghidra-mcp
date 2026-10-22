@@ -9,6 +9,7 @@ tool_cases:
   args:
     function: calc_crc16
     program: Benchmark.dll
+    tags: conformance_test
   assert:
     is_error: false
     nonempty: true
@@ -18,7 +19,7 @@ tool_cases:
   args:
     from_address: '0x10001000'
     to_address: '0x10001120'
-    source_type: int
+    source_type: USER_DEFINED
     program: Benchmark.dll
   assert:
     is_error: false
@@ -70,7 +71,7 @@ tool_cases:
   tier: read
   args:
     address: '0x10001000'
-    direction: both
+    direction: forward
     program: Benchmark.dll
   assert:
     is_error: false
@@ -746,7 +747,7 @@ tool_cases:
 - tool: get_program_options
   tier: read
   args:
-    group: function
+    group: Program Information
     program: Benchmark.dll
   assert:
     is_error: false
@@ -989,6 +990,7 @@ tool_cases:
   args:
     function: calc_crc16
     program: Benchmark.dll
+    tags: conformance_test
   assert:
     is_error: false
     nonempty: true
@@ -1071,7 +1073,7 @@ tool_cases:
 - tool: search_byte_patterns
   tier: read
   args:
-    pattern: int
+    pattern: '9090'
     program: Benchmark.dll
   assert:
     is_error: false
