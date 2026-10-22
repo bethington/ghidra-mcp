@@ -8,6 +8,19 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Added — equate management endpoints
+
+- `list_equates` lists equate definitions (name/value/reference count) with
+  optional filters, optionally expanded into their (address, operand_index)
+  references.
+- `apply_equate` creates an equate and attaches it to scalar operand(s), so
+  a magic constant can be given a readable name. `dry_run=true` previews the
+  targets without writing.
+- `remove_equate` detaches an equate from operand(s) and optionally deletes
+  the shared definition.
+- `rename_equate` renames an equate definition, preserving every operand
+  reference — the GUI cannot do this once an equate has been applied.
+
 ### Fixed — integer and object-array parameters no longer bind lossily
 
 - Integer parameters reject fractional, out-of-range and missing required values

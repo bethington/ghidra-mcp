@@ -9,6 +9,7 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.*;
+import ghidra.util.Msg;
 
 import java.util.*;
 import java.util.Comparator;
@@ -1075,7 +1076,7 @@ public class ListingService {
             description = "List equate definitions (name/value/reference count) with optional filters, optionally "
                     + "expanded into their (address, operand_index) references. Equate names are printed verbatim "
                     + "by the decompiler.",
-            category = "listing")
+            category = "listing", access = ToolAccess.READ_ONLY)
     public Response listEquates(
             @Param(value = "value", defaultValue = "",
                     description = "Only equates with this value: decimal, 0x-hex, or a character literal like '\\x03'") String valueText,
@@ -1085,9 +1086,11 @@ public class ListingService {
                     description = "Only equates referenced at this address") String addressText,
             @Param(value = "include_references", defaultValue = "false",
                     description = "Expand each equate into its (address, operand_index) references") boolean includeReferences,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "200") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of equates to skip before this page starts; 0 begins at the first match") int offset,
+            @Param(value = "limit", defaultValue = "200",
+                   description = "Maximum number of equates to return in this page") int limit,
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1146,7 +1149,7 @@ public class ListingService {
                     + "operand of that instruction) or a whole function with `function_address`; `value` filters which "
                     + "scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see "
                     + "the targets without writing (the framework rolls the transaction back).",
-            category = "listing")
+            category = "listing", access = ToolAccess.WRITE)
     public Response applyEquate(
             @Param(value = "name", source = ParamSource.BODY,
                     description = "Equate name — arbitrary text, printed verbatim by the decompiler") String name,
@@ -1160,7 +1163,7 @@ public class ListingService {
                     description = "Scan every instruction of the function containing this address") String functionAddressText,
             @Param(value = "max_hits", source = ParamSource.BODY, defaultValue = "1000",
                     description = "Safety cap on how many operands may be modified by one call") int maxHits,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1258,7 +1261,7 @@ public class ListingService {
                     + "selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` "
                     + "and `value` filters); with neither selector every reference of `name` is removed. "
                     + "Pass dry_run=true to preview (the framework rolls the transaction back).",
-            category = "listing")
+            category = "listing", access = ToolAccess.DESTRUCTIVE)
     public Response removeEquate(
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
                     description = "Only touch equates with exactly this name") String name,
@@ -1272,7 +1275,7 @@ public class ListingService {
                     description = "Scan every instruction of the function containing this address") String functionAddressText,
             @Param(value = "delete_definition", source = ParamSource.BODY, defaultValue = "false",
                     description = "After detaching, also delete the equate definition (it is shared by every reference)") boolean deleteDefinition,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1361,13 +1364,13 @@ public class ListingService {
             description = "Rename an equate definition; every operand reference is preserved (the GUI cannot do this "
                     + "once an equate has been applied). Pass dry_run=true to preview (the framework rolls the "
                     + "transaction back).",
-            category = "listing")
+            category = "listing", access = ToolAccess.WRITE)
     public Response renameEquate(
             @Param(value = "old_name", source = ParamSource.BODY,
                     description = "Existing equate name") String oldName,
             @Param(value = "new_name", source = ParamSource.BODY,
                     description = "New name (arbitrary text, printed verbatim by the decompiler)") String newName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
