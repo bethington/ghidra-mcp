@@ -495,6 +495,7 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
 | `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
+| `--project` | unset | Exact project name to select at startup, including when multiple instances are running. Overrides `GHIDRA_MCP_PROJECT`. |
 | `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
 | `--tools-page-size` | `0` | Serve `tools/list` in pages of this size (`0` = one page). Only for a client that cannot take one large response; a client that ignores `nextCursor` sees only the first page. |
@@ -579,6 +580,15 @@ instead of registering everything:
   drop a category at runtime.
 - `check_tools("rename_symbol,batch_set_comments")` — confirm specific tools
   are callable right now.
+
+To select a project before the client discovers tools, use
+`bridge-mcp-ghidra --project MyProject --no-lazy`, or set
+`GHIDRA_MCP_PROJECT=MyProject` and `GHIDRA_MCP_LAZY=0` in the client's environment.
+Project names are matched exactly. A missing or ambiguous match leaves the bridge
+disconnected; background retries retain the selector. Blank environment values mean
+unset, and a blank `--project` is rejected. Without a selector, auto-connect behavior
+is unchanged. For TCP-only servers, `GHIDRA_MCP_URL` limits project discovery to that
+listener; otherwise the usual local TCP discovery range is searched.
 
 `search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.

@@ -18,6 +18,22 @@ Changes on `dev` after 7.0.0.
 - **`/find_type_users`** lists the functions whose decompilation references a data type,
   or one field of it.
 
+### Fixed — integer and object-array parameters no longer bind lossily
+
+- Integer parameters reject fractional, out-of-range and missing required values
+  instead of truncating them or binding 0. An empty value (`?limit=`) still means
+  "not given" and uses the parameter's default.
+- Object-array parameters reject entries that are not objects instead of
+  silently dropping them.
+- A malformed value is reported after the program resolves, so a missing program
+  is still the first error.
+
+### Fixed — Scorecard push trigger follows the default dev branch
+
+Scorecard's push filter and its test constant still named `main` while the
+repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
+and the existing check against `origin/HEAD` passes on a fresh clone.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for
@@ -32,6 +48,16 @@ so one bad function cannot fail the rest of a bulk call. Options and the 12 s pe
 timeout are unchanged, and so is every response field. Measured on the real-Ghidra tier
 (`RequestScopedDecompilerGhidraTest`, 20 leaf targets + 10 shared callers,
 `fields=decompiled_code,call_context`): 14.5 s -> 0.32 s.
+
+### Added — startup project selection
+
+`--project NAME` (or `GHIDRA_MCP_PROJECT`) selects an exact project name before
+initial tool discovery, including when several Ghidra instances are running.
+The flag overrides the environment, and background retries retain the selector.
+Missing or ambiguous matches stay disconnected instead of falling back to another
+project. Discovery checks both transports and deduplicates listeners of the same
+instance; TCP probes send the configured authentication token. Existing auto-connect
+selection is unchanged when no selector is supplied.
 
 ### Changed — empty boolean env values mean unset
 
@@ -150,7 +176,7 @@ server-wide lock on purpose: a script run under it would block every other reque
 its 30-minute timeout. Results come back from `executeRead`/`executeWrite` as return values
 instead of through `Atomic*` holders; responses are unchanged.
 
-## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
+## v7.0.0 - 2026-10-21 — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
 **211 tools** — 207 served by the GUI plugin, 192 by the headless server, 188
 by both. The advertised surface went from 272 → 251 in the first consolidation
@@ -177,6 +203,33 @@ the 235-tool schema recording); the figures above are the current ones.
 > and the entries that remain naming fun-doc are ones where its move-out is
 > the *cause* of a change here (`uv.lock`'s stale dependency group, the
 > release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Fixed — native JSON values reach Java Object parameters through MCP ([#598](https://github.com/bethington/ghidra-mcp/pull/598))
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted. The two parameters are now
+advertised to MCP clients with an untyped schema (`{}`); clients with a strict
+schema dialect may need to skip those two tools.
+
+### Fixed — parameter aliases take precedence over omitted defaults ([#599](https://github.com/bethington/ghidra-mcp/pull/599))
+
+FastMCP inserted a canonical parameter's default before the bridge folded
+aliases, so `get_functions(call_context_window=9)` silently sent
+`call_context_lines=3`. Defaults for aliased parameters are now applied after
+alias resolution. An explicitly supplied canonical value still wins, and
+omitting both spellings keeps the upstream default. Array aliases such as
+`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
+
+### Fixed — ARRAY classification honors numeric JSON counts ([#600](https://github.com/bethington/ghidra-mcp/pull/600))
+
+`apply_data_classification` handled `count` only as an Integer or string,
+but Gson represents JSON numbers as Double. A request with `count: 64`
+therefore applied a one-element array and reported success; numeric zero and
+negative counts also became one. Numeric counts now use Number conversion
+before the existing positive-count validation. String counts still work.
 
 ### Added — decompiled C says which language variant produced it ([#509](https://github.com/bethington/ghidra-mcp/pull/509))
 

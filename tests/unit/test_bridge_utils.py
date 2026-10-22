@@ -80,7 +80,7 @@ class TestTcpPortScan(unittest.TestCase):
             def connect(self):
                 pass
 
-            def request(self, method, url):
+            def request(self, method, url, headers=None):
                 pass
 
             def getresponse(self):
@@ -220,7 +220,7 @@ class TestTcpPortScanConcurrency(unittest.TestCase):
                 if self.port not in responding_ports:
                     raise TimeoutError(f"dropped on {self.port}")
 
-            def request(self, method, url):
+            def request(self, method, url, headers=None):
                 pass
 
             def getresponse(self):
