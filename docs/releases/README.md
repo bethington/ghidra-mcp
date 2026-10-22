@@ -9,6 +9,19 @@ For the release preparation runbook, see
 
 ## Current Releases
 
+### Unreleased
+
+The catalog stands at **211 tools** — 207 served by the GUI plugin, 192 by the headless
+server, 188 by both:
+
+- **`list_decompiler_variables`** lists a function's decompiler symbols (SSA /
+  register temporaries) with their type and storage, so a DWARF
+  register-resident local can be matched to the temporary that has to be
+  renamed.
+- **`apply_local_variable`** creates a stack local at an explicit frame offset,
+  or retypes/renames the one already covering that offset. Reaches locals
+  `set_local_variable_type` cannot, because no symbol exists for them.
+
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The first consolidation pass took the advertised
