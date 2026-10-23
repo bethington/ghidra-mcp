@@ -192,28 +192,30 @@ PINNED: list[tuple[str, str, int, str]] = [
         GUI,
         "GUI plugin",
     ),
-    # ---- Release index (the current, unreleased entry) -------------------
+    # ---- Release index (the Unreleased entry) ---------------------------
+    # Shipped entries (7.0.0's "209 tools" among them) are history, like
+    # CHANGELOG.md, and keep the figures they shipped with.
     (
         "docs/releases/README.md",
-        r"\*\*7\.0\.0 ships (\d+) tools\*\*",
+        r"### Unreleased\s+The catalog stands at \*\*(\d+) tools\*\*",
         TOTAL,
         "whole catalog",
     ),
     (
         "docs/releases/README.md",
-        r"7\.0\.0 ships \d+ tools\*\*\s*— (\d+) served by the GUI plugin",
+        r"stands at \*\*\d+ tools\*\* — (\d+) served by the GUI plugin",
         GUI,
         "GUI plugin",
     ),
     (
         "docs/releases/README.md",
-        r"served by the GUI plugin, (\d+) by the headless server",
+        r"stands at \*\*\d+ tools\*\* — \d+ served by the GUI plugin, (\d+) by the headless\s+server",
         HEADLESS,
         "headless server",
     ),
     (
         "docs/releases/README.md",
-        r"by the headless server, (\d+) by both",
+        r"stands at \*\*\d+ tools\*\* — \d+ served by the GUI plugin, \d+ by the headless\s+server, (\d+) by both",
         SHARED,
         "both servers",
     ),

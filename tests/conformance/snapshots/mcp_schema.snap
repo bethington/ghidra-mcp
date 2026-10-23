@@ -1,5 +1,5 @@
 {
-  "count": 205,
+  "count": 211,
   "tools": [
     {
       "category": "function",
@@ -7384,6 +7384,338 @@
       ],
       "path": "/validate_function_prototype",
       "read_only": true
+    },
+    {
+      "path": "/list_decompiler_variables",
+      "method": "GET",
+      "description": "List the decompiler's symbols (SSA / register temporaries) of a function with their type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident local to the temporary that has to be renamed (rename_variables + set_decompiler_variable_type).",
+      "category": "function",
+      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+      "read_only": true,
+      "destructive": false,
+      "params": [
+        {
+          "name": "function_address",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Function entry point address",
+          "param_type": "address"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Program name (default: current program)"
+        }
+      ]
+    },
+    {
+      "path": "/apply_local_variable",
+      "method": "POST",
+      "description": "Create a stack local variable at an explicit frame offset, or retype/rename the one already covering that offset. Use it when DWARF knows a local (DW_OP_fbreg offset) that Ghidra never materialised - typically large struct/array locals, which set_local_variable_type cannot reach because no symbol exists. stack_offset accepts -0x88, -136 or Stack[-0x88]; replace=true overwrites whatever occupies the slot; remove=true deletes the local with the given name (the undo path). dry_run=true previews (the framework rolls the transaction back).",
+      "category": "function",
+      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+      "read_only": false,
+      "destructive": false,
+      "params": [
+        {
+          "name": "function_address",
+          "type": "string",
+          "source": "body",
+          "required": true,
+          "description": "Function containing the variable (0x-prefixed, or space:offset)",
+          "param_type": "address"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "source": "body",
+          "required": true,
+          "description": "Variable name to create/rename to (use the DWARF name)"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Data type name, e.g. uint32_t or EventParamTask_t (not needed with remove=true)"
+        },
+        {
+          "name": "stack_offset",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Stack frame offset: -0x88, -136 or Stack[-0x88]"
+        },
+        {
+          "name": "replace",
+          "type": "boolean",
+          "source": "body",
+          "required": false,
+          "default": "false",
+          "description": "Overwrite the variable that already covers this offset"
+        },
+        {
+          "name": "remove",
+          "type": "boolean",
+          "source": "body",
+          "required": false,
+          "default": "false",
+          "description": "Remove the local variable with this `name` instead of creating one (the undo path for a bad create; type/offset are ignored)"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Program name (default: current program)"
+        }
+      ]
+    },
+    {
+      "path": "/list_equates",
+      "method": "GET",
+      "description": "List equate definitions (name/value/reference count) with optional filters, optionally expanded into their (address, operand_index) references. Equate names are printed verbatim by the decompiler.",
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "read_only": true,
+      "destructive": false,
+      "params": [
+        {
+          "name": "value",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Only equates with this value: decimal, 0x-hex, or a character literal like '\\x03'"
+        },
+        {
+          "name": "name_contains",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Only equates whose name contains this substring (case-insensitive)"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Only equates referenced at this address",
+          "param_type": "address"
+        },
+        {
+          "name": "include_references",
+          "type": "boolean",
+          "source": "query",
+          "required": false,
+          "default": "false",
+          "description": "Expand each equate into its (address, operand_index) references"
+        },
+        {
+          "name": "offset",
+          "type": "integer",
+          "source": "query",
+          "required": false,
+          "default": "0",
+          "description": "Number of equates to skip before this page starts; 0 begins at the first match"
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "source": "query",
+          "required": false,
+          "default": "200",
+          "description": "Maximum number of equates to return in this page"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
+        }
+      ]
+    },
+    {
+      "path": "/apply_equate",
+      "method": "POST",
+      "description": "Create an equate (if it does not exist yet) and attach it to scalar operand(s). Use it to give magic constants a readable name: value 404 -> \"sizeof(tagIecTaskNode)\", value 3 -> \"TASKSTAT_SUSPEND\". Select one instruction with `address` (plus `operand_index`; -1 = every operand of that instruction) or a whole function with `function_address`; `value` filters which scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see the targets without writing (the framework rolls the transaction back).",
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "read_only": false,
+      "destructive": false,
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "source": "body",
+          "required": true,
+          "description": "Equate name — arbitrary text, printed verbatim by the decompiler"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Scalar value to match: decimal, 0x-hex, or a character literal like '\\x03'"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Instruction address (single-operand mode)",
+          "param_type": "address"
+        },
+        {
+          "name": "operand_index",
+          "type": "integer",
+          "source": "body",
+          "required": false,
+          "default": "-1",
+          "description": "Operand index at `address`; -1 = every operand carrying a matching scalar"
+        },
+        {
+          "name": "function_address",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Scan every instruction of the function containing this address",
+          "param_type": "address"
+        },
+        {
+          "name": "max_hits",
+          "type": "integer",
+          "source": "body",
+          "required": false,
+          "default": "1000",
+          "description": "Safety cap on how many operands may be modified by one call"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
+        }
+      ]
+    },
+    {
+      "path": "/remove_equate",
+      "method": "POST",
+      "description": "Detach an equate from operand(s) and optionally delete the definition itself. Operand selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` and `value` filters); with neither selector every reference of `name` is removed. Pass dry_run=true to preview (the framework rolls the transaction back).",
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "read_only": false,
+      "destructive": true,
+      "params": [
+        {
+          "name": "name",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Only touch equates with exactly this name"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Only touch equates with this value (decimal, 0x-hex, or a character literal)"
+        },
+        {
+          "name": "address",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Instruction address; omit together with function_address to clear all references of `name`",
+          "param_type": "address"
+        },
+        {
+          "name": "operand_index",
+          "type": "integer",
+          "source": "body",
+          "required": false,
+          "default": "-1",
+          "description": "Operand index at `address`; -1 = every operand"
+        },
+        {
+          "name": "function_address",
+          "type": "string",
+          "source": "body",
+          "required": false,
+          "default": "",
+          "description": "Scan every instruction of the function containing this address",
+          "param_type": "address"
+        },
+        {
+          "name": "delete_definition",
+          "type": "boolean",
+          "source": "body",
+          "required": false,
+          "default": "false",
+          "description": "After detaching, also delete the equate definition (it is shared by every reference)"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
+        }
+      ]
+    },
+    {
+      "path": "/rename_equate",
+      "method": "POST",
+      "description": "Rename an equate definition; every operand reference is preserved (the GUI cannot do this once an equate has been applied). Pass dry_run=true to preview (the framework rolls the transaction back).",
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "read_only": false,
+      "destructive": false,
+      "params": [
+        {
+          "name": "old_name",
+          "type": "string",
+          "source": "body",
+          "required": true,
+          "description": "Existing equate name"
+        },
+        {
+          "name": "new_name",
+          "type": "string",
+          "source": "body",
+          "required": true,
+          "description": "New name (arbitrary text, printed verbatim by the decompiler)"
+        },
+        {
+          "name": "program",
+          "type": "string",
+          "source": "query",
+          "required": false,
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
+        }
+      ]
     }
   ]
 }
