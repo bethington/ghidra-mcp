@@ -1,0 +1,55 @@
+{
+  "captured_at": "2026-10-23T22:27:39Z",
+  "repo": "bethington/ghidra-mcp",
+  "default_branch": "dev",
+  "rulesets": [
+    {
+      "id": 12435657,
+      "name": "Default",
+      "target": "branch",
+      "enforcement": "disabled",
+      "branches": [],
+      "required_status_checks": [],
+      "required_approving_review_count": 0,
+      "allowed_merge_methods": [],
+      "copilot_code_review": false
+    },
+    {
+      "id": 15242430,
+      "name": "Copilot review for default branch",
+      "target": "branch",
+      "enforcement": "active",
+      "branches": [
+        "~DEFAULT_BRANCH"
+      ],
+      "required_status_checks": [],
+      "required_approving_review_count": 0,
+      "allowed_merge_methods": [],
+      "copilot_code_review": true
+    },
+    {
+      "id": 16768161,
+      "name": "main branch protection",
+      "target": "branch",
+      "enforcement": "active",
+      "branches": [
+        "refs/heads/dev",
+        "refs/heads/main"
+      ],
+      "required_status_checks": [
+        "Java Build (Maven) (21)",
+        "Python Tests (pytest) (3.10)",
+        "Python Tests (pytest) (3.11)",
+        "Python Tests (pytest) (3.12)",
+        "Python Tests (pytest) (3.13)"
+      ],
+      "required_approving_review_count": 0,
+      "allowed_merge_methods": [
+        "merge",
+        "rebase",
+        "squash"
+      ],
+      "copilot_code_review": true
+    }
+  ]
+}
