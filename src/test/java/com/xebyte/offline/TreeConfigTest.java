@@ -81,14 +81,14 @@ public class TreeConfigTest {
         assertEquals(30, cfg.decompileTimeoutSeconds());
         assertEquals(600, cfg.analysisWaitSeconds());
         assertEquals(32768, cfg.maxFileBytes());
-        assertTrue(cfg.disassembleMissing());
+        assertFalse(cfg.disassembleMissing());
     }
 
     @Test
-    public void disassembleMissingDefaultsTrueAndRoundTrips() {
-        assertTrue(TreeConfig.defaults().disassembleMissing());
-        assertFalse(TreeConfig.builder().disassembleMissing(false).build().disassembleMissing());
-        assertTrue(TreeConfig.defaults().toBuilder().disassembleMissing(false).disassembleMissing(true).build()
+    public void disassembleMissingDefaultsFalseAndRoundTrips() {
+        assertFalse(TreeConfig.defaults().disassembleMissing());
+        assertTrue(TreeConfig.builder().disassembleMissing(true).build().disassembleMissing());
+        assertFalse(TreeConfig.defaults().toBuilder().disassembleMissing(true).disassembleMissing(false).build()
                 .disassembleMissing());
     }
 

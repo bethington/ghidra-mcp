@@ -3,16 +3,19 @@ package com.xebyte.core.tree;
 import com.xebyte.core.AddressKeys;
 import com.xebyte.core.FunctionFacts;
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * One function's block in a tree file, rendered from
@@ -91,6 +94,9 @@ public final class FunctionBlock {
                 || c == '-' || c == '.' || c == '_' || c == '~';
     }
 
+    /** The program modification number each pooled decompiler last decompiled at. */
+    private static final Map<DecompInterface, Long> SEEN_AT =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     /** Where the block sits in the tree; not a fact about the function. */
     public record Placement(CompartmentRef compartment, java.time.Instant dts, String uri) {
@@ -117,7 +123,7 @@ public final class FunctionBlock {
             TaskMonitor monitor, CompartmentRef part, String programName) {
         Map<String, Object> facts = FunctionFacts.build(func.getProgram(), func, TREE_FIELDS, f -> {
             try {
-                return decomp.decompileFunction(f, timeoutSeconds, monitor);
+                return decompileCurrent(decomp, f, timeoutSeconds, monitor);
             } catch (Exception e) {
                 return null;
             }
@@ -133,6 +139,22 @@ public final class FunctionBlock {
         return new Built(render(facts, body, where), failed);
     }
 
+    /**
+     * Decompile with a decompiler that outlives one call. The decompile process caches the
+     * function and symbol data it reads and never re-reads it, so after any program change a
+     * reused decompiler can render a callee's old name or prototype. Flush when the program has
+     * changed since this decompiler last ran, and only then: within an unchanged program the
+     * cache is what makes a sweep's later functions cheap.
+     */
+    public static DecompileResults decompileCurrent(DecompInterface decomp, Function func,
+            int timeoutSeconds, TaskMonitor monitor) {
+        long mod = func.getProgram().getModificationNumber();
+        Long seen = SEEN_AT.put(decomp, mod);
+        if (seen != null && seen != mod) {
+            decomp.flushCache();
+        }
+        return decomp.decompileFunction(func, timeoutSeconds, monitor);
+    }
 
     /**
      * Header plus body. {@code body} is the C, or the failure marker when there is none. The

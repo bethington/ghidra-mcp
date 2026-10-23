@@ -644,7 +644,7 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         st._default_groups.clear()
         st._default_groups.update({"listing", "function", "program"})
         st._loaded_groups.clear()
-        st._loaded_groups.update({"listing", "function", "program", "decompile-checkout"})
+        st._loaded_groups.update({"listing", "function", "program", "decompile-tree"})
         try:
             with (
                 patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
@@ -654,7 +654,7 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
             ):
                 self.assertTrue(bridge.dispatch._try_reconnect())
             self.assertEqual(register.call_args.kwargs["groups"],
-                             {"listing", "function", "program", "decompile-checkout"})
+                             {"listing", "function", "program", "decompile-tree"})
         finally:
             st._lazy_mode = saved[0]
             st._default_groups.clear()

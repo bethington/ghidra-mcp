@@ -1,5 +1,6 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.tree.BlockSplicer;
 import com.xebyte.core.tree.CompartmentRef;
 import com.xebyte.core.tree.FunctionBlock;
 import org.junit.Test;
