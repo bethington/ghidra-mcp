@@ -20,7 +20,8 @@
     "symbol": "Create/rename/delete labels, rename data, globals, external locations",
     "system": "Server-side prompt/automation policy",
     "utility": "Health checks, schema, version, tool control",
-    "xref": "Cross-references, call graphs, incoming/outgoing calls, data refs"
+    "xref": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+    "decompile-tree": "Decompilation tree: a browsable on-disk tree of a program's decompiled functions that keeps itself current as the program changes"
   },
   "endpoints": [
     {
