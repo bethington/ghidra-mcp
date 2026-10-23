@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 211,
+  "total_endpoints": 215,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -3283,6 +3283,78 @@
         "headless"
       ],
       "description": "Validate function prototype"
+    },
+    {
+      "path": "/apply_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "name",
+        "value",
+        "address",
+        "operand_index",
+        "function_address",
+        "max_hits",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Create an equate (if it does not exist yet) and attach it to scalar operand(s). Use it to give magic constants a readable name: value 404 -> \"sizeof(tagIecTaskNode)\", value 3 -> \"TASKSTAT_SUSPEND\". Select one instruction with `address` (plus `operand_index`; -1 = every operand of that instruction) or a whole function with `function_address`; `value` filters which scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see the targets without writing (the framework rolls the transaction back)."
+    },
+    {
+      "path": "/list_equates",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "value",
+        "name_contains",
+        "address",
+        "include_references",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "List equate definitions (name/value/reference count) with optional filters, optionally expanded into their (address, operand_index) references. Equate names are printed verbatim by the decompiler."
+    },
+    {
+      "path": "/remove_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "name",
+        "value",
+        "address",
+        "operand_index",
+        "function_address",
+        "delete_definition",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Detach an equate from operand(s) and optionally delete the definition itself. Operand selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` and `value` filters); with neither selector every reference of `name` is removed. Pass dry_run=true to preview (the framework rolls the transaction back)."
+    },
+    {
+      "path": "/rename_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "old_name",
+        "new_name",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Rename an equate definition; every operand reference is preserved (the GUI cannot do this once an equate has been applied). Pass dry_run=true to preview (the framework rolls the transaction back)."
     }
   ]
 }

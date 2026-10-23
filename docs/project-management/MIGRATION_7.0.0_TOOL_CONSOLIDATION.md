@@ -11,6 +11,7 @@ survivor.
 > `/batch_get_comments` — and three later passes removed more (see
 > [Readers, listings and the server model](#readers-listings-and-the-server-model)),
 > so the shipped catalog is **211** (with `/set_memory_block` added after rc.1, and
+> so the shipped catalog is **213** (with `/set_memory_block` added after rc.1, and
 > `/apply_documentation` replacing both documentation writers), not 251. The
 > authoritative count is always [`tests/endpoints.json`](../../tests/endpoints.json);
 > `tests/unit/test_published_counts.py` fails if any published figure disagrees

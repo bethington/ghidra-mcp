@@ -14,6 +14,7 @@ saying so.
 - **Direction and priorities**: [ROADMAP.md](ROADMAP.md)
 - **Documentation index**: [docs/README.md](docs/README.md)
 - **Tool inventory** (211 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
+- **Tool inventory** (213 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
 - **Testing tiers in depth**: [docs/TESTING.md](docs/TESTING.md)
 - **Security reports**: [SECURITY.md](SECURITY.md) — do not file these as public issues
 
