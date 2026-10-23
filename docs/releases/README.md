@@ -9,6 +9,16 @@ For the release preparation runbook, see
 
 ## Current Releases
 
+### Unreleased
+
+The catalog stands at **211 tools** — 207 served by the GUI plugin, 192 by the headless
+server, 188 by both:
+
+- **`partition_program`** groups functions into compartments by evidence before any
+  decompile.
+- **`find_type_users`** lists the functions whose decompilation uses a type or one
+  field of it.
+
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The first consolidation pass took the advertised
