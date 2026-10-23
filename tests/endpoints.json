@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 209,
+  "total_endpoints": 211,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -330,6 +330,25 @@
         "headless"
       ],
       "description": "Apply documentation to ONE function (fields at the top level) OR MANY (entries=[{address, ...}, ...]). Per function, every step is optional and independent and the response reports each one: rename, signature, variable types and renames, comments, labels, then a completeness score. It accepts what get_function_documentation exports (with target_address), so documentation copied between versions applies as it is. The signature is applied before the comments on purpose, because setting a prototype wipes the plate comment."
+    },
+    {
+      "path": "/apply_local_variable",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "name",
+        "type",
+        "stack_offset",
+        "replace",
+        "remove",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Create a stack local variable at an explicit frame offset, or retype/rename the one already covering that offset. Use it when DWARF knows a local (DW_OP_fbreg offset) that Ghidra never materialised - typically large struct/array locals, which set_local_variable_type cannot reach because no symbol exists. stack_offset accepts -0x88, -136 or Stack[-0x88]; replace=true overwrites whatever occupies the slot; remove=true deletes the local with the given name (the undo path). dry_run=true previews (the framework rolls the transaction) and applies nothing."
     },
     {
       "path": "/archive_ingest_function",
@@ -2034,6 +2053,20 @@
         "headless"
       ],
       "description": "List data sorted by xref count"
+    },
+    {
+      "path": "/list_decompiler_variables",
+      "method": "GET",
+      "category": "function",
+      "params": [
+        "function_address",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "List the decompiler's symbols (SSA / register temporaries) of a function with their type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident local to the temporary that has to be renamed (rename_variables + set_decompiler_variable_type)."
     },
     {
       "path": "/list_function_tags",
