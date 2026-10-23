@@ -116,7 +116,8 @@ def collect(repo: str, token: str) -> dict:
 
     rulesets = []
     for summary in _get_all(f"/repos/{repo}/rulesets?per_page=100", token):
-        detail = _get(f"/repos/{repo}/rulesets/{summary['id']}", token)        rules = detail.get("rules") or []
+        detail = _get(f"/repos/{repo}/rulesets/{summary['id']}", token)
+        rules = detail.get("rules") or []
         required_checks = []
         approving_reviews = 0
         merge_methods = []
