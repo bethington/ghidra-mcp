@@ -13,7 +13,7 @@ saying so.
 - **Discussions**: [GitHub Discussions](https://github.com/bethington/ghidra-mcp/discussions)
 - **Direction and priorities**: [ROADMAP.md](ROADMAP.md)
 - **Documentation index**: [docs/README.md](docs/README.md)
-- **Tool inventory** (218 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
+- **Tool inventory** (219 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
 - **Testing tiers in depth**: [docs/TESTING.md](docs/TESTING.md)
 - **Security reports**: [SECURITY.md](SECURITY.md) — do not file these as public issues
 
