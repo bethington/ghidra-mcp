@@ -24,6 +24,96 @@ Scorecard's push filter and its test constant still named `main` while the
 repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
 and the existing check against `origin/HEAD` passes on a fresh clone.
 
+### Added — function resources and `/get_change_token`
+
+A function review used to take about five tool calls, and every write forced a re-read.
+The bridge now serves functions and decompilation trees as MCP resources:
+
+| URI | Role |
+| --- | --- |
+| `ghidra://programs` | Discovery root (the sole `resources/list` entry) |
+| `ghidra://program/{program}/index` | Program summary |
+| `ghidra://program/{program}/functions` | `{name, address}` index (capped) |
+| `ghidra://function/{program}/{address}` | The function, rendered as Markdown |
+| `ghidra://function/{program}/by-name/{name}` | Redirect to the address URI |
+| `ghidra://search/{program}/functions/{pattern}` | Name search |
+| `ghidra://program/{program}/changes` | Change token and per-transport delivery caveats |
+| `ghidra://decompile-tree/{id}` | A tree's status, config and search hints |
+
+- **URIs are keyed by address, never by name.** Renaming is the common write, and MCP
+  has no rename notification, so a name-keyed URI would strand a client's cache.
+- **Writes invalidate what they changed.** Every write tool is classified NONE, LOCAL,
+  CALLERS, TYPE or UNBOUNDED, and CI fails on an unclassified one; a struct edit asks
+  `/find_type_users` which functions to invalidate. NONE covers writes no resource shows,
+  `/save_program` above all, which follows nearly every write and would otherwise drop the
+  whole cache. `notifications/resources/updated` is sent before the write's response,
+  because streamable HTTP drops anything addressed to a request whose response has gone.
+  `--stateless-http` refuses `resources/subscribe`, and `--json-response` warns that
+  notifications cannot be delivered.
+- **`/get_change_token`** returns `<saved time>:<session epoch>:<modification number>`;
+  the bridge polls it to catch GUI edits, undo and scripts no write hook sees. Compare it
+  whole: the counter alone restarts at every open.
+- **Bodies are shaped for the model reading them.** A resource body travels inside a JSON
+  string, so a JSON body arrives doubly escaped; the function resource is Markdown
+  (10,131 characters against 18,233 for indented JSON on one bundle, with 336 quote and
+  backslash characters against 2,746). Locals whose name already says their storage
+  (`local_f0`, `uVar7`) are counted rather than listed; the index and search bodies stay
+  JSON but compact, without a per-row URI (`ghidra://program/{program}/functions`
+  234 KB → 90 KB).
+
+### Added — decompilation tree
+
+A program's decompiled C as a file tree an agent searches with its own Grep, Read and
+Glob, so "which functions touch this MMIO page" is one search instead of one tool call per
+function. `decompile_tree_create` registers a tree without sweeping it;
+`decompile_tree_run(action=start|stop)` runs the sweep, which returns in milliseconds;
+`decompile_tree_status` (read-only, so usable in plan mode) and `STATUS.md` on disk report
+progress; `decompile_tree_configure`, `decompile_tree_pin_module` and
+`decompile_tree_delete` manage it. `/decompile_tree_refresh` is an internal route: it
+stays callable over HTTP but is left out of `/mcp/schema` (`@McpTool(internal = true)`),
+and the published "MCP tools" count excludes it. `disassemble_missing` is **off by
+default**; turning it on makes the next sweep disassemble at function entries that still
+lack an instruction (typical PE `.pdata` stubs) and reflow stub bodies — a program write
+routed through the server's threading strategy, not filesystem-only.
+
+- **Each function block carries what `get_functions` returns for it**, one greppable
+  `// key: value` header line per fact (signature, classification, body range, tags,
+  plate and its issues, calls and callers, parameters, locals, labels, comments, xrefs,
+  jump targets) and `// refs:`, every data address the function uses, including
+  literal-pool values and registers reached as base + offset, so `grep 0x40003c0c`
+  finds a register however the C prints it. A real-Ghidra test holds a swept block equal
+  to a fresh `get_functions` result field for field. Each block's `// uri:` line names
+  the function's `ghidra://function/...` resource, which the bridge serves from the next
+  change on.
+- **It stays current.** An observer turns program events into dirty functions (a rename
+  dirties every function that references the symbol, and the old name is searched for in
+  bodies to catch calls through a register or literal pool); a queue splices rebuilt
+  blocks, and undo, redo or a storm of changes triggers a full reconcile. A sweep, a
+  reconcile and a repair converge: a test holds every route to a fresh sweep, file for
+  file. Measured: a callee used 72 times updated everywhere in 1.4 s.
+- **Its status is honest.** `clean`, `spliced` (kept current since the sweep), `stale`
+  (with the reason) and `in_sync`; `close_program(save=false)` marks it stale and the next
+  open reconciles the discarded edits out. A memory-map change (such as
+  `/set_memory_block`) marks it stale, because only a resweep fixes that.
+- **It survives a restart.** Stamps compare the program's saved time and a per-open
+  session epoch, not the modification counter that restarts at every open; trees are
+  re-adopted and reconciled when their program first opens, matched by `program_url`
+  so two projects holding `/fw.bin` never share one.
+- **Exclusions** keep library code out: `tag:` (function tags, FID), `partition:` (a
+  whole compartment) and `range:` (works on stripped binaries). Narrowing deletes the
+  excluded files immediately so Grep cannot lie. Measured full sweeps: a 677-function
+  ARM firmware in 4 s, a 3,230-function driver in 18–28 s, `ls` (25,231) in 669 s.
+
+### Added — `/partition_program`, `/find_type_users`
+
+- **`/partition_program`** groups functions into compartments before anything is
+  decompiled, by qualified names in strings, MMIO page sets, literal locality and address
+  bands, and reports each partition's rule and evidence. On a Windows driver the two
+  library compartments, 42% of the binary, were identifiable from their strings alone.
+  Read-only; it does not write Ghidra's Program Tree.
+- **`/find_type_users`** lists the functions whose decompilation references a data type,
+  or one field of it.
+
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
 Every decompile in a `get_functions` call -- each target and each caller decompiled for
@@ -127,6 +217,15 @@ nothing is answered with the message tools used to return themselves, and the to
   exact entry. Since a caller may pass a name or an interior address, every single-function
   response carries `resolved_function` `{name, address}`, the function the call acted on.
 
+### Fixed — a tree pass's decompiler sees edits made during the pass
+
+The tree decompiles a whole sweep or reconcile pass with one decompiler. The decompile
+process caches the function and symbol data it reads and never re-reads it, so a block
+decompiled after a mid-pass rename or prototype change could show the old name. That decompiler
+now flushes its cache whenever the program changed since it last ran, and only then, so an
+unchanged program keeps the speedup. `rename_variables` no longer runs a throwaway decompile
+after renaming: it flushed a decompiler nobody else used, so it invalidated nothing.
+
 ### Fixed — every program write takes the headless write lock
 
 21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request
@@ -168,8 +267,9 @@ instead of through `Atomic*` holders; responses are unchanged.
 
 ## v7.0.0 - 2026-10-21 — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
-by both. The advertised surface went from 272 → 251 in the first consolidation
+**219 tools** — 215 served by the GUI plugin, 200 by the headless server, 196
+by both. 218 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
+only the bridge calls. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
 7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
 nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
@@ -177,11 +277,12 @@ folds, 211 once both servers shared one set of program-operation names
 (`/load_program`, `/load_program_from_project`, `/project/info` and headless
 `/health` retired), 209 once version control and the CodeBrowser tools
 became shared services (`/server/version_control/checkin` and
-`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and **209** once `/apply_documentation` replaced
-`/apply_function_documentation` and `/batch_apply_documentation` — 53 tools
-removed and 9 added since rc.1,
-every one named in
-[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, 209 once `/apply_documentation` replaced
+`/apply_function_documentation` and `/batch_apply_documentation` (53 tools
+removed and 9 added since rc.1, every one named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
+218 with the decompilation tree, `/partition_program` and `/find_type_users`, and
+**219** with `/get_change_token`.
 
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
