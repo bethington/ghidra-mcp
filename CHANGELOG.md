@@ -23,6 +23,15 @@ Changes on `dev` after 7.0.0.
 Scorecard's push filter and its test constant still named `main` while the
 repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
 and the existing check against `origin/HEAD` passes on a fresh clone.
+### Added — `/partition_program`, `/find_type_users`
+
+- **`/partition_program`** groups functions into compartments before anything is
+  decompiled, by qualified names in strings, MMIO page sets, literal locality and address
+  bands, and reports each partition's rule and evidence. On a Windows driver the two
+  library compartments, 42% of the binary, were identifiable from their strings alone.
+  Read-only; it does not write Ghidra's Program Tree.
+- **`/find_type_users`** lists the functions whose decompilation references a data type,
+  or one field of it.
 
 ### Performance — `get_functions` opens one decompiler per call (#575)
 
@@ -168,7 +177,7 @@ instead of through `Atomic*` holders; responses are unchanged.
 
 ## v7.0.0 - 2026-10-21 — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
+**211 tools** — 207 served by the GUI plugin, 192 by the headless server, 188
 by both. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
 7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
@@ -177,11 +186,11 @@ folds, 211 once both servers shared one set of program-operation names
 (`/load_program`, `/load_program_from_project`, `/project/info` and headless
 `/health` retired), 209 once version control and the CodeBrowser tools
 became shared services (`/server/version_control/checkin` and
-`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and **209** once `/apply_documentation` replaced
-`/apply_function_documentation` and `/batch_apply_documentation` — 53 tools
-removed and 9 added since rc.1,
-every one named in
-[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, 209 once `/apply_documentation` replaced
+`/apply_function_documentation` and `/batch_apply_documentation` (53 tools
+removed and 9 added since rc.1, every one named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
+and **211** with `/partition_program` and `/find_type_users`.
 
 Entries further down quote the catalog as it stood when they landed (251, 253,
 the 235-tool schema recording); the figures above are the current ones.
