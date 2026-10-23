@@ -76,7 +76,12 @@ class MigrationGuideCoverageTest(unittest.TestCase):
         guide = GUIDE.read_text(encoding="utf-8")
         m = re.search(r"shipped catalog is \*\*(\d+)\*\*", guide)
         self.assertIsNotNone(m, "the guide's 'shipped catalog is **N**' sentence was reworded; update this pattern")
-        self.assertEqual(int(m.group(1)), len(_catalog_paths()))
+        # What 7.0.0 shipped is history: tools added since leave it alone, so it is held to
+        # the release index's 7.0.0 entry rather than to today's catalog.
+        index = (PROJECT_ROOT / "docs" / "releases" / "README.md").read_text(encoding="utf-8")
+        shipped = re.search(r"\*\*7\.0\.0 ships (\d+) tools\*\*", index)
+        self.assertIsNotNone(shipped, "docs/releases/README.md no longer says '**7.0.0 ships N tools**'")
+        self.assertEqual(int(m.group(1)), int(shipped.group(1)))
 
 
 if __name__ == "__main__":

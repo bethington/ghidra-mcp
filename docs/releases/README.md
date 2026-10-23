@@ -9,6 +9,39 @@ For the release preparation runbook, see
 
 ## Current Releases
 
+### Unreleased
+
+The catalog stands at **225 tools** — 221 served by the GUI plugin, 206 by the headless
+server, 202 by both:
+
+- **`list_decompiler_variables`** lists a function's decompiler symbols (SSA /
+  register temporaries) with their type and storage, so a DWARF
+  register-resident local can be matched to the temporary that has to be
+  renamed.
+- **`apply_local_variable`** creates a stack local at an explicit frame offset,
+  or retypes/renames the one already covering that offset. Reaches locals
+  `set_local_variable_type` cannot, because no symbol exists for them.
+- **`list_equates`** lists equate definitions (name/value/reference count) with
+  optional filters, optionally expanded into their (address, operand_index)
+  references.
+- **`apply_equate`** creates an equate and attaches it to scalar operand(s), so
+  a magic constant can be given a readable name. `dry_run=true` previews the
+  targets without writing.
+- **`remove_equate`** detaches an equate from operand(s) and optionally deletes
+  the shared definition.
+- **`rename_equate`** renames an equate definition, preserving every operand
+  reference — the GUI cannot do this once an equate has been applied.
+- **Function resources.** The bridge serves functions and decompilation trees as MCP
+  resources keyed by address, and every write invalidates the resources it changed.
+  **`get_change_token`** lets the bridge notice edits no write hook sees.
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C as files
+  an agent searches with its own Grep, Read and Glob, and keeps them current as the
+  program changes.
+- **`partition_program`** groups functions into compartments by evidence before any
+  decompile.
+- **`find_type_users`** lists the functions whose decompilation uses a type or one
+  field of it.
+
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The first consolidation pass took the advertised
@@ -42,6 +75,10 @@ After rc.1 a second pass removed 53 more tools and added 9, so
 - **`apply_documentation`** replaces `apply_function_documentation` and
   `batch_apply_documentation`, and takes what `get_function_documentation`
   exports (one function, or `entries=[...]` for many).
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C to
+  disk as a file tree an agent searches with its own Grep, Read and Glob, and keeps
+  it current as the program changes. `partition_program` and `find_type_users` come
+  with it, and `get_change_token` tells a client when what it read has gone stale.
 - Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
   `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
   `create_derived_type`, `debugger/step(kind=)`.
@@ -78,7 +115,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (68 endpoints plus 8
+called. The bridge now loads `listing,function,program` (75 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 
