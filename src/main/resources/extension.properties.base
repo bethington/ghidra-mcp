@@ -1,0 +1,5 @@
+name=GhidraMCP
+description=A plugin that runs an embedded HTTP server to expose program data. Provides 205 MCP endpoints for reverse engineering automation (including P-code emulation, live debugger integration, and PCode-graph data flow analysis). Plugin version ${project.version}.
+author=Ben Ethington
+createdOn=2025-03-22
+version=${ghidra.version}

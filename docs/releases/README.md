@@ -11,8 +11,8 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **211 tools** — 207 served by the GUI plugin, 192 by the headless
-server, 188 by both:
+The catalog stands at **215 tools** — 211 served by the GUI plugin, 196 by the headless
+server, 192 by both:
 
 - **`list_decompiler_variables`** lists a function's decompiler symbols (SSA /
   register temporaries) with their type and storage, so a DWARF
@@ -21,8 +21,8 @@ server, 188 by both:
 - **`apply_local_variable`** creates a stack local at an explicit frame offset,
   or retypes/renames the one already covering that offset. Reaches locals
   `set_local_variable_type` cannot, because no symbol exists for them.
-The catalog stands at **213 tools** — 209 served by the GUI plugin, 194 by the headless
-server, 190 by both:
+The catalog stands at **213 tools** — 211 served by the GUI plugin, 196 by the headless
+server, 192 by both:
 
 - **`list_equates`** lists equate definitions (name/value/reference count) with
   optional filters, optionally expanded into their (address, operand_index)
@@ -104,7 +104,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (68 endpoints plus 8
+called. The bridge now loads `listing,function,program` (74 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 

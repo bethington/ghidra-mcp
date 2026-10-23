@@ -1,0 +1,520 @@
+# Ghidra MCP - Claude Code Guide
+
+## Overview
+
+MCP server bridging Ghidra reverse engineering with AI tools. 209 MCP tools for binary analysis.
+
+- **Package**: `com.xebyte` | **Version**: 7.0.0 | **Java**: 21 LTS | **Ghidra**: 12.1.4
+
+## Boil the ocean
+
+The marginal cost of completeness is near zero with AI. Do the whole thing. Do it right. Do it with tests. Do it with documentation. Do it so well that Ben is genuinely impressed — not politely satisfied, actually impressed. Never offer to "table this for later" when the permanent solve is within reach. Never leave a dangling thread when tying it off takes five more minutes. Never present a workaround when the real fix exists. The standard isn't "good enough" — it's "holy shit, that's done." Search before building. Test before shipping. Ship the complete thing. When Ben asks for something, the answer is the finished product, not a plan to build it. Time is not an excuse. Fatigue is not an excuse. Complexity is not an excuse. Boil the ocean.
+
+**Scope of "boil the ocean": code, analysis, and local work — never public or community actions.** It means finish the *engineering*. It does NOT mean act autonomously on the community's behalf. See the next section.
+
+## Community interaction (read-only by default)
+
+This is a public repo with real external contributors. Their issues, PRs, and commits are theirs, not yours to dispose of. Reading is always fine; every write below requires Ben's explicit, per-action approval. There are exactly two ways that approval exists: Ben posts the text himself, or Ben clicks an approval in the `/triage` flow (see "Approved-via-triage posting" below). Absent one of those, you may only *draft*.
+
+- **Never edit, close, comment on, merge, or reopen another person's issue or PR** without Ben's explicit, per-action go-ahead. Never edit anyone's issue/PR/comment *text* — that reads as tampering and is never acceptable.
+- **Draft / WIP / "do not merge" means hands off.** Never cherry-pick, merge, or otherwise pull in a draft PR's work. Draft is the contributor's signal that it isn't ready; respect it.
+- **To use a contributor's work, merge their PR through the normal flow** (which credits them) — never extract the commit around them or push it to `main` directly.
+- **Never post AI-generated text as if it were Ben's own analysis**, and never post a claim about someone else's work without verifying it against the code first.
+- When Ben asks for a reply to a contributor, produce a short draft *in his voice* — plain, concrete, never machine-sounding. It is posted only via the two approval paths above.
+- **Exception: `dependabot[bot]` PRs.** These are the repo's own configured automation, not community contributions — no person's work is at stake. The agent may comment (e.g. `@dependabot rebase`/`recreate`) and merge these autonomously once CI is green, without per-action go-ahead. This exception is scoped to PRs whose author is literally `dependabot[bot]`; it does not extend to any human contributor, even one proposing a similar dependency bump.
+- **Exception: Ben's own PRs and issues** (added 2026-09-18, approved by Ben). This section protects *another person's* work; Ben's own is his, and the agent lands it on his instruction. `gh pr merge|close|comment|review|ready|reopen` and `gh issue close|comment|reopen` need no per-action approval when the target's author resolves to `bethington`. **`edit` is excluded from both**, along with delete/transfer/lock/unlock/pin/unpin: rewriting issue or PR text is never the agent's to do, on anyone's item, and none of those verbs lands work. The author is resolved live and fails closed — an unresolvable author means the normal block stands.
+- A local `.claude/` hook (`block-community-github-writes.py`) enforces a slice of this by denying write-shaped `gh` commands (resolving the target's author live to carve out the dependabot and own-work exceptions above, and honoring single-use triage approval records — see below); treat that as a backstop, not the boundary. The boundary is this section. Its behaviour is pinned by `.claude/triage/proposed-hook/test_hook_behaviour.py` (21 cases, run it after any change); the agent never installs the hook itself, because an agent must not rewrite its own guardrail.
+
+### Approved-via-triage posting (added 2026-08-18, approved by Ben)
+
+Ben decided (2026-08-18) to offload public interfacing to the agent **with himself as the per-action decision maker**. The mechanism:
+
+- In a `/triage` session, each pending community item is presented to Ben via `AskUserQuestion` with a recommended response and alternates. **Ben's click on a specific option for a specific item IS the explicit per-action go-ahead** for that exact text and that exact action — nothing more.
+- On approval the agent writes a single-use approval record to `.claude/triage/approved/` (target + action kind + SHA-256 of the exact body), then performs the write with `gh` using `--body-file` so the hook can verify the hash. The hook consumes the record; records expire after 60 minutes.
+- **The approved text is immutable.** Any edit after the click — even a typo fix — requires re-approval. A hash mismatch means the post does not happen.
+- **Scope of a click is one action.** Approval to comment on an issue is not approval to close it; approval on one issue transfers to no other issue. Batch approvals don't exist.
+- **Never fabricate, pre-write, or backfill approval records** outside an `AskUserQuestion` answer Ben actually gave in the current session. The record is an audit artifact of a real click, not a mechanism to satisfy the hook.
+- Every decision (approve/alt/skip/custom) is appended to `.claude/triage/decision-log.jsonl` for audit.
+- Standing exclusions survive this flow: never edit anyone's issue/PR/comment text, never touch draft PRs, never merge around a contributor, and security reports / hostile threads / anything reputational default to "Ben posts personally" unless he explicitly chooses agent-posts for that item.
+
+## Repository scope — what belongs here
+
+This repo is the **Ghidra MCP server and its bridge**. Concretely, in
+scope:
+
+- `src/`, `python/bridge_mcp_ghidra/` — the server and its bridge
+- `ghidra_scripts/` — Ghidra scripts that work on **any** binary
+- `tests/`, `tools/`, `docs/`
+
+**Out of scope: Diablo II game-side work.** Container/headless probes, mod
+tooling, D2Debugger harnesses, renderer experiments and conformance proving
+belong in the D2MOO repo (or their own), even when a session here produces them.
+Sharing a subject matter is not the same as sharing a codebase.
+
+This is written down because judgement alone did not hold: `scripts/d2probe/`
+was committed here on 2026-08-02 *after* being explicitly identified as
+out-of-scope in its own README, on the reasoning that the wrong repo beat no
+repo. It was rescued from a temp folder, which was a real problem — but the fix
+was to give it a home in D2MOO, not to attach 22 unrelated files to this
+project's history. If something needs rescuing and does not fit the list above,
+move it to the repo where it belongs.
+
+Those 22 files were **removed on 2026-08-11** (919 lines). History was
+deliberately not rewritten, so nothing is lost — recover the directory with:
+
+```text
+git log --all --diff-filter=D -1 --format=%H -- scripts/d2probe   # the deleting commit
+git checkout <that-sha>^ -- scripts/d2probe                       # restore into a worktree
+```
+
+**They now have an owning repo:** D2MOO `tools/d2probe/` (commit `c9438d6`, on
+`master` and `pd2-focus`, pushed). Verified 21 of the 22 files byte-identical to
+what was removed here; the 22nd is `README.md`, deliberately rewritten for the
+new home instead of still declaring itself out of scope. Deleting them here only
+stopped this repo being the answer by default — the rehoming is what finished it.
+
+## Architecture
+
+```text
+AI Tools <-> MCP Bridge (python/bridge_mcp_ghidra/) <-> McpHttpServer (in the GUI plugin, or the headless server)
+```
+
+- **HTTP**: `src/main/java/com/xebyte/core/McpHttpServer.java` -- the one HTTP server for every transport: the Unix socket (`ghidra-<pid>.sock`) and TCP (8089, falling back through the next ports), on both servers, from one `AnnotationScanner` per server. It also owns the identity routes `/mcp/schema`, `/mcp/instance_info`, `/mcp/health` and `/check_connection` (`{status, server_kind, version}`), identical on both servers bar `server_kind`.
+- **Plugin**: `src/main/java/com/xebyte/GhidraMCPPlugin.java` -- builds the GUI service set and hands its scanner to `ServerManager`, the JVM-wide singleton that owns the GUI's `McpHttpServer` across every tool window. Menu: Tools > GhidraMCP > Start / Stop / Restart Server, Server Status.
+- **Bridge**: `python/bridge_mcp_ghidra/` (package, split into focused modules: `config`, `state`, `server`, `validation`, `transport`, `discovery`, `schema`, `dispatch`, `registry`, `static_tools`, `debugger`, `cli`) -- dynamic tool registration from `/mcp/schema` + static tools (8 instance/tool-group/import: `list_instances`, `connect_instance`, `list_tool_groups`, `load_tool_group`, `unload_tool_group`, `check_tools`, `search_tools`, `import_file`; + 22 opt-in debugger proxies via `GHIDRA_DEBUGGER_URL`). Ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script. Cross-module functions are called module-qualified (e.g. `transport.do_request`, `dispatch.dispatch_get`) and mutable runtime state lives in `state.py`, so each function has one canonical mock-patch target.
+- **Service Layer**: `src/main/java/com/xebyte/core/` -- 20 `*Service` classes (~30K lines), `@McpTool`/`@Param` annotated, plus `HeadlessManagementService` in `headless/`. `CoreServices.build(provider, threading)` constructs the 12 every server shares (listing, comment, symbol/label, function, xref/call graph, data type, documentation hash, analysis, malware/security, program/script, emulation, function bundle), once, for the plugin, the headless server and the offline tests. Both servers add `ProjectLifecycleService`, `VersionControlService`, `ServerLifecycleService` and `DocumentationBatchService`; the GUI adds `DebuggerService` (TraceRmi), `PromptPolicyService` and `GuiToolService`; headless adds `HeadlessManagementService`.
+- **Program model**: `ProjectProgramProvider` -- the abstract base both `FrontEndProgramProvider` (GUI; adds the CodeBrowser layer, opens with `okToUpgrade=false`) and `HeadlessProgramProvider` (`okToUpgrade=true`) extend. A path-keyed LRU cache over the project (`GHIDRA_MCP_MAX_CACHED_PROGRAMS`, default 8, minimum 2) that opens a program the first time any endpoint names it; `ProjectProgramProvider.match` is the one name resolver.
+- **Debugger (Python)**: MOVED 2026-08-11 to `d2-game-exe`. It was a standalone
+  HTTP server on port 8099 whose `d2/conventions.py` made it game-side. What
+  stays here is the **bridge proxy** — 22 tools in
+  `python/bridge_mcp_ghidra/debugger.py` that forward to whatever
+  `GHIDRA_DEBUGGER_URL` names. They are OFF BY DEFAULT and register only when
+  `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS` is
+  truthy (`GHIDRA_DEBUGGER_TOOLS=0` wins over a URL); the proxy refuses any
+  non-loopback URL, so forward a remote server's port. The host platform plays
+  no part.
+  The debugger's HTTP surface is now a contract between two repos: a route or
+  payload change there breaks these proxies with no single CI run to catch it.
+- **Headless**: `src/main/java/com/xebyte/headless/` -- standalone server without GUI. `HeadlessManagementService` carries only the project lifecycle (create/open/close/delete/list projects); GZF/GAR export, import, archive and restore are `ProjectLifecycleService`, on both servers. Opening, importing and checking in programs are shared (`ProgramScriptService` over `ProjectProgramProvider`, which both providers extend). The identity routes (`/check_connection`, `/mcp/health`, `/mcp/instance_info`) are `McpHttpServer`'s own, identical on both servers bar `server_kind`.
+- **fun-doc**: MOVED 2026-08-11 to the `d2-game-exe` repository, where it sits
+  alongside the binary-reconstruction work it serves. It is no longer part of
+  this repo's scope, tests or CI. It still consumes this server's HTTP API, so
+  changes to the response envelope or to service endpoints can break it from a
+  distance — the single-commit/single-CI relationship that used to catch that
+  is gone, and that is the cost of the split.
+- **Annotation Scanner**: `AnnotationScanner.java` discovers `@McpTool` methods, generates `/mcp/schema`
+
+Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
+
+- FrontEnd mode: `FrontEndProgramProvider` + `DirectThreadingStrategy`
+- Headless mode: `HeadlessProgramProvider` + `DirectThreadingStrategy`
+
+Both servers construct `DirectThreadingStrategy` (one global lock, no event-thread
+hop). Tool bodies run on the request thread; reads and writes go through
+`executeRead`/`executeWrite`. Code that drives windows calls
+`SwingUtilities.invokeAndWait` or Ghidra's `Swing.runNow` itself (or via Ghidra
+services that already do), as `GuiToolService`, `Workbench` and `DebuggerService` do.
+
+## Tool Inventory
+
+Do not try to keep the full tool list in this file.
+
+- **Authoritative repo snapshot**: `tests/endpoints.json` (209 endpoints, categories, descriptions)
+- **Authoritative runtime schema**: `/mcp/schema` from the running server
+- **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
+
+Use this file for architecture, conventions, and implementation guidance; use the schema and endpoint catalog for the complete tool inventory.
+
+## Build & Deploy
+
+Two backends are supported and both are maintained. **Gradle is the default for
+local work** — it reads Ghidra's jars straight out of the installation, needs no
+`install-file` step, and is the only backend that works on a machine with no
+Maven. **CI still builds and gates with Maven** (`tests.yml`'s *Java Build
+(Maven)* job, and the same steps in `release.yml`), so Maven is a peer and not a
+fallback: a change that is green under Gradle can still be red in CI for a
+Maven-only reason, and the JaCoCo coverage gate is exactly that reason.
+
+**Gradle (default):**
+
+```text
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+./gradlew verifyVersion  -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+```
+
+Registered tasks: `buildExtension`, `prepareGhidraClasspath`, `verifyVersion`,
+`preflight`, `deployExtension`, `installUserExtension`, `patchGhidraUserConfig`,
+`stopGhidra`, `deploy`, `startGhidra`, `cleanAll`, plus the standard `test`
+(pinned by `tests/unit/test_gradle_tasks.py`).
+
+**Git Bash: forward slashes in the path.** `-PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.4_PUBLIC`
+is mangled before Gradle sees it, the property resolves to nothing, and you get
+~100 `package ghidra.program.model.address does not exist` errors that read like
+a broken checkout rather than a broken argument. PowerShell takes the backslash
+form.
+
+**Via the `tools.setup` facade** (same commands, Gradle backend):
+
+```text
+$env:TOOLS_SETUP_BACKEND = "gradle"
+python -m tools.setup build
+python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.4_PUBLIC
+python -m tools.setup deploy    --ghidra-path F:\ghidra_12.1.4_PUBLIC
+```
+
+**`deploy --test <tier>` is the one command that must NOT run under the Gradle
+backend.** `build.gradle`'s `deploy` is `stopGhidra` + `deployExtension` +
+`installUserExtension` + `patchGhidraUserConfig` and runs no post-deploy tier, so
+`cmd_deploy` **refuses** a tier there rather than accepting it and dropping it
+(#484). This is not a Maven-binary requirement: the default backend's
+`deploy_to_ghidra` never invokes `mvn` — `find_plugin_archive` takes the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it. So with no Maven installed the working combination is:
+
+```text
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC   # Gradle builds
+python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.4_PUBLIC --test release
+```
+
+The two steps want different backends. Do not export
+`TOOLS_SETUP_BACKEND=gradle` for a whole session and then wonder why
+`--test release` refuses.
+
+**Maven (peer backend; what CI uses):**
+
+```text
+python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.4_PUBLIC
+python -m tools.setup build
+python -m tools.setup preflight      --ghidra-path F:\ghidra_12.1.4_PUBLIC
+python -m tools.setup deploy         --ghidra-path F:\ghidra_12.1.4_PUBLIC
+```
+
+- Ghidra install: `F:\ghidra_12.1.4_PUBLIC`
+- `ensure-prereqs` / `install-ghidra-deps` exist for Maven's benefit: they
+  `install-file` Ghidra's ~19 jars into the local repository. Gradle reads the
+  installation directly via `fileTree`, so the Gradle equivalent is
+  `prepareGhidraClasspath`, and usually nothing at all.
+- `tools.setup` still defaults to Maven (`TOOLS_SETUP_BACKEND` unset). That
+  default is what makes `deploy --test` work; for everything else set the
+  variable or call `./gradlew` directly.
+- Deploy handles: extension install, FrontEndTool.xml patching, Ghidra restart
+- Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
+
+### Maven-only today — no Gradle path exists
+
+Three things still require Maven. Do not invent a Gradle form for them.
+
+1. **Regenerating the endpoint catalog** —
+   `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`.
+   Gradle *can* select the class (`--tests 'com.xebyte.offline.RegenerateEndpointsJson'`)
+   but **cannot pass the flag that arms it**. `-Dregenerate=true` sets a property
+   on the Gradle *daemon* JVM; `build.gradle`'s `test { }` block forwards only
+   `net.bytebuddy.experimental` and `project.basedir` into the forked test JVM.
+   Measured 2026-09-18: the `Gradle Test Executor` command line carries no
+   `-Dregenerate`, `System.getProperty("regenerate")` returns null, the test
+   returns early, `tests/endpoints.json` is untouched — and the run reports
+   **BUILD SUCCESSFUL**. That silent success is the failure mode to watch for,
+   and it is why this is written down rather than left to be rediscovered.
+2. **The Java coverage gate** — `mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`.
+   JaCoCo is configured in `pom.xml` only; `build.gradle` declares no JaCoCo
+   plugin. This is the concrete way a Gradle-green change goes red in CI.
+3. **The `headless` and `docker` build profiles** —
+   `mvn clean package -P headless -DskipTests` and `-P docker`. Both are
+   `pom.xml` profiles; `build.gradle` registers no equivalent task, and
+   `buildExtension` produces the GUI extension zip, not the headless assembly
+   or the container image.
+
+Everything else — build, offline tier, real-Ghidra tier, deploy, preflight,
+version verification, `cleanAll` — has a working Gradle form, named above.
+`EndpointsJsonParityTest` is **not** in this list: it is an ordinary offline
+test and `./gradlew test --tests 'com.xebyte.offline.*'` runs it. Only the
+*remedy* it prints when it fails is Maven-only.
+
+## Releases
+
+Use `docs/releases/RELEASE_CHECKLIST.md` as the canonical release runbook. Do
+not duplicate the whole checklist here; keep this file light enough to fit in
+agent context.
+
+Release floor before tagging or publishing:
+
+```text
+python -m tools.setup verify-version                    # no backend, no Maven needed
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC
+pytest tests/unit/ -v --no-cov
+python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.4_PUBLIC --test release
+git add docs/releases/live-regression-evidence.json   # the tier writes it; commit it
+```
+
+**That fourth command must run with `TOOLS_SETUP_BACKEND` unset or `maven`** —
+see "Build & Deploy": the Gradle backend's `deploy` runs no tier and refuses
+one. It does not need the `mvn` binary; it deploys whatever archive the second
+step produced.
+
+Run UI-touching deploy/regression only after confirming the current Ghidra UI
+state when modal dialogs may be present.
+
+**That last `--test release` is now load-bearing in CI, not just locally.** A
+passing run writes `docs/releases/live-regression-evidence.json`, and
+`release.yml` / `pre-release.yml` refuse to publish without it. They used to
+accept `needs.release-regression.result == 'skipped'`, and on a **tag push**
+that job is *always* skipped (its own `if` requires `workflow_dispatch`), so the
+gate had never blocked a tagged release and could not. It cannot be fixed by
+running the tier in CI: it needs a live Ghidra GUI on Windows and targets
+`[self-hosted, Windows]`, and **no self-hosted runner is registered** — a
+deliberate choice, because on a public repo labelling a fork PR would run a
+stranger's code on this machine. The evidence records a **source fingerprint**
+(git blob ids of `src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`,
+`tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`, `build.gradle`),
+not a timestamp — touch any of them afterwards and the release fails until the
+tier is re-run; touch the CHANGELOG and it does not.
+
+## Running the MCP Server
+
+```bash
+uv run bridge-mcp-ghidra                                  # stdio (recommended for AI tools)
+uv run bridge-mcp-ghidra --transport streamable-http      # HTTP (web clients, MCP Inspector)
+uv run bridge-mcp-ghidra --transport sse                  # SSE (deprecated compat only)
+uv run python -m bridge_mcp_ghidra             # equivalent module form
+```
+
+The debugger server is not part of this repo (it moved to `d2-game-exe`). The
+22 bridge proxy tools are off by default; to use them, run a debugger server
+and opt in:
+
+```bash
+export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099   # explicit URL => tools register
+export GHIDRA_DEBUGGER_TOOLS=1                     # or force them on at the default URL
+# neither set (or GHIDRA_DEBUGGER_TOOLS=0) => the 22 tools are not registered
+```
+
+The bridge is a package under `python/bridge_mcp_ghidra/` and ships as a wheel
+(`ghidra_mcp_bridge`); installs expose the `bridge-mcp-ghidra` console script.
+
+Ghidra HTTP endpoint: `http://127.0.0.1:8089`
+
+## Adding New Endpoints
+
+1. Add `@McpTool` + `@Param` method in the appropriate service class
+2. AnnotationScanner auto-discovers it -- no bridge or registry changes needed
+3. Regenerate `tests/endpoints.json`, then re-stamp and re-render what reads it:
+
+   ```text
+   mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only, no Gradle path
+   python -m tools.audit_server_scope --write        # the `servers` field
+   python -m tools.gen_readme_api_reference --write  # README API Reference
+   ```
+
+**Which server will serve it is decided by the service class you picked**, not by
+the annotation. The GUI plugin and the headless server each build their own
+`AnnotationScanner` from a different service list, so a tool on `DebuggerService`
+or `PromptPolicyService` is GUI-only and one on `HeadlessManagementService` is
+headless-only; everything on the 16 shared services (the 12 in `CoreServices`
+plus `ProjectLifecycleService`, `VersionControlService`, `ServerLifecycleService`
+and `DocumentationBatchService`) is on both. The catalog
+records this per endpoint as `servers: ["gui"|"headless"]`, derived from the two
+servers' own wiring -- never hand-flagged. The regenerator takes `category` from
+the annotation: it is the tool group the bridge lazy-loads by, not editorial
+metadata, so do not hand-edit it in the catalog.
+
+For complex tools needing bridge-side logic (retries, multi-call orchestration), add a static `@mcp.tool()` in `python/bridge_mcp_ghidra/static_tools.py` (or `debugger.py`) and add the name to `MANAGEMENT_TOOL_NAMES` (or `DEBUGGER_TOOL_NAMES`) in `config.py`; `STATIC_TOOL_NAMES` is built from those sets at import time.
+
+## Code Conventions
+
+- All endpoints return JSON
+- Transactions must be committed for Ghidra database changes
+- Prefer batch operations over individual calls
+- `@Param` defaults to `ParamSource.QUERY`, but `AnnotationScanner.resolveParam` falls back to the other source when the declared one does not carry the parameter, so `program` (or any parameter) in a POST JSON body is found too. The declared source wins when both carry it. Before that fallback, a body `program` was silently ignored and writes landed in whichever program was current.
+
+## Convention Enforcement (Opinionated Tooling)
+
+The longer this project was used across many versions and hundreds of thousands of functions, the less reliable prompt-only discipline became. Models drift, improvise, and skip conventions in much the same way people do.
+
+The tools actively enforce RE documentation standards. This is intentional. v5.0 moves conventions into the tool layer so documentation stays readable, reusable, and consistent across both solo large-scale RE workflows and teams.
+
+- **`NamingConventions.java`**: Centralized validation. All naming tools route through this.
+- **Struct fields**: Auto-prefixed with correct Hungarian notation on `create_struct`, `add_struct_field`, `modify_struct_field`. The model doesn't need to know the prefix rules -- the tool handles it.
+- **Function names**: `rename_function` warns on non-PascalCase, missing verbs, short names. Module prefixes (`UPPERCASE_`) are accepted and validated separately.
+- **Globals/Labels**: `rename_symbol` warns if globals lack `g_` prefix or labels aren't snake_case.
+- **Plate comments**: `batch_set_comments` warns on missing Algorithm/Parameters/Returns sections.
+- **Type changes**: `set_variable_type` rejects `undefined` -> `undefined` (no-op protection).
+- **Completeness scoring**: `analyze_function_completeness` returns budgeted scores with log-scaled deductions. Structural deductions are fully forgiven in effective_score.
+
+When building new tools or modifying existing ones, wire validation through `NamingConventions` to maintain consistency.
+
+## Testing
+
+Four tiers by cost and prerequisites:
+
+1. **Unit** (`pytest tests/unit/`) — pure Python, no Ghidra, no side effects. Covers bridge utils, debugger-proxy gating, setup CLI, catalog/schema consistency. About 1,200 tests, roughly a minute.
+2. **Offline** — Java scanner/parity + Python regression tests that don't hit Ghidra on 8089. Fast (<10s).
+   Plus **`pytest tests/offline/`** (#112): a strict fake of the plugin's HTTP surface
+   (`tests/offline/fake_ghidra.py`) that routes from `tests/endpoints.json`, validates
+   parameters against the recorded `/mcp/schema`, and serves the conformance snapshots.
+   It runs the real bridge end to end over a real socket, and
+   `pytest tests/integration/test_readonly_endpoints.py -p tests.offline.replay_plugin`
+   runs the read-only integration file with **no Ghidra installed** (55 pass, 16 skip: 12
+   documented gaps plus 4 that need a program the recordings do not have). Read `tests/offline/README.md` before adding to it — the fake proves the bridge
+   speaks the protocol and that shapes match the recordings; it proves nothing about what
+   Ghidra does today, and a test that implies otherwise is worse than no test.
+3. **Real-Ghidra** (`src/test/java/com/xebyte/core/*GhidraTest.java`) — builds an actual `ProgramDB` via `ProgramBuilder`. Needs a Ghidra **installation** (`GHIDRA_INSTALL_DIR`) but no running server and no project. ~30s.
+4. **Integration** (`pytest tests/` + `./gradlew test`, or `mvn test`) — requires live Ghidra on port 8089 with a binary open. Slow and stateful.
+
+### Match change → tests
+
+Find the file(s) you edited below; run everything in that row. Always include the tier-1 Unit + Offline row as a floor unless noted.
+
+| Change location | Run |
+| --- | --- |
+| `src/main/java/com/xebyte/core/*Service.java` (any service class) | Offline (Java) + Integration (Java) + `tests/integration/test_readonly_endpoints.py` |
+| `tests/offline/*` (the fake, the replay plugin, the baselines) | `pytest tests/offline/ --no-cov` + `pytest tests/integration/test_readonly_endpoints.py -p tests.offline.replay_plugin --no-cov`. Both baselines are asserted EXACTLY: a new contract violation fails, and so does a stale one, so fixing a breach means deleting its line from `fixtures/expected_contract_violations.json` — which is now **empty and must stay empty**. `fixtures/known_offline_gaps.json` errors on a node id that no longer exists, so the quarantine list cannot outlive its tests. Do NOT teach the fake to compute an answer — it routes, validates and replays, and a fake that derives a response is a test asserting on itself. |
+| Any `tests/integration/*.py` — adding or editing an HTTP call | `pytest tests/unit/test_integration_call_contract.py --no-cov`. It AST-checks every call's path, method and parameter names against `tests/endpoints.json` + the recorded `/mcp/schema`, with no server and no fixtures. **A wrong parameter name is invisible at runtime**: `AnnotationScanner` does not find it, uses the default, and returns 200, so the test passes while asserting nothing — that is how ten of these survived in the read-only suite until #112's offline tier ran. `tests/unit/fixtures/known_integration_call_breaches.json` is a ratchet in both directions; fixing a breach means deleting its line, and adding one is a decision to ship a test that cannot fail. `@Param` **aliases** are valid spellings the schema does not advertise, so both this check and the fake resolve them through `tests/offline/param_aliases.py` rather than reporting them — a schema that emitted `aliases` would retire that module. |
+| `src/main/java/com/xebyte/core/AnalysisService.java` — `/get_function_pcode` / `/get_language_metadata` (#192) | Offline (Java) + `tests/integration/test_readonly_endpoints.py::TestProgramInfo::test_get_language_metadata*` + `::TestFunctionAnalysis::test_get_function_pcode_*`. Requires live Ghidra with the new JAR deployed. |
+| `src/main/java/com/xebyte/core/LanguageVariants.java` + the variant check (`ServiceUtils.variantGate` / `variantRejectionData` / `putLanguageSelection`), and any code that obtains decompiler C | Offline (Java) `LanguageVariantsTest` for the decision table (it is deliberately Ghidra-free so the table runs without an install) + `DecompiledOutputIsStampedTest`; **plus real-Ghidra (Java) `LanguageVariantDecoderGhidraTest` and `DecompileVariantLabellingGhidraTest`**. The first asks Ghidra's own language table whether x86 really is one decoder and PowerPC really is many -- the `.ldefs` measurement below is otherwise pinned by nothing, and a Ghidra release that gave `System Management Mode` its own `.sla` would re-create the x86 blocker silently. The second drives the real endpoints (`get_functions` single/bulk/`call_context`, `force_decompile`, both composites, `get_language_metadata`) on `ProgramBuilder` x86 and PowerPC programs with the real decompiler, so what a caller receives is pinned in CI without a deploy. After deploy, `tests/integration/test_decompile_variant_labelling.py` (auto-skips against a server built before this) and the `curated_calc_crc16_*` / `get_language_metadata` conformance cases. **Ghidra's loader GUESSES the variant column and a wrong guess is undetectable in the output**: `PowerPC:BE:32:default` and `PowerPC:BE:64:VLE-32addr` (VLE) decode the same bytes into different instruction streams, so a VLE image opened as classic PowerPC decompiles into C that is syntactically perfect, entirely fictional, and reported as a success. **The answer is a LABEL, not a required parameter** -- `variant=` is optional on all four C-returning endpoints. The first cut made it mandatory whenever the bucket held more than one variant row and that failed twice over: it fires on every x86 binary (#509 was blocked on exactly this), and the confirmation is unenforceable because a refusal must enumerate the legal values to be answerable, so it names the answer and a model re-sends it unchecked -- the same shape as the eviction guard whose text must never name `allow_evict`, except here the override IS the parameter. What ships instead: (1) **every** response carrying C is stamped `language_id` + `variant`, unconditionally; (2) a processor whose variants load more than one SLEIGH **decoder** also gets `variant_ambiguous` + `variant_candidates` + `variant_notice`; (3) a variant the caller NAMES that the program contradicts is refused (`variant_mismatch`), because that one is a volunteered claim and answering it would return one dialect's C under a label the caller chose. **Ambiguity counts DECODERS, not rows** -- measured on 12.1.2: 30 of 83 buckets hold >1 variant but only **19** hold >1 `.sla` (96 of 177 non-deprecated languages). All three x86 buckets drop out (`default` and `System Management Mode` are both `x86.sla`, differing in pspec); PowerPC/BE/32 keeps 10 decoders across 11 variants. The bucket key is `(processor, endian, getSize())` -- **`size` is the address size, not the id's middle field**, so `PowerPC:BE:64:VLE-32addr` (size 32) shares a bucket with `PowerPC:BE:32:default`. The decoder test is a **proxy for "the loader guessed", not a proof of identical decoding**: `x86-16.pspec` sets `addrsize`/`opsize` and `mips64micro.pspec` sets `RELP`, so those same-`.sla` variants really do decode differently -- widening the rule to catch them re-admits x86, and the unconditional stamp is what covers the gap (`LanguageVariantsTest` pins both directions so nobody "fixes" it by accident). **Where C leaves the server, and where the stamp goes**: `get_functions` builds every bundle in `FunctionFacts.build`, which stamps any bundle carrying `decompiled_code` or `call_context` -- in the PRODUCER, so bulk mode stamps every entry and any future surface rendering that map inherits the label; `get_functions` runs `variantGate` ahead of the bulk dispatch and of field selection, so a contradicted claim is refused in every mode. `force_decompile` stamps and checks like it. The composites (`/analyze_function_complete`, `/analyze_for_documentation`) **withhold `decompiled_code` and return the rest** on a mismatch rather than failing wholesale. Endpoints that decompile only to derive a score or field-usage map (`/analyze_function_completeness`, `/analyze_struct_field_usage`) are untouched -- they hand back no pseudocode. Internal Java callers bypass the check on purpose (`FunctionService.forceDecompileAt` and the internal overloads) -- it belongs on the MCP boundary, where a belief is stated. `DecompiledOutputIsStampedTest` (offline) is what makes all of that enforceable: it ratchets, across EVERY main source file, the set of methods obtaining decompiler C (`getDecompiledFunction().getC()` / `getCCodeMarkup()`) with a declared role for each, plus the set putting it into a response, and requires the stamp ahead of every emission -- so a new producer fails until someone decides whether it reaches a caller. **Do not narrow it back to a file list**: its first version scanned `FunctionService` and `AnalysisService` only, and when `/get_functions` replaced `/decompile_function` the C moved into `FunctionFacts`, which that version would never have seen. It reads source text rather than exercising behaviour on purpose -- it exists to catch the emitter nothing calls yet (`decompileFunctionByAddress` and `batchDecompileFunctions` are reachable from nothing today and are stamped anyway). Use `ProjectSource.normalizeNewlines` (or `ProjectSource.read`) in any source-text test here: two older ones match a needle containing a bare newline and fail on every Windows checkout for that reason alone. |
+| `src/main/java/com/xebyte/core/McpHttpServer.java` / `ServerManager.java` — transports, identity routes, UDS + TCP port advertising (#175) | Offline (Java) `ServerManagerPortTest` (the bound port is read from the listener via `getBoundTcpPort`, never stored), `McpHttpServerSocketDirTest`, `IdentityRoutesTest`; `tests/integration/test_readonly_endpoints.py::TestProgramInfo::test_mcp_instance_info_on_tcp` for the live endpoint. |
+| `src/main/java/com/xebyte/core/ProgramScriptService.java` — `open_program` / `import_file` / `checkin_program`, or `ProjectProgramProvider` | Offline (Java) `ProjectProgramProviderTest` + `ProgramOpenFailureMessageTest`, then a live round-trip on BOTH servers: checkout → `open_program` → `close_program save=false` → `undo_checkout` must return `checkout_undone` **on the first try, with no Ghidra restart**. The provider opens under its own consumer and keeps that reference in its cache on purpose: that one reference is what `close_program`, `closeProgramByPath` and LRU eviction release. A reference taken anywhere else and not released leaves the DomainFile permanently "in use". Measured 2026-08-10, when `open_program` held a second, tool-owned reference: a read-only verification sweep stranded **140 exclusive checkouts**, clearable only by restarting Ghidra. `import_file` closes the importer's `LoadResults` for the same reason and reopens the saved file through the provider. **A writable open that fails falls back to read-only and succeeds**, so `open_program` must keep reporting `read_only` + `read_only_reason`: a stale SLEIGH language surfaces only there. `upgrade_project_language --verify` keys on that reason, not on `success`. `describeOpenFailure` must keep naming the remedy for a language-version refusal — a bare `Minor language change 4.6 -> 4.7` names the symptom, and the GUI structurally cannot fix it (`okToUpgrade=false`, and an upgrade needs an exclusive checkout), so the message points at `tools/upgrade_project_language.py`. Do NOT decorate unrelated failures; a test pins that pass-through. Name resolution is `ProjectProgramProvider.match` everywhere: exact path, exact name, the project, then a UNIQUE substring. An ambiguous name is an error, never the first hit — `D2Common.dll` exists in every version folder. |
+| `src/main/java/com/xebyte/core/NamingConventions.java` | Offline (Java) — `NamingConventionsTest` covers function-name verb-tier rules + token-subset duplicate detection + global-name validator (`checkGlobalNameQuality`, `checkGlobalPlateComment`, `isAutoGeneratedGlobalName`). After deploy: `tests/integration/test_safe_write_endpoints.py` + `tests/integration/test_global_endpoints.py`. fun-doc's benchmark (`--mock --tier fast --compare`) moved to `d2-game-exe` with fun-doc; re-run it there when a naming verdict changes. |
+| `src/main/java/com/xebyte/core/DataTypeService.java` — `audit_global` / `set_global` | Offline (Java) `NamingConventionsTest` for the helpers; `tests/integration/test_global_endpoints.py` for live endpoint behavior (post-deploy only — auto-skips when endpoints aren't registered). **"Untyped" has exactly ONE definition and it lives in THREE places that must move together**: `NamingConventions.isPlaceholderTypeName` (Java), `d2moo_types.PLACEHOLDERS` (Python), `conformance_dashboard._glob_is_untyped` (the inventory's `typed` flag). The last two moved to `d2-game-exe`'s `fun-doc/` on 2026-08-11, so a change to the Java side needs a matching change in that repo; no CI run here sees the other two. The set is `undefined*` + `code` + bare `pointer`/`pointer32`/`pointer64`. Until 2026-08-03 the Java side tested only `startsWith("undefined")`, so a `pointer *` global audited `issues: []`, `fully_documented: true` — the globals worker filed it `already_clean` AND clean-cached it, while the dashboard's types bar counted it untyped and told the operator to run that worker. The bar's count could not go down: 2 of PD2_EXT.dll's 5, ~180 corpus-wide. A one-sided edit here silently rebuilds that trap, and it presents as "starting a typing worker does nothing". **`set_global` must never clear a NAMED global out of existence** — `findEvictionVictims` + `NamingConventions.isEvictableSymbolName` gate the `clearCodeUnits` call and reject with `type_would_evict`, listing the casualties; `allow_evict=true` is the deliberate override. Clearing auto-generated labels (`DAT_*`, `LAB_*`) stays allowed — you cannot lay down an array otherwise. Before this guard, `clearCodeUnits` ran over the whole extent with its exception swallowed, so a type application deleted any global it overlapped **and still reported success**: measured 2026-08-03, three globals destroyed in one PD2_EXT.dll pass (a `float10` ate `g_dwPosInfBits` 8 bytes on; a `byte[256]` ate `g_abUppercaseCharTbl2_end`; three 4-byte writes destroyed the 128-byte `g_apfnApiSlots` they sat inside), and 541 globals corpus-wide sitting in that state. Both directions matter — a small write INSIDE an existing unit destroys the whole container, because `clearCodeUnits` works on whole code units. **All THREE clearing writers must go through `evictionRejection`** (`set_global`, `apply_data_type`, `apply_data_classification`): guarding only `set_global` made the guard advisory, and a worker hit its refusal four times then completed the identical write through `apply_data_type` + `rename_symbol` + `set_comment` — simply the next tool in the chain. **The refusal text must never name `allow_evict`** (`NamingConventions.evictionSuggestion` is tested for this): the first version ended "re-send with allow_evict=true", and within one turn a model read the suggestion, re-sent with the override, and destroyed `g_ldHalf`. The escape hatch is for a human who has decided the overlap is wrong; it is not a hint for the agent being constrained. |
+| `src/main/java/com/xebyte/core/NamingConventions.java` — `plateStatedCount` / `plateExtentContradicts` (`plate_extent_mismatch`) | Offline (Java) `NamingConventionsTest`. Catches a type recording an extent the data does not support: when the eviction guard refuses, the easy way out is shrinking the type until it fits the free gap, which produced `g_apfnApiSlots : FARPROC[3]`, `issues: []`, `fully_documented: true` under a plate saying "Array of 32 FARPROC slots" — 3 is where the next label sat, not a fact about the binary. MEDIUM, so it blocks `fully_documented`. **The thresholds are calibration outputs, not choices** — measured against 6,434 live globals (PD2_EXT/D2Common/D2Client/Fog) across three passes: 153 findings with ~40% hand-reviewed false, then 83, then 69 (1.1%). Each abstention kills a MEASURED class and must not be removed: POINTER (`g_pInterpTable : double *` — the plate describes the pointee), SENTINEL (`*End`/`*_end` — the count describes the array it terminates), UNIT-MULTIPLE (`dword[510]` under "255 entries, 2 DWORDs each" — agreement in different units; only abstain when BOTH sides exceed 1, or a length of 1 divides everything), STRIDE ("8 bytes each" is an element size, not an extent), and SINGULAR nouns ("Roll 2 entry" is a proper noun). The stride look-behind must stay clause-bounded — a flat window made "32 slots, each a 4-byte pointer, 16 entries" drop the 16 and turn a two-count abstention into a confident wrong answer. |
+| `src/main/java/com/xebyte/core/DataTypeService.java` — `auditGlobalAt`'s export gate (`is_export`) | Offline (Java) `NamingConventionsTest` for `isOrdinalExportName`; live `audit_global` on a named data export. **A NAMED export's name is the ABI contract and must never be audited into `g_` form** — the consuming loader resolves that exact string. Measured 2026-08-04 on PD2_EXT.dll, which is a `version.dll` PROXY: all 12 named exports are forwarder strings (`"version.VerFindFileW"`) and it has no real code exports at all. A globals pass renamed every one — `GetFileVersionInfoA` → `g_szImportNameGetFileVersionInfoA`, and `GetFileVersionInfoW` → `g_szVerFileVersionApi`, which does not even name the right export — plus mis-typed three of them (`char *` and `dword` on 24-byte strings). `list_exports` then showed both `Ordinal_1` and the invented global at one address. The model that first refused ("would destroy the canonical exported API identity") was RIGHT; nothing in the tool layer backed it, so a later pass did it anyway. **The exemption is name-only** — type and plate checks still fire, so a forwarder still needs its exact `char[N]`. **It must NOT be a blanket "exports are untouchable" rule**: D2's DLLs export almost everything by ORDINAL, Ghidra names those `Ordinal_10001`, and renaming them is the core workflow — `isOrdinalExportName` is the discriminator. Blast radius measured corpus-wide: 7,172 named *code* exports (unaffected, code-address guard) and 28 named *data* exports, of which 16 already had good `g_` names, so the rule's real effect is exactly the 12 forwarders — plus correctly protecting `g_dwNvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance`, which drivers look up BY NAME. |
+| `src/main/java/com/xebyte/core/DataTypeService.java` — `auditGlobalAt`'s interior detection | Offline (Java) + live `audit_global` on a known interior address. `audit_global` must keep distinguishing "no data here" from "swallowed by a unit that starts earlier" (`interior_to_data` + the `container` block). The difference is not cosmetic: **`/list_globals` resolves the CONTAINING data unit**, so it reports the EATER's type at a dead address and the dashboard renders a destroyed global as perfectly typed. On PD2_EXT.dll the types bar counted 1 untyped while `audit_global` counted 3; corpus-wide 540 of 541 damaged globals were invisible to every dashboard read. Severity is deliberately **soft** — `untyped` (hard) already fires for every interior global, and a second blocking issue would send the worker chasing a fix that needs a human judgement call (either the container's length is wrong or the interior symbol shouldn't exist). |
+| `src/main/java/com/xebyte/core/SymbolLabelService.java` — `rename_symbol` / `rename_symbol` validator hook | Offline (Java) `NamingConventionsTest` for the rule; `tests/integration/test_global_endpoints.py` for the structured-rejection round-trip. |
+| Add/modify `@McpTool` / `@Param` annotation | Offline (Java) first — `EndpointsJsonParityTest` will fail if `tests/endpoints.json` is stale. Regenerate: `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` (**Maven only** — Gradle cannot pass `-Dregenerate` into the forked test JVM and exits BUILD SUCCESSFUL having regenerated nothing), **then** `python -m tools.gen_readme_api_reference --write` (regenerating the catalog red-lines `tests/unit/test_project_consistency.py` otherwise). Then Integration (Java). |
+| `@McpTool(category=)` / `@McpToolGroup` / `ManualToolDescriptors` category | Offline (Java) `EndpointsJsonParityTest` (3 category guards) + `pytest tests/unit/test_audit_endpoint_categories.py`. **`category` is the tool GROUP the bridge lazy-loads by** — `list_tool_groups`/`load_tool_group`/`check_tools` and `CORE_GROUPS = {listing, function, program}` all key on it, read from `/mcp/schema`, never from the catalog. Because nothing compared the two, 63 of 219 catalog entries drifted onto a dead pre-tool-group verb taxonomy (`getter`/`rename`/`decompile`/`search`/`script`) naming groups no `load_tool_group` call can resolve, and understated 27 tools — `decompile_function`, `rename_function`, `search_functions`, `run_ghidra_script` among them — as outside the default groups. `RegenerateEndpointsJson` no longer preserves the catalog's category (preserving it copied the stale value forward on every regeneration); to move a tool between groups edit the annotation and regenerate. Reproduce the drift without Maven or Ghidra: `python -m tools.audit_endpoint_categories`. |
+| `src/main/java/com/xebyte/GhidraMCPPlugin.java` (hand-coded routes, service wiring) | Offline (Java) — `ManualToolDescriptorsParityTest` for hand-coded routes, `EndpointsJsonParityTest` + `tests/unit/test_audit_server_scope.py` for the service list — + `EndpointRegistrationTest` (integration). For UDS/TCP defaults + TCP port-range fallback (#175): manual verification with port 8089 occupied, expect bind on 8090; `/mcp/instance_info → tcp_port` should report the actual bound port. |
+| `src/main/java/com/xebyte/headless/*` | Offline (Java) + `tests/unit/test_setup_ghidra.py` + Integration (Java) headless run |
+| `python/bridge_mcp_ghidra/*` (bridge package) | `tests/unit/test_bridge_utils.py tests/unit/test_mcp_tools.py tests/unit/test_mcp_tool_functions.py tests/unit/test_response_schemas.py tests/unit/test_endpoint_catalog.py tests/unit/test_project_consistency.py`. For multi-candidate socket dir scan (#170): `TestGetSocketDirCandidates` + `TestDiscoverInstancesMultiDir`. For TCP port-range scanner (#175): `TestTcpPortScan`. For debugger-tool opt-in gating: `TestDebuggerEnabled` + `TestDebuggerToolRegistration`. For the MCP-conformance surface (#553): `tests/unit/test_bridge_cli.py` (bare `OPTIONS`, the session guard, the bearer token, `--json-response` / `--stateless-http`, `--tools-page-size`), `tests/unit/test_mcp_tools.py` (`isError`, progress, `readOnlyHint`/`destructiveHint`, no fake output schema). Per-module size cap is 800 lines (`test_bridge_modules_stay_focused`). Mock-patch targets are module-qualified (e.g. `bridge_mcp_ghidra.dispatch.dispatch_get`, `bridge_mcp_ghidra.transport.do_request`); mutable globals live in `bridge_mcp_ghidra.state`. |
+| `src/main/java/com/xebyte/core/ListingService.java` — `/list_shadowed_globals` | Offline (Java) `EndpointsJsonParityTest` + live smoke against a binary with known shadowed globals (D2Common had 136). Exists because **`/list_globals` structurally cannot show this population**: it resolves the CONTAINING data unit, so a global swallowed by a neighbour reports the eater's type and renders as perfectly typed in every panel — 539 of 540 corpus-wide were invisible, each hard-capped at 79 by the untyped ceiling and unable to band COMPLETE_80+. Keep its symbol gates identical to `listGlobals` Pass 1: this count renders beside that one, and two views of "the globals in this binary" disagreeing on their denominator is the exact bug class it was built to expose. Auto-generated labels are skipped — their loss is not documentation loss, the same rule the eviction guard uses. **`formatGlobalSymbol` must take the type from `getDefinedDataAt`, never `symbol.getObject()`**: for a label inside a larger unit `getObject()` returns the CONTAINING Data, so the listing printed the covering neighbour's type at an address that has no type at all, and every consumer (types bar, globals inventory, `plate_scaffold`, the assess pass) read it as typed. It also contradicted its own caller — `type_filter` derives from `getDefinedDataAt`, so `type_filter=undefined` correctly SELECTED these while the printed line said they were typed. Fixing that one field is what actually closed the 540-global blind spot: PD2_EXT went from "bar says 1 untyped, `audit_global` says 3, 2 ghosts" to 2/2/**0 ghosts**, and the corpus sweep's `invisible to the dashboard` count went 539 → **0**. The separate endpoint answers a different question — not "is this untyped" (the listing now says so) but "what ate it". `isGlobalDataSymbol` is SHARED by both scanners, not copied: the first cut hand-copied the gates, which is the same two-code-paths-one-question shape as every other bug in this area, and the two counts render side by side. `tests/integration/test_readonly_endpoints.py::TestShadowedGlobalsConsistency` pins the subset relation live, and discovers a program that actually has shadowed globals rather than skipping on whatever is active (after a deploy that is the benchmark fixture, which has none). |
+| `tools/upgrade_project_language.py` | `tests/unit/test_upgrade_project_language.py` (offline) + a live dry run, then `--apply` on ONE folder before the corpus. **Ghidra records the SLEIGH language version a Program was built against, and a bump makes every older program open READ-ONLY** — measured 2026-08-09, the whole `diablo2` repo sat at `x86:LE:32:default` **4.6** against 12.1.2's **4.7**, and the symptom was "binaries open read-only and edits vanish". This is NOT the Ghidra DB schema version (`ProgramDB.DB_VERSION` was 32 on both sides, and `UPGRADE_REQUIRED_BEFORE_VERSION = 19` only gates *read-only* opens); the line that bites is `openMode == UPDATE && storedVersion < DB_VERSION`, and the language check is the parallel one in `LanguageVersionException`. A *minor* bump (4.6→4.7) returns a null `languageUpgradeTranslator` — no re-disassembly, no re-analysis, documentation safe; a *major* bump is a different operation this tool reports rather than performs. **`-commit` is load-bearing, not cosmetic**: `HeadlessAnalyzer` does `domFile.checkout(options.commit, ...)`, so without it the checkout is NON-exclusive, the upgrade cannot happen, and the run completes cleanly having upgraded nothing. `-noanalysis` is unconditional — auto-analysis over curated programs is the one irreversible mistake here. **The MCP server can never fix this itself**: the GUI's provider passes `okToUpgrade=false` (`FrontEndProgramProvider`'s `super(consumer, false)`), so it can only report `Minor language change 4.6 -> 4.7`; only `HeadlessProgramProvider` passes `true`. Three traps that each produced a silent no-op: a `ghidra://` URL sees **only versioned files** (9 private programs are unreachable and must not be counted as covered); Git Bash rewrites `--folder /Vanilla/1.01` into `C:\Program Files\Git\...`; and a check-in comment containing **parentheses** kills `analyzeHeadless.bat` with `"" was unexpected at this time` before the JVM starts. Files already checked out by the GUI project are skipped — headless is a separate project instance and cannot take an exclusive checkout on them. Credentials come from `<ghidra_dir>/.env` (`GHIDRA_SERVER_PASSWORD`), the same file `GhidraMCPAuthInitializer` reads; name outranks source, because an ambient `GHIDRA_PASS` holding a credential the server rejects otherwise beats it and presents as an auth outage. **It is NOT idempotent and `--apply` must not be used as its own verification** — `HeadlessAnalyzer` runs `if (canSave()) save()` then `commitProgram()` unconditionally, and `canSave()` is true for any checked-out file regardless of changes, so every pass writes a new server version for every file it touches; Ghidra logs *nothing* on a language upgrade, so the log cannot tell "upgraded" from "re-committed unchanged" (measured: a second full pass moved all 517 files up another version having upgraded none). A whole-project `--apply` therefore refuses within 24h of a previous one unless `--force`. **`--verify` is the verification step and takes an exclusive checkout per probed program**: forcing a read-WRITE open needs one. The probe closes the program (`close_program`, which now releases the provider's reference as well as any CodeBrowser's) before `undo_checkout`. A checkout still "in use" after that survives until Ghidra restarts. Measured before `close_program` could release the provider's reference: a 152-program probe stranded 140 checkouts. The live round-trip in the `open_program` row is what proves the leak closed. Keep `--verify-sample` at 1-2; clear leftovers with a Ghidra restart then `--release-checkouts` (which only ever releases paths the tool recorded creating — undoing an arbitrary checkout discards whatever local work it held). Paths must be parsed with `(.+?)` and never `\S+`: `Diablo II.exe` (present in all 25 Vanilla folders) contains a space, which made the skip lines fail to match entirely and silently dropped the file from the tally. |
+| `python/bridge_mcp_ghidra/debugger.py` (the 22 proxy tools) | `tests/unit/test_bridge_utils.py::TestDebuggerEnabled` + `::TestDebuggerToolRegistration`. The debugger SERVER moved to `d2-game-exe` on 2026-08-11 along with its 7 unit tests; these gate whether the proxies register at all — off by default, on only for an explicit `GHIDRA_DEBUGGER_URL` or a truthy `GHIDRA_DEBUGGER_TOOLS`, never inferred from the platform — so they are what stops the bridge advertising 22 tools that point at nothing. |
+| **Adding any Java test class** under `src/test/java/` | `pytest tests/unit/test_ci_java_test_globs.py --no-cov` + Offline (Java). **CI never runs `mvn test`** -- it runs `-Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`, and Surefire's `*` does not cross the package separator. A class in any other package is compiled, committed and NEVER SELECTED, and an unselected test cannot fail, so nothing reports it: `GarArchiveRestoreTest` + `GzfExportImportTest` (#264's 14 path-traversal / exact-name security guards) sat in `com.xebyte` and had never executed in CI until #483. Put the class in `com.xebyte.offline` (offline tier) or `com.xebyte.core` (Mockito + real-Ghidra tier); `com.xebyte.*Test` is NOT the fix -- it sweeps in the three live-server integration classes. The guard detects tests by **content across two JUnit generations**, not by a `*Test.java` filename: a filename scan agrees with the glob instead of checking it, and an `@Test`-only scan calls `AppTest`/`EndpointRegistrationTest`/`GhidraMCPPluginTest` (JUnit 3, `extends TestCase`, no annotations) not-tests. `UNSELECTED_BY_DESIGN` is a ratchet in both directions -- a stale entry fails too. It also pins the offline glob identical across `tests.yml`/`release.yml`/`pre-release.yml`. |
+| pom.xml `ghidra-runtime-tests` profile / `src/test/java/com/xebyte/core/*GhidraTest.java` | Real-Ghidra tier under **both** backends -- `./gradlew test --tests 'com.xebyte.core.*GhidraTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"` and `mvn test -Dtest='com.xebyte.core.*GhidraTest' -Djacoco.skip=true`. **Check the skip count, not the exit status.** `assumeTrue` reports a skipped tier as SUCCESS, which is how this tier managed to never run anywhere until 2026-08-31: with `GHIDRA_INSTALL_DIR` set it died in `@Before` with `NoClassDefFoundError: org/apache/logging/log4j/LogManager`, and with it unset every test self-skipped -- and CI took the second branch. `install-file` records **no transitive dependencies**, so none of the dozen libraries Ghidra bundles for loading a SLEIGH language were on Maven's test classpath; the profile adds them from the installation, which is what `build.gradle`'s `fileTree` already did (Gradle was green throughout -- only Maven was broken). `setInitializeLogging(false)` does NOT avoid the log4j requirement: `DefaultLanguageService`'s static initializer resolves `LogManager` before any flag is read. The jar filenames are **version-stamped**, so a Ghidra upgrade renames them and the JVM silently ignores the missing element -- `GhidraRuntimeClasspathGhidraTest` exists to turn that into a named failure, and it reads the list out of pom.xml rather than restating it. Both silent-skip routes are closed: CI asserts on surefire's `skipped` attribute, and `build.gradle` forwards `-PGHIDRA_INSTALL_DIR` into the test task's environment (without that, the documented Gradle command reported BUILD SUCCESSFUL while skipping all 9). |
+| `.github/workflows/release.yml` / `pre-release.yml` publish gate, `tools/release_evidence.py` | `pytest tests/unit/test_release_evidence.py --no-cov`. **`needs.release-regression.result == 'skipped'` was accepted, and a TAG PUSH always skips it** -- that job's `if` requires `workflow_dispatch` -- so the live-regression gate had never blocked a tagged release and structurally could not. It cannot be fixed by running the tier in CI: it needs a live Ghidra GUI on Windows, targets `[self-hosted, Windows]`, and **0 self-hosted runners are registered** by choice (on a public repo, labelling a fork PR runs a stranger's code on Ben's machine). The gate is therefore RECORDED LOCAL EVIDENCE: a passing `--test release` writes `docs/releases/live-regression-evidence.json` and both workflows verify it. It pins a **source fingerprint, never a timestamp** -- a timestamp says a regression ran, not that it ran against this code. **Line endings are normalised in `release_evidence.py`, NOT delegated to `git hash-object`**: the maintainer's Windows tree really is CRLF (`pom.xml`, `build.gradle`, `tests/endpoints.json`) and the release runner's is LF, and `git hash-object` normalises them only *usually* -- measured, it cleans CRLF to the stored blob in this checkout and does NOT in a fresh clone with identical `core.autocrlf=true`. Files with a NUL byte (the fixture's PE images) are hashed raw; everything else has CRLF collapsed. Scope is deliberately narrow (`src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`, `tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`, `build.gradle`) so writing the release notes does not invalidate hours of live testing -- a gate people route around is not a gate. **Never give these checks a fallback**: `release.yml`'s `\|\| echo "0"` on a deleted `EndpointRegistry.java` published `Headless Endpoints: 1` in v6.0.0. |
+| `tools/setup/*`, `build.gradle`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_gradle_tasks.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
+| Deploy test tiers — `DEPLOY_TEST_MODES`, `resolve_deploy_test_modes`, `run_deploy_tests`' dispatch chain | `tests/unit/test_setup_ghidra.py` + `tests/unit/test_setup_cli.py`. **`DEPLOY_TEST_MODES` in `ghidra.py` is the ONLY tier list** — `--test`'s argparse `choices` reads from it and the `.env` value is validated against it, because the two routes disagreed silently: `--test relase` was rejected, but `GHIDRA_MCP_DEPLOY_TESTS=relase` resolved to `['relase']`, the dispatch `elif` chain had no `else`, and deploy **exited 0 having run only the smoke test** (#484) — with `deploy --test release` being this file's fourth release-floor command. Both directions are closed: an unknown tier is refused (never ignored), and a tier listed in `DEPLOY_TEST_MODES` with no dispatch branch raises `UnknownDeployTestMode` instead of reporting a pass for an implementation that does not exist. The **Gradle backend refuses tier requests** rather than accepting them: `build.gradle`'s `deploy` is `stopGhidra` + `deployExtension` + `installUserExtension` + `patchGhidraUserConfig` and runs no tier, so `TOOLS_SETUP_BACKEND=gradle deploy --test release` used to exit 0 having run nothing — the same silence through a different door. Resolution happens FIRST in `cmd_deploy`, before anything is built, copied or restarted. |
+| `tests/fixtures/benchmark/*` (the deploy-regression fixture) | `tests/unit/test_benchmark_fixture.py`, then **regenerate and commit the binaries**: `python tests/fixtures/benchmark/make_fixture.py`. The fixture is generated, not compiled — `make_fixture.py` + `x86.py` + `pe32.py` emit both PE32 images with no toolchain, so the committed `.dll`/`.exe` must be byte-identical to a fresh run (the test enforces this) and any change to a generator file moves bytes. **Changing the fixture moves function addresses, and `regression/*.yaml` is keyed on them** — the test fails offline naming the moved function, which is the whole reason it is generated rather than compiled: the predecessor's addresses were build observations, a toolchain switch moved all of them, and the only symptom was a red deploy gate. Re-derive pinned metrics by measurement, never by reading the source: `tests/fixtures/benchmark/tools/DumpBenchmarkFacts.java` under `analyzeHeadless` in a **throwaway** project (never the live GUI instance, never a shared project). `basic_block_count` is safe to pin exactly because `BinaryComparisonService` counts with the same `BasicBlockModel.getCodeBlocksContaining` call; `cyclomatic_complexity` derives from an edge count that script does not report, so leave it out rather than guess. Six of the eight `--test` tiers reset this fixture, `release` among them. |
+| `tests/endpoints.json` hand-edit | Offline (Java) — `EndpointsJsonParityTest` verifies every `@McpTool` is listed and hand-authored descriptions are preserved. Then `python -m tools.gen_readme_api_reference --write`: regenerating the catalog makes README's API Reference stale and red-lines `tests/unit/test_project_consistency.py`. Do NOT hand-edit `category`: it is overwritten from the annotation on the next regeneration and three parity guards reject a disagreement. |
+| Either server's `new AnnotationScanner(...)` list, either `ManualToolDescriptors.addAll(...)` list, or `tests/endpoints.json`'s `servers` field | `tests/unit/test_audit_server_scope.py` + re-stamp with `python -m tools.audit_server_scope --write`, then `python -m tools.gen_readme_api_reference --write`. **The two servers do not serve the same routes** — 186 endpoints are on both, 19 are GUI-only (`DebuggerService` needs a live `PluginTool`; `PromptPolicyService` drives GUI prompts; `GuiToolService` moves a CodeBrowser), and 4 are headless-only (`HeadlessManagementService`'s `/create_project`, `/close_project`, `/delete_project` and `/list_projects`; its `/open_project` has a GUI counterpart, so that one is on both). `/check_connection`, `/mcp/health` and `/mcp/instance_info` are `McpHttpServer`'s own, identical on both bar `server_kind`. Opening and importing programs are shared, served by `ProgramScriptService` over the one `ProjectProgramProvider` both servers extend, and version control (`/checkin_program` and the `/server/*` routes) by `VersionControlService`: file operations over the open project (`ProjectVersionControl`) and server-level ones over a `ServerSession` (headless's `GhidraServerManager`; the GUI's `ProjectServerSession`, its open project's connection). The split is **derived, never declared**: adding a service to one server's scanner moves 20 catalog entries with no per-tool edit, the same "scanner always wins" rule `RegenerateEndpointsJson` uses for `category`. `RegenerateEndpointsJson` cannot re-derive it — it scans the union of both servers' services in one bag — so it carries `servers` through verbatim and a NEW endpoint arrives unstamped until the audit script runs; the unit test's `unstamped` assertion is what makes that loud instead of silent. Release notes (`.github/workflows/release.yml`) read these counts via `--release-counts`; they used to grep `EndpointRegistry.java`, deleted 2026-07-25, and `\|\| echo "0"` turned the missing file into a plausible number — v6.0.0 published **Headless Endpoints: 1**. Never give these counts a fallback default. |
+| CLI: `bridge-mcp-ghidra --transport` / `python -m bridge_mcp_ghidra`, `tools.setup` subcommands | `tests/unit/test_setup_cli.py` + manual invocation |
+
+### Commands
+
+**Unit (always cheap, run by default):**
+
+```text
+pytest tests/unit/ --no-cov
+```
+
+**Offline Java (scanner, endpoints.json parity, service validation — 726 tests in 78 classes under Gradle):**
+
+```text
+# Gradle (default) — Git Bash needs the forward-slash path
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+# Maven (peer)
+mvn test -Dtest='com.xebyte.offline.*Test'
+```
+
+The two select a slightly different set on purpose: Maven's `*Test` filter
+excludes the `RegenerateEndpointsJson` helper class, Gradle's
+`com.xebyte.offline.*` includes it. It is inert either way — see "Maven-only
+today" for why Gradle cannot arm it.
+
+**Whole Java suite (what a pre-push check should run):**
+
+```text
+./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+```
+
+**Real-Ghidra (a Ghidra INSTALL, not a running server — 16 tests in 6 classes, ~30s):**
+
+```text
+# Gradle (default) — build.gradle puts the whole installation on the classpath via fileTree
+./gradlew test --tests 'com.xebyte.core.*GhidraTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+# Maven (peer) — the ghidra-runtime-tests profile activates off GHIDRA_INSTALL_DIR being set
+mvn test -Dtest='com.xebyte.core.*GhidraTest' -Djacoco.skip=true
+```
+
+**Java coverage gate — Maven only** (no JaCoCo in `build.gradle`; this is what
+CI runs, so a Gradle-green change can still be red here):
+
+```text
+mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+```
+
+**Integration (Ghidra running on 8089 with a binary open):**
+
+```text
+# Java
+./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"   # or: mvn test
+# Python — subset by marker
+pytest tests/ -m readonly          # safe, no writes
+pytest tests/ -m safe_write        # identity writes only
+pytest tests/                      # full suite, includes mutating tests
+```
+
+### Catalog drift
+
+If `EndpointsJsonParityTest` fails after `@McpTool` edits, regenerate
+`tests/endpoints.json` from the scanner (preserves hand-authored descriptions and
+hand-registered routes; `category` always comes from the annotation).
+
+**This step needs Maven and there is no Gradle path** — Gradle can select the
+class but cannot pass `-Dregenerate=true` into the forked test JVM, so it exits
+BUILD SUCCESSFUL having regenerated nothing. See "Maven-only today".
+
+```text
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true   # Maven only
+python -m tools.audit_server_scope --write         # stamp `servers` on new entries
+python -m tools.gen_readme_api_reference --write   # else test_project_consistency red-lines
+```
+
+Detecting the drift needs neither backend:
+
+```text
+./gradlew test --tests 'com.xebyte.offline.EndpointsJsonParityTest' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+python -m tools.audit_endpoint_categories          # category drift, no Maven, no Ghidra
+python -m tools.audit_server_scope --check         # `servers` drift
+pytest tests/unit/test_published_counts.py         # any published count vs the catalog
+```
+
+## Key Gotchas
+
+- **A Ghidra upgrade can silently make every program read-only** -- a SLEIGH language bump (e.g. x86 4.6 -> 4.7) leaves old programs openable read-only but refuses read-write, and on a shared project that compounds with "not checked out" into one indistinguishable symptom. Fix: `python tools/upgrade_project_language.py` (dry run) then `--apply`. Check this FIRST after any Ghidra version change.
+- **Decompiler output is only as correct as the language variant** -- Ghidra's loader GUESSES the variant column, and `PowerPC:BE:32:default` vs `PowerPC:BE:64:VLE-32addr` (VLE) decode the same bytes into different instructions, so a wrong guess yields pseudocode that is syntactically perfect and fictional. Every response carrying decompiler C is therefore stamped with `language_id` + `variant` (`get_functions` stamps any bundle with `decompiled_code` or `call_context`, every entry in bulk mode); where the processor offers more than one SLEIGH **decoder** it also carries `variant_ambiguous` + `variant_candidates`. `variant=` is OPTIONAL on all four C-returning endpoints (`get_functions`, `force_decompile`, `analyze_function_complete`, `analyze_for_documentation`) and is *checked* when supplied: naming a variant the program is not loaded under is refused (`variant_mismatch`), never answered. Measured against 12.1.2's `.ldefs`: **19 of 83 processor/endian/size buckets hold more than one decoder, covering 96 of 177 non-deprecated languages** -- PowerPC/BE/32 (ten decoders across eleven variants), both ARM/32 buckets, PIC, MIPS/32, SuperH, 68000, Dalvik. x86 is NOT among them at any width: `default` and `System Management Mode` are one `x86.sla` with different processor specs, which is why requiring the parameter would have broken every ordinary PE and ELF for nothing. `get_language_metadata` reports `variant_ambiguous` + `available_variants` (each with its decoder). The server structurally cannot re-decode under another variant: fixing a wrong one means `import_file(language=...)` or Ghidra's Language > Set Language.
+- **Ghidra overwrites FrontEndTool.xml on exit** -- deploy must patch AFTER Ghidra exits
+- **Shared server renames not persisted by save_program** -- must checkin to persist
+- **Max ~5 shared server programs open at once** -- opening 20+ crashes Ghidra
+- **`switch_program` changes the server-wide current program** -- for multi-version work pass `program=<full project path>` on each call instead. Names resolve through `ProjectProgramProvider.match` (exact path, exact name, then a unique substring), so a bare name like `D2Common.dll` that several version folders share is an error listing the candidates, not the first hit
+- **Plate comment `\n` creates literal text**, not newlines -- use actual multi-line text
+- **GUI operations from HTTP threads** must reach the Swing thread with `SwingUtilities.invokeAndWait()` (or Ghidra's `Swing.runNow`). Both servers run tool bodies on the request thread; reads/writes go through `executeRead`/`executeWrite`. Window-driving code hops itself — see "Architecture"
+
+## Cross-version doc archive (optional re-kb service)
+
+When explicitly configured, documentation is stored in `re_kb.functions` on a user-selected Postgres instance and exposed through a user-selected re-kb FastAPI service. Source: `re-universe/services/re-kb/`. The system has six pieces:
+
+1. **Schema** — `re_kb.functions` augmented with matching keys (`opcode_hash`, `bsim_signature LSHVECTOR`, shape stats), full doc payload (`locals`, `instruction_comments`, `referenced_data_types`, `referenced_globals`, `referenced_labels`, `equates_referenced` JSONB), and metadata. Companion tables: `doc_field_provenance` (per-field decision history), `doc_conflict_queue` (AI judge backlog), `doc_match_log` (lookup audit).
+2. **REST API** (5 endpoints) — `POST /v1/doc_archive/upsert`, `POST /v1/doc_archive/match`, `GET /v1/doc_archive/{id}/full`, `GET /v1/doc_archive/conflicts`, `POST /v1/doc_archive/conflicts/{id}/resolve`.
+3. **Heuristics** — `app/services/doc_heuristics.py` resolves field-level conflicts (longer plate wins, more typed params wins, etc.) without AI cost. 13 per-field strategies.
+4. **MCP tools** — `archive_ingest_function(function, program)`, `archive_ingest_program(program)` in `DocumentationHashService.java`. Build payload from current Ghidra state, POST to archive's upsert endpoint.
+5. **Client hooks (external, optional)** — a documentation orchestrator outside this repo can call `/archive_ingest_function` after `save_program` (write side), and query `/v1/doc_archive/match` before spending an LLM call (read side); on a Q5-D gate pass (hash exact OR `BSim ≥0.9 AND score ≥80`) it applies name + plate via the existing MCP tools. No such client ships here.
+6. **AI conflict worker** — `re-kb-conflict-worker` docker container, polls `/v1/doc_archive/conflicts`, asks Claude Haiku for structured JSON decisions, POSTs back. Idle when queue empty.
+
+Q1-Q6 design decisions are locked in; design rationale lives in commit history. Migration `003_function_doc_archive.sql` applies to the selected BSim database. Archive exchange is disabled by default; set `GHIDRA_MCP_ARCHIVE_URL` for the Java service to opt in (an external client uses its own setting for the archive URL).
+
+**BSim signature backfill** is a one-shot Ghidra script — `ghidra_scripts/recovery/Backfill_BSimSignatures.java` — run per binary from CodeBrowser to populate the `bsim_signature` column and unlock tier-2 LSH similarity matching. Tier 1 (opcode hash) works without it.
+
+## Documentation
+
+- Workflow: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md`
+- Data types: `docs/prompts/DATA_TYPE_INVESTIGATION_QUICK.md`
+- Tool guide: `docs/prompts/TOOL_USAGE_GUIDE.md`
+- String labels: `docs/prompts/STRING_LABELING_CONVENTION.md`
+- Version history: see `CHANGELOG.md`
+
+The four D2-corpus workflows (`DATA_TYPE_INVESTIGATION_WORKFLOW`,
+`BINARY_DOCUMENTATION_ORDER`, `CROSS_VERSION_FUNCTION_MATCHING`,
+`CROSS_VERSION_MATCHING_COMPREHENSIVE`) moved to `d2-game-exe` on 2026-08-11 —
+they describe documenting a specific corpus, not operating this server.

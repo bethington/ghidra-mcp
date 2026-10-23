@@ -1,0 +1,59 @@
+# AGENTS.md — ghidra-mcp Project
+
+You are a coding agent working on **ghidra-mcp**, a Model Context Protocol server that bridges Ghidra's reverse engineering capabilities with AI tools.
+
+## Project Context
+
+- **Repo**: <https://github.com/bethington/ghidra-mcp>
+- **Version**: 7.0.0
+- **Language**: Java (Ghidra extension) + Python (MCP bridge)
+- **Key feature**: 209 MCP tools for binary analysis, knowledge database, BSim integration, headless server support, AI documentation workflows
+
+## Directory Structure
+
+- `src/` — Java source for Ghidra extension and headless server
+- `python/bridge_mcp_ghidra/` — Python MCP bridge package (`bridge-mcp-ghidra` console script / `python -m bridge_mcp_ghidra`)
+- `pyproject.toml` + `uv.lock` — uv project (ships the `ghidra-mcp-bridge` wheel; deps via PEP 735 groups)
+- `docs/` — Documentation and workflow prompts
+- `tests/` — Python unit, offline and integration tests, and the endpoint catalog (`tests/endpoints.json`); Java tests are under `src/test/java/`
+- `CHANGELOG.md` — Version history
+
+## Current Priorities
+
+1. Keep the GUI plugin and headless server on one service set (`CoreServices`) and one program model (`ProjectProgramProvider`); the catalog's `servers` field records the deliberate differences
+2. Keep `tests/endpoints.json` in sync with Java endpoint registrations
+3. Maintain CI/CD pipeline health
+4. Community PR reviews
+
+## Guidelines
+
+- Run tests before committing: `pytest tests/unit/ -v --no-cov`
+- Build with Gradle: `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<ghidra-install>`
+- Follow existing code style
+- Update CHANGELOG.md for user-facing changes
+- Create PRs for review (don't push directly to main)
+- Use `python -m tools.setup bump-version --new X.Y.Z` to bump version across all maintained files atomically
+
+## Commands
+
+**Gradle is the default backend for local work.** It reads Ghidra's jars
+straight out of the installation, so there is no `install-file` step, and it is
+the only backend that works without Maven. **CI still builds and gates with
+Maven**, so Maven is a maintained peer, not a fallback — see `CLAUDE.md`'s
+"Build & Deploy" for the three things that are Maven-only: regenerating
+`tests/endpoints.json`, the JaCoCo coverage gate, and the `headless`/`docker`
+build profiles.
+
+In Git Bash use a **forward-slash** Ghidra path; a backslash path is mangled
+before Gradle sees it and produces ~100 misleading "package does not exist"
+errors.
+
+- Build: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Quick compile: `./gradlew compileJava "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Test (Python): `pytest tests/unit/ -v --no-cov`
+- Test (Java, offline): `./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Test (Java, all): `./gradlew test "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"`
+- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.4_PUBLIC`
+- Deploy: `./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.4_PUBLIC` — leave `TOOLS_SETUP_BACKEND` **unset** for this second step, because the Gradle backend's `deploy` runs no post-deploy test tier and refuses `--test`
+- Version bump: `python -m tools.setup bump-version --new X.Y.Z`
+- Maven equivalents (peer backend): `python -m tools.setup ensure-prereqs --ghidra-path <dir>` then `python -m tools.setup build`
