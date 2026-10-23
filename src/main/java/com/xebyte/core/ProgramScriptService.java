@@ -2832,7 +2832,8 @@ if (map instanceof ObjectPropertyMap) {
                 + "matters most: firmware loaders often mark the flash block writable, and the decompiler "
                 + "then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of "
                 + "folding it into the constant it holds; marking flash read-only lets peripheral and "
-                + "RAM addresses show as constants or their labels.",
+                + "RAM addresses show as constants or their labels. Every function may decompile "
+                + "differently afterwards, so decompilation trees are marked stale (resweep).",
             category = "program", access = ToolAccess.WRITE)
     public Response setMemoryBlock(
             @Param(value = "block", source = ParamSource.BODY, defaultValue = "",

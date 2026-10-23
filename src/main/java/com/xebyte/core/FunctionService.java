@@ -3501,12 +3501,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                 List<String> warnings = new ArrayList<>();
                 Response fallbackResult = null;
                 String errorRef = null;
-                Function funcForCache = null;
 
                 try {
 
-
-                    funcForCache = func;
                     if (func == null) {
                     throw new Refusal("No function at address");
                     }
@@ -3636,25 +3633,6 @@ Map<String, Object> out = new LinkedHashMap<>();
                     // ALWAYS close transactions — nested transactions must be closed inner-first
                     eventTx.end(batchSuccess);
                     program.flushEvents();
-
-                    // Invalidate decompiler cache after successful renames
-                    if (batchSuccess && variablesRenamed > 0 && funcForCache != null) {
-                        try {
-                            DecompInterface tempDecomp = null;
-                            try {
-                                tempDecomp = ServiceUtils.createConfiguredDecompiler(program);
-                                tempDecomp.flushCache();
-                                tempDecomp.decompileFunction(funcForCache, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                            } finally {
-                                if (tempDecomp != null) {
-                                    try { tempDecomp.dispose(); } catch (Exception ignored) {}
-                                }
-                            }
-                            Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed + " variables");
-                        } catch (Exception cacheEx) {
-                            Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
-                        }
-                    }
                 }
                 return new BatchRenameOutcome(fallbackResult, errorRef, variablesRenamed, variablesFailed, errors, warnings);
             });
