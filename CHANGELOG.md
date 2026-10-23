@@ -23,6 +23,7 @@ Changes on `dev` after 7.0.0.
 Scorecard's push filter and its test constant still named `main` while the
 repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
 and the existing check against `origin/HEAD` passes on a fresh clone.
+
 ### Added — function resources and `/get_change_token`
 
 A function review used to take about five tool calls, and every write forced a re-read.
