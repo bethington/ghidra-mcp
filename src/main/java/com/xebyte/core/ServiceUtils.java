@@ -16,8 +16,6 @@ import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Shared static utility methods used by all service classes.
@@ -27,203 +25,6 @@ import java.util.regex.Pattern;
 public final class ServiceUtils {
 
     private ServiceUtils() {} // Prevent instantiation
-
-    // ========================================================================
-    // JSON Encoding/Decoding
-    // ========================================================================
-
-    /**
-     * Escape a string for safe inclusion in JSON values.
-     * Handles quotes, backslashes, and control characters.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead — Gson handles escaping automatically.
-     */
-    @Deprecated
-    public static String escapeJson(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
-
-    /**
-     * Unescape JSON string escape sequences: \n -> newline, \" -> quote, \\ -> backslash, etc.
-     */
-    public static String unescapeJsonString(String s) {
-        if (s == null || s.isEmpty()) return s;
-        StringBuilder sb = new StringBuilder(s.length());
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' && i + 1 < s.length()) {
-                char next = s.charAt(i + 1);
-                switch (next) {
-                    case 'n':  sb.append('\n'); i++; break;
-                    case 'r':  sb.append('\r'); i++; break;
-                    case 't':  sb.append('\t'); i++; break;
-                    case '"':  sb.append('"');  i++; break;
-                    case '\\': sb.append('\\'); i++; break;
-                    case '/':  sb.append('/');  i++; break;
-                    case 'u':
-                        if (i + 5 < s.length()) {
-                            try {
-                                int cp = Integer.parseInt(s.substring(i + 2, i + 6), 16);
-                                sb.append((char) cp);
-                                i += 5;
-                            } catch (NumberFormatException e) {
-                                sb.append(c);
-                            }
-                        } else {
-                            sb.append(c);
-                        }
-                        break;
-                    default:
-                        sb.append(c);
-                        break;
-                }
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
-
-    /**
-     * Serialize a List of objects to a JSON array string.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
-     */
-    @Deprecated
-    public static String serializeListToJson(List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            Object item = list.get(i);
-            if (item instanceof String) {
-                sb.append("\"").append(escapeJson((String) item)).append("\"");
-            } else if (item instanceof Number) {
-                sb.append(item);
-            } else if (item instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) item));
-            } else if (item instanceof List) {
-                sb.append(serializeListToJson((List<?>) item));
-            } else {
-                sb.append("\"").append(escapeJson(item.toString())).append("\"");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Serialize a Map to a JSON object string.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
-     */
-    @Deprecated
-    public static String serializeMapToJson(Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("\"").append(escapeJson(entry.getKey().toString())).append("\":");
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"").append(escapeJson((String) value)).append("\"");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else if (value instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) value));
-            } else if (value instanceof List) {
-                sb.append(serializeListToJson((List<?>) value));
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value == null) {
-                sb.append("null");
-            } else {
-                sb.append("\"").append(escapeJson(value.toString())).append("\"");
-            }
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    /**
-     * Extract a JSON string value by key using regex.
-     */
-    public static String extractJsonString(String json, String key) {
-        String pattern = "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"";
-        Pattern p = Pattern.compile(pattern);
-        Matcher m = p.matcher(json);
-        if (m.find()) {
-            return m.group(1).replace("\\\"", "\"").replace("\\n", "\n");
-        }
-        // Check for null value
-        pattern = "\"" + key + "\"\\s*:\\s*null";
-        if (json.matches(".*" + pattern + ".*")) {
-            return null;
-        }
-        return null;
-    }
-
-    /**
-     * Extract a JSON array as a string by key using bracket matching.
-     */
-    public static String extractJsonArray(String json, String key) {
-        int startIdx = json.indexOf("\"" + key + "\"");
-        if (startIdx < 0) return null;
-
-        int arrayStart = json.indexOf('[', startIdx);
-        if (arrayStart < 0) return null;
-
-        int depth = 1;
-        int arrayEnd = arrayStart + 1;
-        while (arrayEnd < json.length() && depth > 0) {
-            char c = json.charAt(arrayEnd);
-            if (c == '[') depth++;
-            else if (c == ']') depth--;
-            arrayEnd++;
-        }
-
-        return json.substring(arrayStart, arrayEnd);
-    }
-
-    // ========================================================================
-    // Numeric/Boolean Parsing
-    // ========================================================================
-
-    /**
-     * Parse an integer from a string, returning defaultValue if null or invalid.
-     */
-    public static int parseIntOrDefault(String val, int defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Integer.parseInt(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a double from a string, returning defaultValue if null or invalid.
-     */
-    public static double parseDoubleOrDefault(String val, double defaultValue) {
-        if (val == null) return defaultValue;
-        try {
-            return Double.parseDouble(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse a boolean from an Object (Boolean, String, or null), returning defaultValue if unrecognized.
-     */
-    public static boolean parseBoolOrDefault(Object obj, boolean defaultValue) {
-        if (obj == null) return defaultValue;
-        if (obj instanceof Boolean) return (Boolean) obj;
-        if (obj instanceof String) return Boolean.parseBoolean((String) obj);
-        return defaultValue;
-    }
 
     // ========================================================================
     // Collection Utilities
@@ -243,16 +44,66 @@ public final class ServiceUtils {
      *
      * @param key   plural name for the collection ("segments", "functions")
      * @param all   the full result set, before paging
-     * @param offset first item to return
+     * @param offset first item to return; negative values clamp to 0
      * @param limit  maximum items to return; {@code <= 0} means "no limit"
+     *               (the key is omitted from the response when unbounded)
      */
     public static Response paged(String key, List<?> all, int offset, int limit) {
+        return paged(key, all, offset, limit, null);
+    }
+
+    /**
+     * As {@link #paged(String, List, int, int)}, with extra fields merged after
+     * the standard keys (map name, class_name, note, …).
+     */
+    public static Response paged(String key, List<?> all, int offset, int limit,
+            Map<String, ?> extras) {
+        int start = Math.max(0, offset);
+        int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
+        List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+        return pagedEnvelope(key, page, start, limit, all.size(), extras);
+    }
+
+    /**
+     * Paged envelope when the page was already sliced from a streaming source
+     * (property-map iterators) and {@code total} is known without materializing
+     * every item. Same keys and limit policy as {@link #paged}.
+     */
+    public static Response pagedWindow(String key, List<?> page, int offset, int limit,
+            int total, Map<String, ?> extras) {
+        return pagedEnvelope(key, page, Math.max(0, offset), limit, total, extras);
+    }
+
+    private static Response pagedEnvelope(String key, List<?> page, int start, int limit,
+            int total, Map<String, ?> extras) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put(key, page);
+        out.put("count", page.size());
+        out.put("offset", start);
+        if (limit > 0) {
+            out.put("limit", limit);
+        }
+        out.put("total", total);
+        if (extras != null) {
+            for (Map.Entry<String, ?> e : extras.entrySet()) {
+                out.put(e.getKey(), e.getValue());
+            }
+        }
+        return Response.ok(out);
+    }
+
+    /**
+     * Paged envelope for {@code /list_program_items}: one {@code items} array
+     * regardless of kind, so agents learn one shape instead of eight.
+     */
+    public static Response pagedProgramItems(String kind, List<?> all, int offset, int limit) {
         int start = Math.max(0, offset);
         int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
         List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put(key, page);
+        out.put("kind", kind);
+        out.put("items", page);
         out.put("count", page.size());
         out.put("offset", start);
         if (limit > 0) {
@@ -272,26 +123,6 @@ public final class ServiceUtils {
         out.put(key, all);
         out.put("count", all.size());
         return Response.ok(out);
-    }
-
-    /**
-     * Convert a list of strings into a newline-delimited string, applying offset and limit.
-     *
-     * @deprecated Produces plain text, which violates the response contract
-     *     (see {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}). Use
-     *     {@link #paged(String, List, int, int)} instead. Retained only while
-     *     the staged text-to-JSON migration is in flight.
-     */
-    @Deprecated
-    public static String paginateList(List<String> items, int offset, int limit) {
-        int start = Math.max(0, offset);
-        int end = Math.min(items.size(), offset + limit);
-
-        if (start >= items.size()) {
-            return "";
-        }
-        List<String> sub = items.subList(start, end);
-        return String.join("\n", sub);
     }
 
     /**
@@ -349,44 +180,21 @@ public final class ServiceUtils {
     // ========================================================================
 
     /**
-     * Escape non-ASCII characters to \\xHH hex notation.
+     * Split a comma-separated string into trimmed tokens, skipping blanks.
+     * Null or blank input yields an empty list.
      */
-    public static String escapeNonAscii(String input) {
-        if (input == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (char c : input.toCharArray()) {
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else {
-                sb.append("\\x");
-                sb.append(Integer.toHexString(c & 0xFF));
+    public static List<String> csvTokens(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) {
+                out.add(t);
             }
         }
-        return sb.toString();
-    }
-
-    /**
-     * Escape special characters in a string for display.
-     */
-    public static String escapeString(String input) {
-        if (input == null) return "";
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < input.length(); i++) {
-            char c = input.charAt(i);
-            if (c >= 32 && c < 127) {
-                sb.append(c);
-            } else if (c == '\n') {
-                sb.append("\\n");
-            } else if (c == '\r') {
-                sb.append("\\r");
-            } else if (c == '\t') {
-                sb.append("\\t");
-            } else {
-                sb.append(String.format("\\x%02x", (int) c & 0xFF));
-            }
-        }
-        return sb.toString();
+        return out;
     }
 
     /**
@@ -521,40 +329,209 @@ public final class ServiceUtils {
         return func;
     }
 
-    /**
-     * Resolve a function by either address or name.
-     * Resolution order:
-     * 1. Try parsing as an address → getFunctionAt → getFunctionContaining
-     * 2. If address resolution fails, try exact name match via SymbolTable
-     * Returns null if no function is found.
-     */
-    public static Function resolveFunction(Program program, String functionRef) {
-        if (functionRef == null || functionRef.trim().isEmpty()) return null;
-        functionRef = functionRef.trim();
+    /** A function reference resolved, or the reason it was not (and the message to say so). */
+    public record FunctionOrError(Function function, String message) {
+        public boolean hasError() { return function == null; }
 
-        // Try as address first (parseAddress never throws)
-        Address addr = parseAddress(program, functionRef);
+        /** The failure as a response. Only meaningful when {@link #hasError()}. */
+        public Response error() { return Response.err(message); }
+    }
+
+    /** How many candidate functions an ambiguity message lists. */
+    private static final int MAX_LISTED_CANDIDATES = 8;
+
+    /**
+     * Whether a reference is unmistakably an address: a {@code 0x} prefix or a
+     * {@code space:offset} form. Anything else, bare hex included, may also be a name.
+     */
+    private static boolean looksLikeExplicitAddress(String ref) {
+        return ref.startsWith("0x") || ref.startsWith("0X") || ref.indexOf(':') >= 0;
+    }
+
+    /**
+     * The one function a reference names: an address, or a function name.
+     *
+     * <p>This is the only place that decides what a function reference means; every endpoint
+     * that takes one goes through it, so the same text resolves the same way everywhere
+     * and fails with the same message. Before it there were two resolvers, and a name typed
+     * in the wrong case worked in some tools and not others.
+     *
+     * <p>Order:
+     * <ol>
+     *   <li>A bare token (no {@code 0x}, no {@code :}) that exactly names a function is that
+     *       function. A function called {@code add} or {@code dead} must not resolve to
+     *       whatever lives at {@code 0xadd}.</li>
+     *   <li>An address: the function at it, else the function containing it.</li>
+     *   <li>A case-insensitive name, only when nothing matched exactly.</li>
+     * </ol>
+     * A name several functions share (two namespaces, a thunk and its target) is an error
+     * listing their addresses, never the first hit: a non-thunk beats a thunk, and if that
+     * still leaves more than one, the caller must pass the address. That matches what
+     * {@code ProjectProgramProvider.match} does for programs.
+     */
+    public static FunctionOrError getFunctionOrError(Program program, String ref) {
+        if (ref == null || ref.isBlank()) {
+            return functionError("Function name or address is required");
+        }
+        String s = ref.trim();
+        boolean explicit = looksLikeExplicitAddress(s);
+
+        if (!explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+
+        Address addr = parseAddress(program, s);
         if (addr != null) {
             Function func = getFunctionForAddress(program, addr);
-            if (func != null) return func;
+            if (func != null) {
+                return new FunctionOrError(func, null);
+            }
         }
-        // Clear lastParseError before the name-lookup path so a failed address parse
-        // doesn't leave a misleading error on the thread-local if name lookup also fails.
+        String parseError = getLastParseError();
         lastParseError.remove();
 
-        // Try as exact function name via symbol table
-        FunctionManager funcManager = program.getFunctionManager();
+        if (explicit) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                return pickFunction(exact, s);
+            }
+        }
+        List<Function> anyCase = functionsNamedIgnoreCase(program, s);
+        if (!anyCase.isEmpty()) {
+            return pickFunction(anyCase, s);
+        }
+
+        String why;
+        if (addr != null) {
+            why = "no function at or containing that address, and no function has that name";
+        } else if (explicit && parseError != null && !parseError.isEmpty()) {
+            why = parseError;
+        } else {
+            why = "not a function name, and not an address";
+        }
+        return functionError("Function not found: '" + s + "' (" + why + ")");
+    }
+
+    /**
+     * The entry point of the function a reference names, for call sites that need an
+     * {@code Address} rather than a {@link Function}. On failure returns null and leaves
+     * the reason in {@link #getLastParseError()}, which every caller already reports.
+     *
+     * <p>An address argument behaves exactly as {@link #parseAddress}, including an
+     * interior address, which stays interior so a following {@code getFunctionAt} still
+     * rejects it. A name resolves as in {@link #getFunctionOrError}.
+     *
+     * <p>That asymmetry is why a dozen tools advertised "function address" and meant it
+     * literally, even though the resolver behind them took either form.
+     */
+    public static Address resolveFunctionAddress(Program program, String ref) {
+        String s = ref == null ? "" : ref.trim();
+        if (!s.isEmpty() && !looksLikeExplicitAddress(s)) {
+            List<Function> exact = functionsNamed(program, s);
+            if (!exact.isEmpty()) {
+                FunctionOrError picked = pickFunction(exact, s);
+                if (picked.hasError()) {
+                    lastParseError.set(picked.message());
+                    return null;
+                }
+                return picked.function().getEntryPoint();
+            }
+        }
+        Address parsed = parseAddress(program, s);
+        if (parsed != null) {
+            return parsed;
+        }
+        FunctionOrError byName = getFunctionOrError(program, s);
+        if (!byName.hasError()) {
+            return byName.function().getEntryPoint();
+        }
+        lastParseError.set(byName.message());
+        return null;
+    }
+
+    /** The function a reference names, or null; for callers with nothing to say about a miss. */
+    public static Function resolveFunction(Program program, String functionRef) {
+        return getFunctionOrError(program, functionRef).function();
+    }
+
+    /**
+     * The symbol a global name refers to, or null: a symbol in the global namespace, else
+     * the first non-function symbol under that name in any namespace. The lookup
+     * {@code rename_symbol} runs twice (its naming-rule check, then the rename itself),
+     * which used to be two copies that had to agree.
+     */
+    public static Symbol findGlobalSymbol(Program program, String name) {
         SymbolTable symbolTable = program.getSymbolTable();
-        SymbolIterator symbols = symbolTable.getSymbols(functionRef);
+        List<Symbol> inGlobalNamespace = symbolTable.getSymbols(name, program.getGlobalNamespace());
+        if (!inGlobalNamespace.isEmpty()) {
+            return inGlobalNamespace.get(0);
+        }
+        SymbolIterator anywhere = symbolTable.getSymbols(name);
+        while (anywhere.hasNext()) {
+            Symbol symbol = anywhere.next();
+            if (symbol.getSymbolType() != SymbolType.FUNCTION) {
+                return symbol;
+            }
+        }
+        return null;
+    }
+
+    private static FunctionOrError functionError(String message) {
+        return new FunctionOrError(null, message);
+    }
+
+    /** Functions whose name is exactly {@code name}, by entry point. */
+    private static List<Function> functionsNamed(Program program, String name) {
+        FunctionManager funcManager = program.getFunctionManager();
+        Map<Address, Function> found = new LinkedHashMap<>();
+        SymbolIterator symbols = program.getSymbolTable().getSymbols(name);
         while (symbols.hasNext()) {
             Symbol symbol = symbols.next();
             if (symbol.getSymbolType() == SymbolType.FUNCTION) {
                 Function func = funcManager.getFunctionAt(symbol.getAddress());
-                if (func != null) return func;
+                if (func != null) {
+                    found.putIfAbsent(func.getEntryPoint(), func);
+                }
             }
         }
+        return new ArrayList<>(found.values());
+    }
 
-        return null;
+    /** Functions whose name matches ignoring case: a linear scan, so a last resort. */
+    private static List<Function> functionsNamedIgnoreCase(Program program, String name) {
+        List<Function> found = new ArrayList<>();
+        for (Function func : program.getFunctionManager().getFunctions(true)) {
+            if (func.getName().equalsIgnoreCase(name)) {
+                found.add(func);
+            }
+        }
+        return found;
+    }
+
+    private static FunctionOrError pickFunction(List<Function> candidates, String ref) {
+        if (candidates.size() == 1) {
+            return new FunctionOrError(candidates.get(0), null);
+        }
+        List<Function> real = candidates.stream().filter(f -> !f.isThunk()).toList();
+        if (real.size() == 1) {
+            return new FunctionOrError(real.get(0), null);
+        }
+        List<String> listed = new ArrayList<>();
+        for (Function f : candidates) {
+            if (listed.size() == MAX_LISTED_CANDIDATES) {
+                break;
+            }
+            listed.add(f.getEntryPoint() + (f.isThunk() ? " (thunk)" : "")
+                + (f.getParentNamespace() != null && !f.getParentNamespace().isGlobal()
+                    ? " in " + f.getParentNamespace().getName(true) : ""));
+        }
+        return functionError("Function name '" + ref + "' is ambiguous: it matches "
+            + candidates.size() + " functions (" + String.join(", ", listed)
+            + (candidates.size() > listed.size() ? ", ..." : "")
+            + "). Pass the address of the one you mean.");
     }
 
     // ========================================================================
@@ -581,9 +558,22 @@ public final class ServiceUtils {
      * {@link DecompInterface#dispose()} when finished.
      */
     public static DecompInterface createConfiguredDecompiler(Program program) {
+        return createConfiguredDecompiler(program, null);
+    }
+
+    /**
+     * As above, but with a hook to adjust the options before they are applied.
+     *
+     * <p>Exists so one endpoint can deviate without moving the default for the ten call
+     * sites that share {@code decompileFunctionNoRetry}: {@code analyze_function_completeness}
+     * counts comment lines in this text, so a change here is a change to a scoring input.
+     */
+    public static DecompInterface createConfiguredDecompiler(Program program,
+            java.util.function.Consumer<DecompileOptions> tune) {
         DecompInterface decomp = new DecompInterface();
         DecompileOptions opts = new DecompileOptions();
         opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+        if (tune != null) tune.accept(opts);
         decomp.setOptions(opts);
         decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
         decomp.openProgram(program);                // openProgram AFTER setOptions
@@ -591,20 +581,331 @@ public final class ServiceUtils {
     }
 
     // ========================================================================
-    // Program Resolution
+    // Language variants
     // ========================================================================
 
     /**
-     * Generate a JSON error response for when a program cannot be found.
-     * @deprecated Use {@link #getProgramOrError(ProgramProvider, String)} instead.
+     * One selectable SLEIGH language variant for a program's
+     * processor/endian/size, as Ghidra's language picker would list it.
+     *
+     * <p>{@code decoder} is the {@code .sla} the variant loads — the compiled
+     * SLEIGH decoder, not a label. Two variants sharing one are the same decoder
+     * configured differently; two variants with different ones are different
+     * programs for turning bytes into instructions. That distinction is what
+     * decides whether the advisory fires: see
+     * {@link LanguageVariants#isAmbiguous}.
      */
-    @Deprecated
-    public static String programNotFoundError(String programName) {
-        if (programName == null || programName.isEmpty()) {
-            return "{\"error\": \"No program is currently open\"}";
-        }
-        return "{\"error\": \"Program not found: " + escapeJson(programName) + "\"}";
+    public record VariantChoice(String variant, String languageId, String description,
+                                String decoder) {}
+
+    /**
+     * A processor/endian/size bucket as enumerated once and reused.
+     *
+     * <p>{@code enumerationFailed} is carried rather than swallowed. When
+     * Ghidra's language table cannot be walked, the bucket degrades to the single
+     * loaded variant and the advisory silently stops firing — which looks exactly
+     * like an unambiguous processor. Recording it lets the response say so
+     * instead of quietly asserting a fact it could not establish.
+     */
+    private record VariantBucket(List<VariantChoice> choices, boolean enumerationFailed) {}
+
+    /**
+     * Memoized variant buckets, keyed by the program's own language id.
+     *
+     * <p>Walking Ghidra's language table is cheap but not free, and
+     * {@code /get_functions} stamps every bundle carrying C -- once per entry in
+     * bulk mode -- on what is among the hottest endpoints in the server. The key
+     * is safe because a program's language id is fixed for as long as it
+     * describes that program: changing the language (Set Language, or a
+     * re-import) yields a different id and therefore a different cache entry.
+     */
+    private static final Map<String, VariantBucket> VARIANT_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Every language variant Ghidra offers for this program's processor at the
+     * <em>same</em> endian and size, plus the variant the program is actually
+     * loaded under.
+     *
+     * <p>Endian and size are held fixed on purpose. Those two columns come off
+     * the file header and the loader gets them right; the variant column is the
+     * one it guesses. Widening the bucket to every language sharing a processor
+     * would offer a 32-bit program a set of 64-bit answers and turn a precise
+     * question into a menu.
+     *
+     * <p>The loaded variant is unioned in because {@code getLanguageDescriptions(false)}
+     * omits deprecated languages: without it, a program imported under a
+     * deprecated or since-removed processor module would be refused with no legal
+     * answer available.
+     */
+    public static List<VariantChoice> languageVariantChoices(Program program) {
+        return variantBucket(program).choices();
     }
+
+    private static VariantBucket variantBucket(Program program) {
+        VariantBucket empty = new VariantBucket(List.of(), false);
+        if (program == null) return empty;
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return empty;
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld == null) return empty;
+        String languageId = lang.getLanguageID().getIdAsString();
+
+        return VARIANT_CACHE.computeIfAbsent(languageId, key -> {
+            List<VariantChoice> found = new ArrayList<>();
+            boolean failed = false;
+            try {
+                ghidra.program.model.lang.LanguageService svc =
+                        ghidra.program.util.DefaultLanguageService.getLanguageService();
+                String processor = String.valueOf(ld.getProcessor());
+                for (ghidra.program.model.lang.LanguageDescription d :
+                        svc.getLanguageDescriptions(false)) {
+                    if (!processor.equals(String.valueOf(d.getProcessor()))) continue;
+                    if (!Objects.equals(d.getEndian(), ld.getEndian())) continue;
+                    if (d.getSize() != ld.getSize()) continue;
+                    found.add(new VariantChoice(d.getVariant(),
+                            d.getLanguageID().getIdAsString(), d.getDescription(),
+                            decoderOf(d)));
+                }
+            } catch (Throwable t) {
+                // A processor module that cannot enumerate must not take the
+                // decompiler down with it. The bucket degrades to the single
+                // loaded variant, which reads as "unambiguous" — so the failure
+                // is recorded and reported rather than inferred away.
+                failed = true;
+                Msg.warn(ServiceUtils.class,
+                        "Could not enumerate language variants for " + key + ": " + t);
+            }
+
+            String loaded = LanguageVariants.normalize(ld.getVariant());
+            boolean hasLoaded = false;
+            for (VariantChoice c : found) {
+                if (loaded.equalsIgnoreCase(LanguageVariants.normalize(c.variant()))) {
+                    hasLoaded = true;
+                    break;
+                }
+            }
+            if (!hasLoaded) {
+                found.add(new VariantChoice(ld.getVariant(), key, ld.getDescription(),
+                        decoderOf(ld)));
+            }
+
+            // "default" first, then alphabetical. Deterministic ordering keeps the
+            // advisory and refusal text stable across calls, which matters when
+            // they are the thing a caller is expected to read and act on.
+            found.sort((a, b) -> {
+                String ka = LanguageVariants.key(a.variant());
+                String kb = LanguageVariants.key(b.variant());
+                int ra = "default".equals(ka) ? 0 : 1;
+                int rb = "default".equals(kb) ? 0 : 1;
+                return ra != rb ? Integer.compare(ra, rb) : ka.compareTo(kb);
+            });
+            return new VariantBucket(List.copyOf(found), failed);
+        });
+    }
+
+    /**
+     * The SLEIGH decoder a language loads, as a stable identifier.
+     *
+     * <p>{@code SleighLanguageProvider} sets the {@code .sla} on every
+     * description it builds out of an {@code .ldefs} and throws if the file is
+     * missing, so this is populated for anything {@code DefaultLanguageService}
+     * hands back. A description that is not a Sleigh one, or that somehow has no
+     * {@code .sla}, falls back to its own language id — which makes it distinct
+     * from every other row and so counts as its own decoder. That errs toward
+     * showing the advisory, which costs a sentence; erring the other way would
+     * silently drop it.
+     */
+    private static String decoderOf(ghidra.program.model.lang.LanguageDescription d) {
+        if (d instanceof ghidra.program.model.lang.SleighLanguageDescription sld) {
+            generic.jar.ResourceFile sla = sld.getSlaFile();
+            if (sla != null) return sla.getAbsolutePath();
+        }
+        return d.getLanguageID().getIdAsString();
+    }
+
+    /** The variant a program is loaded under, or "" when it cannot be determined. */
+    public static String loadedVariant(Program program) {
+        if (program == null) return "";
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return "";
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        return ld == null ? "" : LanguageVariants.normalize(ld.getVariant());
+    }
+
+    /** Just the variant names from {@link #languageVariantChoices}. */
+    public static List<String> languageVariantNames(Program program) {
+        List<String> names = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) names.add(c.variant());
+        return names;
+    }
+
+    /**
+     * Whether this program's processor offers more than one SLEIGH <em>decoder</em>
+     * at its endian and size — the test that decides whether decompiler output
+     * carries the ambiguity advisory.
+     *
+     * @see LanguageVariants#isAmbiguous for the measurement behind counting
+     *      decoders rather than variant rows, and for what that proxy misses
+     */
+    public static boolean variantAmbiguous(Program program) {
+        List<String> decoders = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) decoders.add(c.decoder());
+        return LanguageVariants.isAmbiguous(decoders);
+    }
+
+    /**
+     * Whether Ghidra's language table could not be walked for this program, so
+     * {@link #variantAmbiguous} is reporting ignorance rather than a single
+     * variant.
+     */
+    public static boolean variantEnumerationFailed(Program program) {
+        return variantBucket(program).enumerationFailed();
+    }
+
+    /** The variant candidates rendered for a JSON response body. */
+    public static List<Map<String, Object>> languageVariantsAsJson(Program program) {
+        String loaded = loadedVariant(program);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (VariantChoice c : languageVariantChoices(program)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("variant", c.variant());
+            m.put("language_id", c.languageId());
+            m.put("description", c.description());
+            // The decoder's file name, not its path: the path differs per
+            // installation and would make every snapshot machine-specific, while
+            // the name is what makes two rows visibly the same decoder.
+            m.put("decoder", decoderName(c.decoder()));
+            m.put("loaded", loaded.equalsIgnoreCase(LanguageVariants.normalize(c.variant())));
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** The trailing path element of a decoder identifier, for display. */
+    private static String decoderName(String decoder) {
+        String d = LanguageVariants.normalize(decoder);
+        int slash = Math.max(d.lastIndexOf('/'), d.lastIndexOf('\\'));
+        return slash >= 0 ? d.substring(slash + 1) : d;
+    }
+
+    /**
+     * The variant check every decompile tool runs before producing output.
+     * Returns {@code null} when the call may proceed, or a structured rejection
+     * naming the loaded variant and the remedy.
+     *
+     * <p>This fires only when the caller <em>named</em> a variant and named one
+     * the program is not loaded under. Omitting {@code variant=} is always
+     * accepted: the response is labelled with what actually ran, and on a
+     * multi-decoder processor it carries the ambiguity advisory. See
+     * {@link LanguageVariants} for why the parameter is not mandatory.
+     *
+     * <p>Shared rather than copied, for the same reason the eviction guard is
+     * shared across its three writers: a rule that only one entry point enforces
+     * is a rule the next tool in the chain steps around. Four endpoints return
+     * decompiler-produced C to a caller — /get_functions (decompiled_code and
+     * call_context, single and bulk mode), /force_decompile,
+     * /analyze_function_complete, /analyze_for_documentation — and all four
+     * consult this check. Endpoints
+     * that merely decompile internally to derive a score or a field-usage map
+     * (/analyze_function_completeness, /analyze_struct_field_usage) do not: they
+     * hand back no pseudocode, so there is nothing for a caller to misread as
+     * verified output.
+     *
+     * @see LanguageVariants for the decision table and why a mismatch is a
+     *      refusal rather than a warning field
+     */
+    public static Response variantGate(Program program, String requestedVariant) {
+        Map<String, Object> rejection = variantRejectionData(program, requestedVariant);
+        return rejection == null ? null : Response.ok(rejection);
+    }
+
+    /**
+     * The gate's refusal as a plain map, or {@code null} when the selection is
+     * acceptable.
+     *
+     * <p>Composite tools that return pseudocode as one field among many
+     * (/analyze_function_complete, /analyze_for_documentation) embed this instead
+     * of failing the whole call: the rest of their payload is still worth having,
+     * but the pseudocode field itself must not travel under a label the program
+     * contradicts. Without that, a caller refused by /get_functions could
+     * simply ask a composite for the same C and get it — the rule would be a
+     * speed bump rather than a rule.
+     */
+    public static Map<String, Object> variantRejectionData(Program program, String requestedVariant) {
+        if (program == null) return null;
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return null;
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld == null) return null;
+
+        String languageId = lang.getLanguageID().getIdAsString();
+        String loaded = ld.getVariant();
+        LanguageVariants.Rejection rejection = LanguageVariants.check(
+                languageId, loaded, languageVariantNames(program), requestedVariant);
+        if (rejection == null) return null;
+
+        return JsonHelper.mapOf(
+                "status", "rejected",
+                "error", rejection.error(),
+                "issue", rejection.error(),
+                "program", program.getName(),
+                "language_id", languageId,
+                "processor", String.valueOf(lang.getProcessor()),
+                "loaded_variant", loaded,
+                "available_variants", languageVariantsAsJson(program),
+                "message", rejection.message(),
+                "suggestion", rejection.suggestion());
+    }
+
+    /**
+     * Stamp the language the output was produced under onto a decompiler
+     * response, and say so when that language was a guess between real
+     * alternatives.
+     *
+     * <p>This is the half of the variant work that is unconditional. Decompiled
+     * C used to travel with no record of the dialect that produced it, so a
+     * transcript full of PowerPC pseudocode could not be audited after the fact
+     * for which of eleven variants decoded it. {@code language_id} and
+     * {@code variant} fix that at negligible cost, on every response, for every
+     * program — there is no processor for which the label is not worth having.
+     *
+     * <p>On a processor whose variants load more than one SLEIGH decoder, three
+     * further fields ride along: {@code variant_ambiguous}, the candidate names,
+     * and a sentence saying the loader guessed. They are the replacement for the
+     * mandatory-parameter gate this started as — visible at the moment the C is
+     * handed over, costing nobody an outage. They are deliberately absent on
+     * unambiguous processors rather than present-and-false: a field that is
+     * always there and almost always false is a field readers learn to skip, and
+     * this one is only worth anything if it is read.
+     */
+    public static void putLanguageSelection(Map<String, Object> out, Program program) {
+        if (out == null || program == null) return;
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        if (lang == null) return;
+        out.put("language_id", lang.getLanguageID().getIdAsString());
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+        if (ld == null) return;
+        out.put("variant", ld.getVariant());
+
+        if (variantEnumerationFailed(program)) {
+            // Ignorance, reported. Without this the response looks exactly like
+            // one from a processor that genuinely offers a single variant.
+            out.put("variant_enumeration_failed", true);
+            return;
+        }
+        if (variantAmbiguous(program)) {
+            out.put("variant_ambiguous", true);
+            out.put("variant_candidates", languageVariantNames(program));
+            out.put("variant_notice",
+                    LanguageVariants.ambiguityNotice(languageVariantNames(program),
+                            ld.getVariant()));
+        }
+    }
+
+    // ========================================================================
+    // Program Resolution
+    // ========================================================================
 
     /**
      * Type-safe result from program resolution.
@@ -615,32 +916,154 @@ public final class ServiceUtils {
     }
 
     /**
-     * Resolve the target program by name, or the current program if name is null/empty.
-     * Returns a ProgramOrError with either a valid Program or a Response.Err.
+     * The program a name resolves to ({@link #getProgramOrError}), or a {@link Refusal} with the
+     * same message. Tools take a {@code Program} parameter instead; this is for code that only
+     * has a name.
+     */
+    public static Program requireProgram(ProgramProvider provider, String programName) {
+        ProgramOrError pe = getProgramOrError(provider, programName);
+        if (pe.hasError()) {
+            throw new Refusal(pe.error() instanceof Response.Err err ? err.message() : pe.error().toJson());
+        }
+        return pe.program();
+    }
+
+    /**
+     * Which program this HTTP request actually resolved, if any.
+     *
+     * <p>HTTP threads are pooled. An uncleared value lets request N+1 inherit
+     * request N's program name and report data as belonging to a binary it never
+     * touched — the multi-program survey confusion wearing an authoritative label.
+     * {@link AnnotationScanner} clears on entry and in {@code finally}; background
+     * jobs (SweepJob, DirtyQueue) do not use this path.
+     */
+    private static final ThreadLocal<Program> resolvedProgram = new ThreadLocal<>();
+
+    /** Record the resolved program for response labeling. Call only on success. */
+    static void recordResolvedProgram(Program program) {
+        if (program != null) {
+            resolvedProgram.set(program);
+        }
+    }
+
+    /** Clear before/after each annotation-driven request (entry + finally). */
+    public static void clearResolvedProgramName() {
+        resolvedProgram.remove();
+    }
+
+    /** Peek the name recorded for this thread, or null if none. */
+    public static String peekResolvedProgramName() {
+        Program program = resolvedProgram.get();
+        return program != null ? program.getName() : null;
+    }
+
+    /** The program this request resolved, or null if none. */
+    static Program peekResolvedProgram() {
+        return resolvedProgram.get();
+    }
+
+    /**
+     * Format the open-program list for error messages (leading space when non-empty).
+     */
+    private static String formatAvailablePrograms(ProgramProvider provider) {
+        Program[] all = provider.getAllOpenPrograms();
+        if (all == null || all.length == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(" Available programs: ");
+        for (int i = 0; i < all.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(all[i].getName());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Resolve the target program by name, or the sole open program when name is omitted.
+     *
+     * <p>When {@code programName} is omitted (null/blank):
+     * <ul>
+     *   <li>exactly one program open → that program (no verbosity tax on the common case)</li>
+     *   <li>more than one open → error naming every open program; with more than one
+     *       candidate, guessing is never acceptable. Measured failure mode: a
+     *       17-program survey that omitted {@code program} returned the same binary's
+     *       numbers 17 times because headless never reassigned {@code currentProgram}
+     *       after the first load.</li>
+     *   <li>zero open → {@code "No program loaded."}</li>
+     * </ul>
+     * An explicit name that misses keeps the existing not-found error.
+     *
+     * <p>{@code /switch_program} does NOT create an exemption for later calls —
+     * having switched N calls ago is exactly the stale implicit state this closes.
+     * Endpoints whose contract IS the active program use
+     * {@link #getActiveProgramOrError} instead.
      */
     public static ProgramOrError getProgramOrError(ProgramProvider provider, String programName) {
-        Program program = null;
         if (programName != null && !programName.isEmpty()) {
-            program = provider.getProgram(programName);
-        } else {
-            program = provider.getCurrentProgram();
-        }
-        if (program == null) {
-            String available = "";
-            Program[] all = provider.getAllOpenPrograms();
-            if (all != null && all.length > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < all.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(all[i].getName());
-                }
-                available = " Available programs: " + sb;
+            Program program;
+            try {
+                program = provider.getProgram(programName);
+            } catch (AmbiguousProgramException e) {
+                return new ProgramOrError(null, ServiceUtils.fail(e));
             }
-            String msg = programName != null && !programName.isEmpty()
-                    ? "Program not found: " + programName + available
-                    : "No program loaded." + available;
-            return new ProgramOrError(null, Response.err(msg));
+            if (program == null) {
+                return new ProgramOrError(null, Response.err(
+                        "Program not found: " + programName + formatAvailablePrograms(provider)));
+            }
+            recordResolvedProgram(program);
+            return new ProgramOrError(program, null);
         }
+
+        // Omitted: refuse to guess when more than one program is open.
+        Program[] all = provider.getAllOpenPrograms();
+        if (all != null && all.length > 1) {
+            StringBuilder names = new StringBuilder();
+            for (int i = 0; i < all.length; i++) {
+                if (i > 0) names.append(", ");
+                names.append(all[i].getName());
+            }
+            return new ProgramOrError(null, Response.err(
+                    "Multiple programs open; 'program' is required. Open programs: " + names));
+        }
+
+        Program program = provider.getCurrentProgram();
+        if (program == null) {
+            return new ProgramOrError(null, Response.err(
+                    "No program loaded." + formatAvailablePrograms(provider)));
+        }
+        recordResolvedProgram(program);
+        return new ProgramOrError(program, null);
+    }
+
+    /**
+     * Resolve the active (current) program without the multi-program omit rule.
+     *
+     * <p>Use ONLY for endpoints whose contract IS the active program:
+     * {@code /get_ui_cursor} (program facet), {@code /list_open_programs},
+     * {@code /switch_program}. A distinct helper (not a boolean on
+     * {@link #getProgramOrError}) keeps the exemption a greppable list rather
+     * than a flag someone can flip by accident.
+     *
+     * <p>{@code /switch_program} does NOT create an exemption for later calls —
+     * having switched N calls ago is exactly the stale implicit state
+     * {@link #getProgramOrError} closes. That is deliberate.
+     */
+    public static ProgramOrError getActiveProgramOrError(ProgramProvider provider) {
+        Program program = provider.getCurrentProgram();
+        if (program == null) {
+            // Distinguish "nothing is open" from "several are open and none is
+            // active". Headless no longer has a current-program concept, so this
+            // returns null the moment a second program opens — and answering
+            // "No program loaded." while listing two loaded programs is a message
+            // that contradicts its own evidence.
+            Program[] all = provider.getAllOpenPrograms();
+            String message = (all != null && all.length > 1)
+                    ? "Multiple programs open and none is active; 'program' is required."
+                            + formatAvailablePrograms(provider)
+                    : "No program loaded." + formatAvailablePrograms(provider);
+            return new ProgramOrError(null, Response.err(message));
+        }
+        recordResolvedProgram(program);
         return new ProgramOrError(program, null);
     }
 
@@ -660,6 +1083,22 @@ public final class ServiceUtils {
         return lastParseError.get();
     }
 
+    /** A failure's message for a Response: the cause an ExecutionException wraps, else its class name when it has none. */
+    public static String failureMessage(Throwable e) {
+        Throwable t = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
+        return t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+    }
+
+    /** {@link Response#err} whose text is {@link #failureMessage(Throwable)}. */
+    public static Response fail(Throwable e) {
+        return Response.err(failureMessage(e));
+    }
+
+    /** {@link Response#err} shaped {@code what + " failed: " + failureMessage(e)}. */
+    public static Response fail(String what, Throwable e) {
+        return Response.err(what + " failed: " + failureMessage(e));
+    }
+
     /**
      * Parse an address string using the program's AddressFactory.
      * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00",
@@ -668,8 +1107,8 @@ public final class ServiceUtils {
      * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
      *
      * THREADING: Must be called on the HTTP worker thread, BEFORE entering any
-     * threadingStrategy.executeRead/executeWrite lambda. SwingThreadingStrategy transfers
-     * execution to the EDT inside execute*; a ThreadLocal set there is invisible to the caller.
+     * threadingStrategy.executeRead/executeWrite lambda. A ThreadLocal set inside the
+     * lambda is invisible to the caller after execute* returns — set it beforehand.
      */
     public static Address parseAddress(Program program, String addressStr) {
         lastParseError.remove();
@@ -1157,6 +1596,38 @@ public final class ServiceUtils {
             return result;
         }
         return searchByNameInAllCategories(dtm, typeName.toLowerCase());
+    }
+
+    /**
+     * Resolve {@code name} to a {@link Structure}, or refuse with a fixed message.
+     * Not-found: {@code Structure not found: X}. Wrong kind:
+     * {@code Data type 'X' is not a structure}.
+     */
+    public static Structure requireStructure(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Structure not found: " + name);
+        }
+        if (!(dt instanceof Structure)) {
+            throw new Refusal("Data type '" + name + "' is not a structure");
+        }
+        return (Structure) dt;
+    }
+
+    /**
+     * Resolve {@code name} to an enum, or refuse with a fixed message.
+     * Not-found: {@code Enumeration not found: X}. Wrong kind:
+     * {@code Data type 'X' is not an enumeration}.
+     */
+    public static ghidra.program.model.data.Enum requireEnum(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Enumeration not found: " + name);
+        }
+        if (!(dt instanceof ghidra.program.model.data.Enum)) {
+            throw new Refusal("Data type '" + name + "' is not an enumeration");
+        }
+        return (ghidra.program.model.data.Enum) dt;
     }
 
     /**

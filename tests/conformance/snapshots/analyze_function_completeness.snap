@@ -93,7 +93,7 @@
     "3. Mandatory Undefined Type Audit: examine BOTH decompiled code and disassembly for undefined types",
     "4. Verify Decompiler vs Assembly: loops, type casts, pointer arithmetic, conditionals, early exits",
     "5. Control Flow + Loop Mapping: return points, loop headers/bounds/stride, error paths",
-    "6. Structure Identification: search_data_types() or create_struct(), memory model docs",
+    "6. Structure Identification: find_data_types() or create_struct(), memory model docs",
     "7. Rename + Prototype: rename_function() (PascalCase) + set_function_prototype()",
     "8. Local Variable Renaming: set_variable_type() then rename_variables() with Hungarian notation",
     "9. Global Data: rename_symbol() with g_ prefix for DAT_*/s_* references",

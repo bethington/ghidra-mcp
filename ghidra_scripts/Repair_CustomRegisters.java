@@ -6,9 +6,9 @@
 // Output: Adds register parameters to function signatures.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Promote non-standard registers to function arguments
-// @menupath Diablo 2.Repair.Custom Registers
+// @menupath GhidraMCP.Repair.Custom Registers
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
@@ -18,6 +18,7 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.pcode.*;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.exception.CancelledException;
+import java.util.Iterator;
 
 public class Repair_CustomRegisters extends GhidraScript {
 
@@ -40,7 +41,6 @@ public class Repair_CustomRegisters extends GhidraScript {
                 monitor.incrementProgress(1);
                 monitor.setShowProgressValue(true);
 
-                if (func.getEntryPoint().toString().equals("00681a48")) break;
 
                 monitor.setMessage("Analyzing 0x" + func.getEntryPoint());
                 DecompileResults res = ifc.decompileFunction(func, 60, monitor);
@@ -48,8 +48,8 @@ public class Repair_CustomRegisters extends GhidraScript {
                 if (highFunc != null) {
                     LocalSymbolMap lsm = highFunc.getLocalSymbolMap();
 
-                    HighFunctionDBUtil.commitParamsToDatabase(highFunc, true, SourceType.USER_DEFINED);
-                    HighFunctionDBUtil.commitReturnToDatabase(highFunc, SourceType.USER_DEFINED);
+                    HighFunctionDBUtil.commitParamsToDatabase(highFunc, true,
+                        HighFunctionDBUtil.ReturnCommitOption.COMMIT, SourceType.USER_DEFINED);
                     HighFunctionDBUtil.commitLocalNamesToDatabase(highFunc, SourceType.USER_DEFINED);
 
                     Iterator<HighSymbol> symbols = lsm.getSymbols();

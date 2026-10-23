@@ -11,7 +11,7 @@ Validates whether armor equipment can be equipped by a player.
 
 Algorithm:
 1. Check if item pointer is not NULL
-2. Call Ordinal_10444 to validate item structure
+2. Call Ordinal_120 to validate item structure
 3. Check if player entity can receive items
 4. Verify unit type is player (type == 1)
 5. Get armor class from player's skill

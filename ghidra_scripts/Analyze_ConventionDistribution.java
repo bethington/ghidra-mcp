@@ -6,9 +6,9 @@
 // Output: Console report with convention counts, percentages, and sample functions.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Analyze calling convention distribution across functions
-// @menupath Diablo 2.Analysis.Convention Distribution
+// @menupath GhidraMCP.Analysis.Convention Distribution
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
@@ -148,60 +148,55 @@ public class Analyze_ConventionDistribution extends GhidraScript {
         println("ANALYSIS");
         println("========================================");
         
+        Set<String> standardNames = new HashSet<>(Arrays.asList(
+            "__cdecl", "__stdcall", "__fastcall", "__thiscall", "__vectorcall"));
         int customConventions = 0;
         int standardConventions = 0;
-        
+
         for (Map.Entry<String, Integer> entry : conventionCounts.entrySet()) {
             String conv = entry.getKey();
-            if (conv.startsWith("__d2")) {
-                customConventions += entry.getValue();
-            } else if (conv.equals("__cdecl") || conv.equals("__stdcall") || 
-                      conv.equals("__fastcall") || conv.equals("__thiscall")) {
+            if (conv == null || conv.equals("unknown") || conv.equals("undefined")
+                    || conv.equals("default")) {
+                continue;
+            }
+            if (standardNames.contains(conv)) {
                 standardConventions += entry.getValue();
+            } else {
+                customConventions += entry.getValue();
             }
         }
-        
-        println("Standard conventions: " + standardConventions + 
-               " (" + String.format("%.2f%%", 
+
+        println("Standard conventions: " + standardConventions +
+               " (" + String.format("%.2f%%",
                (standardConventions * 100.0) / totalFunctions) + ")");
-        println("Custom D2 conventions: " + customConventions + 
-               " (" + String.format("%.2f%%", 
+        println("Custom / compiler-spec-specific conventions: " + customConventions +
+               " (" + String.format("%.2f%%",
                (customConventions * 100.0) / totalFunctions) + ")");
         println();
-        
-        // Check for suspicious patterns
-        int d2regcallCount = conventionCounts.getOrDefault("__d2regcall", 0);
-        int stdcallCount = conventionCounts.getOrDefault("__stdcall", 0);
-        
+
         println("POTENTIAL ISSUES:");
-        if (d2regcallCount > stdcallCount * 0.5) {
-            println("⚠️  WARNING: High __d2regcall count (" + d2regcallCount + 
-                   ") relative to __stdcall (" + stdcallCount + ")");
-            println("   This may indicate misclassification of stack-based functions.");
-            println("   Consider running FixFunctionParameters with updated detection.");
-        } else {
-            println("✓ Convention distribution looks reasonable.");
-        }
-        
+        boolean issues = false;
         if (undefined > totalFunctions * 0.1) {
-            println("⚠️  WARNING: " + undefined + " functions with undefined conventions");
-            println("   (" + String.format("%.2f%%", (undefined * 100.0) / totalFunctions) + 
+            issues = true;
+            println("WARNING: " + undefined + " functions with undefined conventions");
+            println("   (" + String.format("%.2f%%", (undefined * 100.0) / totalFunctions) +
                    " of total)");
         }
-        
+        if (!issues) {
+            println("Convention distribution looks reasonable.");
+        }
+
         println();
         println("========================================");
         println("RECOMMENDATIONS");
         println("========================================");
-        
-        if (d2regcallCount > 100) {
-            println("1. Review sample __d2regcall functions for false positives");
-            println("2. Check if they have MOV reg,[ESP+offset] patterns");
-            println("3. Run FixFunctionParameters with stack load detection");
+
+        if (undefined > totalFunctions * 0.1) {
+            println("- Run Analyze_FixFunctionParameters to infer conventions from RET cleanup and register usage");
         }
-        
+
         if (functionsNoParams > totalFunctions * 0.3) {
-            println("4. Many functions show 0 parameters - consider parameter detection");
+            println("- Many functions show 0 parameters - consider parameter detection");
         }
         
         println();

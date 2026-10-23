@@ -6,9 +6,9 @@
 // Output: Clears all BSim data tables, ready for fresh import.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Reset BSim database by wiping all data (destructive)
-// @menupath Diablo 2.Analysis.BSim Step 0 Reset Database
+// @menupath GhidraMCP.Analysis.BSim Step 0 Reset Database
 
 import ghidra.app.script.GhidraScript;
 import java.sql.*;
@@ -154,13 +154,13 @@ public class Analyze_BSimStep0_ResetDatabase extends GhidraScript {
             println(String.format("  Records remaining: %,d", remainingRecords));
             println("");
             println("The database is now ready for fresh data import.");
-            println("Run Step1_AddProgramToBSimDatabase to begin populating.");
+            println("Run Analyze_BSimIngestProgram on each program to begin populating.");
             println("═══════════════════════════════════════════════════════════════");
 
             popup("Database Reset Complete!\n\n" +
                 String.format("Deleted %,d records.\n\n", totalRecords) +
                 "The database is now empty and ready for fresh data.\n" +
-                "Run Step1 to begin importing programs.");
+                "Run Analyze_BSimIngestProgram to begin importing programs.");
 
         } catch (SQLException e) {
             printerr("Database error: " + e.getMessage());
@@ -195,7 +195,6 @@ public class Analyze_BSimStep0_ResetDatabase extends GhidraScript {
         counts.put("API Imports", getTableCount(conn, "api_imports"));
         counts.put("API Exports", getTableCount(conn, "api_exports"));
         counts.put("Executables (exetable)", getTableCount(conn, "exetable"));
-        counts.put("Game Versions", getTableCount(conn, "game_versions"));
 
         return counts;
     }
@@ -251,11 +250,8 @@ public class Analyze_BSimStep0_ResetDatabase extends GhidraScript {
             deleteFromTable(conn, "api_exports", "API Exports");
             deleteFromTable(conn, "binary_versions", "Binary Versions");
             
-            // Executables table (references game_versions)
+            // Executables table
             deleteFromTable(conn, "exetable", "Executables");
-            
-            // Game versions (parent table - Step1 will recreate these)
-            deleteFromTable(conn, "game_versions", "Game Versions");
 
             conn.commit();
             println("");

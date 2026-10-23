@@ -4,14 +4,12 @@ Phase 3: Data Type System Endpoints Tests
 Tests for the 15 Phase 3 endpoints:
 - create_enum
 - create_union
-- create_typedef
-- create_array_type
-- create_pointer_type
+- create_derived_type
 - add_struct_field
 - modify_struct_field
 - remove_struct_field
 - delete_data_type
-- search_data_types
+- find_data_types
 - validate_data_type
 - get_type_size
 - get_struct_layout
@@ -118,7 +116,7 @@ class TestCreateTypedef:
         """Test creating a basic typedef."""
         unique_name = f"MyInt_{uuid.uuid4().hex[:8]}"
         response = http_client.post(
-            "/create_typedef", data={"name": unique_name, "base_type": "int"}
+            "/create_derived_type", data={"kind": "typedef", "name": unique_name, "base_type": "int"}
         )
         assert response.status_code == 200
         text = response.text
@@ -130,14 +128,16 @@ class TestCreateTypedef:
         """Test creating a pointer typedef."""
         unique_name = f"IntPtr_{uuid.uuid4().hex[:8]}"
         response = http_client.post(
-            "/create_typedef", data={"name": unique_name, "base_type": "int*"}
+            "/create_derived_type", data={"kind": "typedef", "name": unique_name, "base_type": "int*"}
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
     def test_create_typedef_missing_base(self, http_client):
         """Test typedef with missing base type."""
-        response = http_client.post("/create_typedef", data={"name": "TestTypedef"})
+        response = http_client.post(
+            "/create_derived_type", data={"kind": "typedef", "name": "TestTypedef"}
+        )
         assert response.status_code == 200
         assert is_error_response(response.text)
 
@@ -150,7 +150,7 @@ class TestCreateArrayType:
     def test_create_array_type_basic(self, http_client):
         """Test creating a basic array type."""
         response = http_client.post(
-            "/create_array_type", data={"base_type": "int", "length": "10"}
+            "/create_derived_type", data={"kind": "array", "base_type": "int", "length": "10"}
         )
         assert response.status_code == 200
         text = response.text
@@ -162,8 +162,8 @@ class TestCreateArrayType:
         """Test creating a named array type."""
         unique_name = f"IntArray_{uuid.uuid4().hex[:8]}"
         response = http_client.post(
-            "/create_array_type",
-            data={"base_type": "byte", "length": "16", "name": unique_name},
+            "/create_derived_type",
+            data={"kind": "array", "base_type": "byte", "length": "16", "name": unique_name},
         )
         assert response.status_code == 200
 
@@ -171,7 +171,7 @@ class TestCreateArrayType:
     def test_create_array_type_invalid_length(self, http_client):
         """Test array with invalid length."""
         response = http_client.post(
-            "/create_array_type", data={"base_type": "int", "length": "0"}
+            "/create_derived_type", data={"kind": "array", "base_type": "int", "length": "0"}
         )
         assert response.status_code == 200
         assert is_error_response(response.text)
@@ -184,7 +184,9 @@ class TestCreatePointerType:
     @pytest.mark.write
     def test_create_pointer_type_basic(self, http_client):
         """Test creating a basic pointer type."""
-        response = http_client.post("/create_pointer_type", data={"base_type": "int"})
+        response = http_client.post(
+            "/create_derived_type", data={"kind": "pointer", "base_type": "int"}
+        )
         assert response.status_code == 200
         text = response.text
         assert is_valid_response(text)
@@ -193,13 +195,15 @@ class TestCreatePointerType:
     @pytest.mark.write
     def test_create_pointer_type_void(self, http_client):
         """Test creating a void pointer type."""
-        response = http_client.post("/create_pointer_type", data={"base_type": "void"})
+        response = http_client.post(
+            "/create_derived_type", data={"kind": "pointer", "base_type": "void"}
+        )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
     def test_create_pointer_type_missing_base(self, http_client):
         """Test pointer with missing base type."""
-        response = http_client.post("/create_pointer_type", data={})
+        response = http_client.post("/create_derived_type", data={"kind": "pointer"})
         assert response.status_code == 200
         assert is_error_response(response.text)
 
@@ -331,31 +335,31 @@ class TestDeleteDataType:
         assert is_error_response(response.text)
 
 
-class TestSearchDataTypes:
+class TestFindDataTypes:
     """Test data type search endpoint."""
 
     @pytest.mark.requires_program
-    def test_search_data_types_basic(self, http_client):
+    def test_find_data_types_basic(self, http_client):
         """Test searching for data types."""
         response = http_client.get(
-            "/search_data_types", params={"pattern": "int", "limit": 10}
+            "/find_data_types", params={"pattern": "int", "limit": 10}
         )
         assert response.status_code == 200
         # Should return some results for common type "int"
 
     @pytest.mark.requires_program
-    def test_search_data_types_pagination(self, http_client):
+    def test_find_data_types_pagination(self, http_client):
         """Test search pagination."""
         response = http_client.get(
-            "/search_data_types", params={"pattern": "int", "offset": 0, "limit": 5}
+            "/find_data_types", params={"pattern": "int", "offset": 0, "limit": 5}
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_search_data_types_no_match(self, http_client):
+    def test_find_data_types_no_match(self, http_client):
         """Test search with no matches."""
         response = http_client.get(
-            "/search_data_types", params={"pattern": f"NoMatch_{uuid.uuid4().hex[:8]}"}
+            "/find_data_types", params={"pattern": f"NoMatch_{uuid.uuid4().hex[:8]}"}
         )
         assert response.status_code == 200
 

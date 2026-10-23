@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from functools import partial
 from contextlib import contextmanager
 
-from .config import CORE_GROUPS, MAX_CONCURRENT_GHIDRA_REQUESTS, logger
+from .config import CORE_GROUPS, MAX_CONCURRENT_GHIDRA_REQUESTS, logger, parse_bool
 
 # --------------------------------------------------------------------------
 # Connection state
@@ -438,9 +438,6 @@ _loaded_groups: set[str] = set()
 _lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)
 
-_TRUTHY_LAZY = {"1", "true", "yes", "on"}
-_FALSEY_LAZY = {"0", "false", "no", "off"}
-
 
 def lazy_mode_from_env(default: bool = True) -> bool:
     """Resolve lazy mode from GHIDRA_MCP_LAZY, falling back to the default.
@@ -455,17 +452,8 @@ def lazy_mode_from_env(default: bool = True) -> bool:
     because guessing here silently picks one of the two client families this
     setting exists to keep working.
     """
-    raw = (os.getenv("GHIDRA_MCP_LAZY") or "").strip().lower()
-    if not raw:
-        return default
-    if raw in _FALSEY_LAZY:
-        return False
-    if raw in _TRUTHY_LAZY:
-        return True
-    logger.warning(
-        "Ignoring GHIDRA_MCP_LAZY=%r: expected one of %s. Leaving lazy tool loading %s.",
-        raw,
-        ",".join(sorted(_TRUTHY_LAZY | _FALSEY_LAZY)),
-        "on" if default else "off",
+    return parse_bool(
+        (os.getenv("GHIDRA_MCP_LAZY") or ""),
+        default=default,
+        on_unknown="warn",
     )
-    return default

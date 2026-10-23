@@ -4,6 +4,11 @@
 **Audience**: Ghidra MCP users, headless automation users, GUI plugin users, MCP client authors, and sponsors  
 **Scope**: Native Java MCP support for headless and GUI modes, with bridge fallback during migration
 
+> **Status note, 2026-10-07.** No native Java MCP endpoint exists yet; clients
+> still connect through the Python bridge. That bridge, written below as
+> `bridge_mcp_ghidra.py`, is now the `python/bridge_mcp_ghidra` package, run as
+> the `bridge-mcp-ghidra` console script.
+
 ## Summary
 
 Ghidra MCP currently uses a Python bridge to speak MCP to AI clients and forward calls over HTTP to the Java Ghidra extension or headless server. This works and should remain supported during migration, but it adds another process, another protocol hop, and another deployment surface.
@@ -17,7 +22,7 @@ The Python bridge should remain a supported fallback during migration and may la
 Current architecture:
 
 ```text
-AI Tool -> MCP -> bridge_mcp_ghidra.py -> HTTP/UDS/TCP -> Ghidra Java server
+AI Tool -> MCP -> bridge-mcp-ghidra (Python) -> HTTP/UDS/TCP -> Ghidra Java server
 ```
 
 This architecture has served the project well, but it creates friction:
@@ -56,7 +61,7 @@ GUI:
 
 ## Non-goals
 
-- Do not remove `bridge_mcp_ghidra.py` abruptly.
+- Do not remove the Python bridge (`bridge-mcp-ghidra`) abruptly.
 - Do not hand-write 225+ MCP tools.
 - Do not make `tests/endpoints.json` the runtime source of truth.
 - Do not require GUI mode to own stdio.
@@ -283,7 +288,7 @@ Specific cases:
 
 Acceptance criteria:
 
-- A local MCP client can run the headless server without `bridge_mcp_ghidra.py`.
+- A local MCP client can run the headless server without the Python bridge.
 - All annotation-scanned tools are available.
 - Existing HTTP fallback still works.
 

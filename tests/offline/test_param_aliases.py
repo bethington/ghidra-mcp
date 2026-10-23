@@ -39,16 +39,23 @@ def test_java_sources_are_where_we_think():
 def test_scan_finds_most_of_the_catalog():
     """A parser that quietly matched nothing would satisfy every other test."""
     routes = load_param_aliases()
-    assert len(routes) > 200, f"only {len(routes)} @McpTool routes parsed"
+    assert len(routes) > 150, f"only {len(routes)} @McpTool routes parsed"
 
 
 @pytest.mark.parametrize(
     "path,method,expected",
     [
+        # A FUNCTION_REF parameter: the scanner adds the standard spellings
+        # (AnnotationScanner.FUNCTION_REF_ALIASES) without the annotation listing them.
         (
-            "/get_function_labels",
+            "/analyze_function_completeness",
             "GET",
-            {"function": "name", "address": "name", "function_address": "name"},
+            {
+                "address": "function",
+                "name": "function",
+                "function_address": "function",
+                "function_name": "function",
+            },
         ),
         (
             "/rename_function",
@@ -64,9 +71,39 @@ def test_scan_finds_most_of_the_catalog():
             "POST",
             {"address": "target", "function_address": "target"},
         ),
-        ("/set_function_no_return", "POST", {"noReturn": "no_return"}),
-        ("/set_function_this_type", "POST", {"thisType": "this_type"}),
-        ("/set_variable_type", "POST", {"parameter_name": "variable_name"}),
+        (
+            "/set_function_no_return",
+            "POST",
+            {
+                "noReturn": "no_return",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
+        (
+            "/set_function_this_type",
+            "POST",
+            {
+                "thisType": "this_type",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
+        (
+            "/set_variable_type",
+            "POST",
+            {
+                "parameter_name": "variable_name",
+                "address": "function_address",
+                "function": "function_address",
+                "function_name": "function_address",
+                "name": "function_address",
+            },
+        ),
     ],
 )
 def test_known_alias_sets_exactly(path, method, expected):
@@ -74,15 +111,15 @@ def test_known_alias_sets_exactly(path, method, expected):
 
 
 def test_endpoints_without_aliases_report_none():
-    """The discriminator that makes the ten breaches real.
+    """The discriminator that keeps a breach a breach.
 
-    /analyze_function_completeness declares `function_address` and no alias
-    for `address`, so a call sending `address` really is dropped. If this ever
-    returns a mapping, the contract checks would start excusing it.
+    These declare no alias, so a call sending another spelling really is dropped.
+    If this ever returns a mapping, the contract checks would start excusing it.
+    (/analyze_function_completeness used to be the example; since its parameter
+    became a function reference, `address` is a real alias of it.)
     """
-    assert aliases_for("/analyze_function_completeness", "GET") == {}
-    assert aliases_for("/list_functions", "GET") == {}
-    assert aliases_for("/search_functions_enhanced", "GET") == {}
+    assert aliases_for("/get_xrefs_to", "GET") == {}
+    assert aliases_for("/get_entry_points", "GET") == {}
 
 
 def test_every_alias_target_is_a_real_declared_parameter():
@@ -147,7 +184,7 @@ def test_signature_parser_handles_parens_inside_descriptions():
     """Descriptions contain ')' -- naive paren matching ends the block early."""
     signature = (
         '@Param(value = "start", description = "Address (0x<hex> or space:hex)") '
-        'String start, '
+        "String start, "
         '@Param(value = "name", aliases = {"address", "function"}) String name'
     )
     assert _params_of_signature(signature) == {
@@ -210,8 +247,11 @@ def test_published_schema_aliases_match_the_annotation_parser():
         "server, or ParamDescriptor stopped emitting them."
     )
 
-    parsed = {route: dict(mapping)
-              for route, mapping in load_param_aliases().items() if mapping}
+    parsed = {
+        route: dict(mapping)
+        for route, mapping in load_param_aliases().items()
+        if mapping
+    }
 
     assert published == parsed, (
         "the published schema and the annotation parser disagree about which "

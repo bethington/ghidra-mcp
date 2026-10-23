@@ -25,9 +25,9 @@
 // guessing at them.
 //
 // @author Ben Ethington
-// @category Diablo 2.Project
+// @category GhidraMCP.Project
 // @description Upgrade all programs to the current Ghidra language/DB version
-// @menupath Diablo 2.Project.Upgrade All
+// @menupath GhidraMCP.Project.Upgrade All
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.Application;

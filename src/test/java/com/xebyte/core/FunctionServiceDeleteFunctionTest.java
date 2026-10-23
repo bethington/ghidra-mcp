@@ -58,10 +58,6 @@ public class FunctionServiceDeleteFunctionTest {
             return action.call();
         }
 
-        @Override
-        public boolean isHeadless() {
-            return true;
-        }
     }
 
     /** Wires a mocked Program/FunctionManager/Function so deleteFunctionAtAddress runs for real. */
@@ -126,7 +122,7 @@ public class FunctionServiceDeleteFunctionTest {
         Fixture fx = new Fixture("0x401000", "HOT", "REVIEWED");
 
         FunctionService service = new FunctionService(fx.provider, new InlineThreadingStrategy());
-        Response response = service.deleteFunctionAtAddress("0x401000", "");
+        Response response = service.deleteFunctionAtAddress("0x401000", fx.program);
 
         assertTrue("expected success, got: " + response.toJson(), response instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) response).data();
@@ -146,7 +142,7 @@ public class FunctionServiceDeleteFunctionTest {
         Fixture fx = new Fixture("0x402000");
 
         FunctionService service = new FunctionService(fx.provider, new InlineThreadingStrategy());
-        Response response = service.deleteFunctionAtAddress("0x402000", "");
+        Response response = service.deleteFunctionAtAddress("0x402000", fx.program);
 
         assertTrue("expected success, got: " + response.toJson(), response instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) response).data();

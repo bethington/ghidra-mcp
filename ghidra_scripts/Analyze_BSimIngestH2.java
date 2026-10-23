@@ -2,13 +2,13 @@
 //
 // Generates BSim feature vectors (LSH signatures) for every function in the current program and inserts them into an H2 database. One-time per binary.
 //
-// Usage: Args: [0]=H2 database path (default: C:/tmp/bsim_diablo2). Run after BSimCreateH2Database.
+// Usage: Args: [0]=H2 database path (default: ~/ghidra-mcp-bsim/bsim_ghidra_mcp). Run after BSimCreateH2Database.
 // Output: Populates the H2 BSim database with function signatures.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Ingest all functions into an H2 file-based BSim database
-// @menupath Diablo 2.Analysis.BSim Ingest H2
+// @menupath GhidraMCP.Analysis.BSim Ingest H2
 
 import java.io.File;
 import java.net.URL;
@@ -36,7 +36,7 @@ import ghidra.program.model.listing.FunctionManager;
 
 public class Analyze_BSimIngestH2 extends GhidraScript {
 
-    private static final String DEFAULT_DB_PATH = "C:/tmp/bsim_diablo2";
+    private static final String DEFAULT_DB_PATH = System.getProperty("user.home") + "/ghidra-mcp-bsim/bsim_ghidra_mcp";
 
     @Override
     protected void run() throws Exception {

@@ -171,9 +171,9 @@ class TestFixtureIntegrity:
 
 class TestRouting:
     def test_serves_a_recorded_payload_verbatim(self, fake_ghidra):
-        status, body = _get(f"{fake_ghidra.url}/list_segments")
+        status, body = _get(f"{fake_ghidra.url}/get_entry_points")
         assert status == 200
-        recorded = (SNAPSHOT_DIR / "list_segments.snap").read_text(encoding="utf-8")
+        recorded = (SNAPSHOT_DIR / "get_entry_points.snap").read_text(encoding="utf-8")
         assert json.loads(body) == json.loads(recorded)
 
     def test_unknown_endpoint_is_404(self, fake_ghidra):
@@ -257,7 +257,7 @@ class TestContractRules:
         assert status == 200
 
     def test_undeclared_parameter_is_refused(self, fake_ghidra):
-        status, body = _get(f"{fake_ghidra.url}/list_functions?limit=5")
+        status, body = _get(f"{fake_ghidra.url}/get_entry_points?limit=5")
         assert status == 400
         payload = json.loads(body)
         assert payload["error"] == "unknown_parameter"
@@ -290,10 +290,10 @@ class TestLenientMode:
     def test_lenient_mode_records_instead_of_refusing(self):
         server = FakeGhidraServer(strict=False).start()
         try:
-            status, body = _get(f"{server.url}/list_functions?limit=5")
+            status, body = _get(f"{server.url}/get_entry_points?limit=5")
             assert status == 200, "lenient mode must serve the fixture"
             assert json.loads(body)["count"] > 0
-            assert server.violation_keys() == ["unknown_parameter GET /list_functions [limit]"]
+            assert server.violation_keys() == ["unknown_parameter GET /get_entry_points [limit]"]
         finally:
             server.stop()
 
@@ -324,9 +324,9 @@ class TestFaultInjection:
         assert _get(f"{fake_ghidra.url}/check_connection")[0] == 200
 
     def test_fail_next_can_be_scoped_to_one_path(self, fake_ghidra):
-        fake_ghidra.fail_next(500, path="/get_version")
+        fake_ghidra.fail_next(500, path="/mcp/health")
         assert _get(f"{fake_ghidra.url}/check_connection")[0] == 200
-        assert _get(f"{fake_ghidra.url}/get_version")[0] == 500
+        assert _get(f"{fake_ghidra.url}/mcp/health")[0] == 500
 
     def test_malformed_next_returns_unparseable_json(self, fake_ghidra):
         fake_ghidra.malformed_next()
@@ -336,8 +336,8 @@ class TestFaultInjection:
             json.loads(body)
 
     def test_requests_are_recorded_for_inspection(self, fake_ghidra):
-        _get(f"{fake_ghidra.url}/get_version")
-        calls = fake_ghidra.calls_to("/get_version")
+        _get(f"{fake_ghidra.url}/mcp/health")
+        calls = fake_ghidra.calls_to("/mcp/health")
         assert len(calls) == 1
         assert calls[0].method == "GET"
         assert calls[0].status == 200

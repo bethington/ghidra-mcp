@@ -1,70 +1,55 @@
+/* ###
+ * IP: GHIDRA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.xebyte.offline;
 
 import com.xebyte.core.ServerManager;
 import junit.framework.TestCase;
 
 /**
- * Unit tests for the bound-TCP-port field added in issue #175.
+ * The bound TCP port is read from the listener, never remembered.
  *
- * The plugin's TCP port-range fallback writes the actual bound port to
- * ServerManager.setBoundTcpPort(); the /mcp/instance_info handler reads it
- * out via getBoundTcpPort(). This test pins the contract:
- *   - Default value is -1 (TCP not running / port unknown).
- *   - setBoundTcpPort persists.
- *   - The field is thread-safe under concurrent writes (volatile semantics).
- *
- * Pure-logic test, no Ghidra runtime required.
+ * <p>It used to live in a {@code volatile int} that the plugin set after
+ * starting its own server and reset on stop, and these tests pinned the setter.
+ * Two servers meant two places that had to agree; one place forgot on at least
+ * one path (#196, a stale port left in {@code /mcp/instance_info}). With a
+ * single {@link com.xebyte.core.McpHttpServer} owning both transports the
+ * listener is the only thing that knows, so it is the only thing asked.
  */
 public class ServerManagerPortTest extends TestCase {
 
-    public void testDefaultBoundTcpPortIsNegativeOne() {
-        // Default value when TCP isn't running. -1 is the sentinel value the
-        // /mcp/instance_info handler surfaces so the bridge knows to fall
-        // back to the configured default port.
-        int original = ServerManager.getInstance().getBoundTcpPort();
-        try {
-            // If a previous test left state, just verify the type contract.
-            ServerManager.getInstance().setBoundTcpPort(-1);
-            assertEquals(-1, ServerManager.getInstance().getBoundTcpPort());
-        } finally {
-            ServerManager.getInstance().setBoundTcpPort(original);
-        }
+    /**
+     * -1 is the sentinel the {@code /mcp/instance_info} handler surfaces so the
+     * bridge knows to fall back to the configured default port rather than
+     * trusting a number nobody bound.
+     */
+    public void testPortIsNegativeOneWhileNothingIsListening() {
+        assertFalse("no server should be running in an offline test",
+            ServerManager.getInstance().isRunning());
+        assertEquals(-1, ServerManager.getInstance().getBoundTcpPort());
     }
 
-    public void testSetBoundTcpPortPersists() {
-        int original = ServerManager.getInstance().getBoundTcpPort();
-        try {
-            ServerManager.getInstance().setBoundTcpPort(8092);
-            assertEquals(8092, ServerManager.getInstance().getBoundTcpPort());
-
-            ServerManager.getInstance().setBoundTcpPort(9999);
-            assertEquals(9999, ServerManager.getInstance().getBoundTcpPort());
-        } finally {
-            ServerManager.getInstance().setBoundTcpPort(original);
-        }
+    /** Reading it twice cannot drift: there is no state to drift. */
+    public void testPortIsDerivedNotStored() {
+        ServerManager mgr = ServerManager.getInstance();
+        assertEquals(mgr.getBoundTcpPort(), mgr.getBoundTcpPort());
+        assertEquals(-1, mgr.getBoundTcpPort());
     }
 
-    public void testSetBoundTcpPortVisibleAcrossThreads() throws Exception {
-        // The field is declared volatile; this test sanity-checks that a
-        // value written from one thread is visible from another thread.
-        // Not a real concurrency stress test, but catches obvious wiring
-        // mistakes (e.g. accidentally caching the value in a non-volatile
-        // field).
-        int original = ServerManager.getInstance().getBoundTcpPort();
-        try {
-            final int target = 8095;
-            ServerManager.getInstance().setBoundTcpPort(target);
-
-            final int[] observed = new int[]{-9999};
-            Thread reader = new Thread(() ->
-                observed[0] = ServerManager.getInstance().getBoundTcpPort()
-            );
-            reader.start();
-            reader.join(2000);
-
-            assertEquals(target, observed[0]);
-        } finally {
-            ServerManager.getInstance().setBoundTcpPort(original);
-        }
+    /** No listener means no socket either; both answer "not running" the same way. */
+    public void testSocketPathIsNullWhileNothingIsListening() {
+        assertNull(ServerManager.getInstance().getSocketPath());
     }
 }

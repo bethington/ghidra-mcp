@@ -1,5 +1,7 @@
 """Schema parsing — converts the upstream /mcp/schema to internal tool defs."""
 
+from typing import Any
+
 from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES
 from .validation import sanitize_tool_name, _allocate_tool_name
 
@@ -12,7 +14,9 @@ _TYPE_MAP = {
     "number": float,
     "object": dict,
     "array": list,
-    "any": str,
+    # Java Object bindings accept native JSON values. A str annotation makes
+    # FastMCP reject objects/arrays before the request can reach the server.
+    "any": Any,
     "address": str,
 }
 
@@ -31,7 +35,7 @@ def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
         sanitized_name = sanitize_tool_name(raw_name)
 
         # Collision detection uses the ACTIVE static set: when the WinDbg debugger
-        # proxies are suppressed on this host, their names are free, so Ghidra's own
+        # proxies are off (the default), their names are free, so Ghidra's own
         # TraceRmi /debugger/* endpoints (System B) keep clean names instead of _2.
         #
         # Preserve the existing behavior for valid dynamic names that exactly
@@ -91,8 +95,7 @@ def _parse_schema(raw: dict) -> list[dict]:
             if p.get("required", False):
                 required.append(p["name"])
 
-        tool_defs.append(
-            {
+        tool_def = {
                 "name": raw_name,
                 "original_name": raw_name,
                 "endpoint": path,
@@ -105,7 +108,14 @@ def _parse_schema(raw: dict) -> list[dict]:
                     "properties": properties,
                     "required": required,
                 },
-            }
-        )
+        }
+        # Present only for tools the server has classified (@McpTool's
+        # `access`). Absent means "unclassified": the bridge then emits no MCP
+        # annotations at all rather than guessing, because a wrong
+        # readOnlyHint=true lets a mutating tool run unattended.
+        if "read_only" in tool:
+            tool_def["read_only"] = bool(tool["read_only"])
+            tool_def["destructive"] = bool(tool.get("destructive", False))
+        tool_defs.append(tool_def)
 
     return _normalize_tool_def_names(tool_defs)

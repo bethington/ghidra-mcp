@@ -837,6 +837,13 @@ class TestAutoConnect(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         self._bridge = bridge
+        self._tcp_discovery = patch.object(bridge.discovery, "_iter_tcp_instances", return_value=[])
+        self._tcp_discovery.start()
+        self.addCleanup(self._tcp_discovery.stop)
+        self._env = patch.dict(os.environ)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        os.environ.pop("GHIDRA_MCP_URL", None)
         self._saved = (
             bridge.state._active_socket,
             bridge.state._active_tcp,
@@ -855,6 +862,172 @@ class TestAutoConnect(unittest.TestCase):
             self._bridge.state._transport_mode,
             self._bridge.state._connected_project,
         ) = self._saved
+
+    def test_project_selects_one_of_multiple_uds_instances(self):
+        bridge = self._bridge
+        instances = [
+            {"socket": "/tmp/other.sock", "project": "Other"},
+            {"socket": "/tmp/chosen.sock", "project": "Chosen"},
+        ]
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]) as fetch,
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(fetch.call_args.kwargs["connection"].active_socket, "/tmp/chosen.sock")
+        self.assertEqual(bridge.state._connected_project, "Chosen")
+
+    def test_missing_or_ambiguous_project_never_fetches_schema(self):
+        bridge = self._bridge
+        for instances in (
+            [{"socket": "/tmp/a.sock", "project": "Other"}],
+            [{"socket": "/tmp/a.sock", "project": "Chosen"}, {"socket": "/tmp/b.sock", "project": "Chosen"}],
+        ):
+            with (
+                self.subTest(instances=instances),
+                patch.object(bridge.discovery, "discover_instances", return_value=instances),
+                patch.object(bridge.discovery, "_iter_tcp_instances", return_value=[]),
+                patch.object(bridge.transport, "tcp_request", return_value=("{}", 200)),
+                patch.object(bridge.registry, "_fetch_schema") as fetch,
+            ):
+                self.assertFalse(bridge._auto_connect(project="Chosen"))
+                fetch.assert_not_called()
+                self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_selected_schema_failure_does_not_fall_back_to_other_listener(self):
+        bridge = self._bridge
+        with (
+            patch.object(
+                bridge.discovery,
+                "discover_instances",
+                return_value=[{"socket": "/tmp/chosen.sock", "project": "Chosen"}],
+            ),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", side_effect=OSError("unavailable")) as fetch,
+        ):
+            self.assertFalse(bridge._auto_connect(project="Chosen"))
+        fetch.assert_called_once()
+        self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_project_selects_tcp_only_instance(self):
+        bridge = self._bridge
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://127.0.0.1:9999"}),
+            patch.object(bridge.transport, "tcp_request", return_value=('{"data":{"project":"Chosen"}}', 200)) as info,
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        info.assert_called_once_with("http://127.0.0.1:9999", "GET", "/mcp/instance_info", timeout=5)
+        self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:9999")
+        self.assertEqual(bridge.state._connected_project, "Chosen")
+
+    def test_tcp_scan_rejects_duplicate_names_and_matches_exactly(self):
+        bridge = self._bridge
+        for found in (
+            [("http://127.0.0.1:8089", {"project": "Chosen extra"})],
+            [("http://127.0.0.1:8089", {"project": "Chosen"}), ("http://127.0.0.1:8090", {"project": "Chosen"})],
+        ):
+            with (
+                self.subTest(found=found),
+                patch.dict(os.environ),
+                patch.object(bridge.discovery, "discover_instances", return_value=[]),
+                patch.object(bridge.discovery, "_iter_tcp_instances", return_value=found),
+                patch.object(bridge.registry, "_fetch_schema") as fetch,
+            ):
+                os.environ.pop("GHIDRA_MCP_URL", None)
+                self.assertFalse(bridge._auto_connect(project="Chosen"))
+                fetch.assert_not_called()
+
+    def test_tcp_scan_selects_matching_project(self):
+        bridge = self._bridge
+        with (
+            patch.dict(os.environ),
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[
+                    ("http://127.0.0.1:8089", {"project": "Other"}),
+                    ("http://127.0.0.1:8090", {"project": "Chosen"}),
+                ],
+            ),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            os.environ.pop("GHIDRA_MCP_URL", None)
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:8090")
+
+    def test_mixed_transport_duplicate_project_stays_disconnected(self):
+        bridge = self._bridge
+        with (
+            patch.object(
+                bridge.discovery,
+                "discover_instances",
+                return_value=[{"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1}],
+            ),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 2})],
+            ),
+            patch.object(bridge.registry, "_fetch_schema") as fetch,
+        ):
+            self.assertFalse(bridge._auto_connect(project="Chosen"))
+        fetch.assert_not_called()
+        self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_same_instance_on_both_transports_is_not_ambiguous(self):
+        bridge = self._bridge
+        original = {"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1, "project_path": "/a/Chosen"}
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[original]),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 1, "project_path": "/a/Chosen"})],
+            ),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(bridge.state._active_socket, "/tmp/chosen.sock")
+        self.assertNotIn("url", original)
+
+    def test_distinct_paths_in_same_process_remain_ambiguous(self):
+        bridge = self._bridge
+        with patch.object(
+            bridge.discovery,
+            "_iter_tcp_instances",
+            return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 1, "project_path": "/b/Chosen"})],
+        ):
+            self.assertEqual(
+                bridge.discovery.find_project_instances(
+                    "Chosen",
+                    [{"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1, "project_path": "/a/Chosen"}],
+                ),
+                [],
+            )
+
+    def test_retry_retains_project_selector(self):
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools, "_auto_connect", side_effect=[False, True]) as connect,
+            patch.object(static_tools.state, "notify_tools_changed_from_worker") as notify,
+        ):
+            thread = static_tools._start_auto_connect_retry(interval=0.001, project="Chosen")
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertEqual(call.kwargs, {"project": "Chosen"})
+        notify.assert_called_once()
 
     def test_single_uds_instance_connects_and_registers(self):
         bridge = self._bridge
@@ -1049,6 +1222,21 @@ class TestListInstancesPayloadSize(unittest.TestCase):
 
         self.assertEqual(summarized["program_count"], 2)
         self.assertEqual(summarized["open_programs"], ["A.dll", "B.dll"])
+
+    def test_list_open_programs_dicts_are_treated_as_open(self):
+        """#565: the /list_open_programs fallback returns dicts with no `open`
+        key — every entry is open by definition, so none may be dropped. An
+        explicit open=False (from /mcp/instance_info) still filters."""
+        inst = self._big_instance()
+        inst["programs"] = [
+            {"name": "A.dll", "path": "/proj/A.dll", "is_current": True},
+            {"name": "B.dll", "path": "/proj/B.dll", "is_current": False},
+            {"name": "C.dll", "path": "/proj/C.dll", "open": False},
+        ]
+        _, summarized = self._run(inst)
+
+        self.assertEqual(summarized["program_count"], 3)
+        self.assertEqual(summarized["open_programs"], ["/proj/A.dll", "/proj/B.dll"])
 
     def test_instance_without_programs_key_is_untouched(self):
         inst = {"socket": "/tmp/s", "pid": 1, "project": "p"}

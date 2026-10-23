@@ -43,21 +43,17 @@ CORPUS_DIR = REPO_ROOT / "tests" / "conformance" / "corpus"
 # fixture, which is why they are recorded as debt instead of guessed at.
 KNOWN_ERROR_PAYLOAD_GOLDENS = {
     # --- the synthesizer omitted a required-in-practice argument ------------
-    "add_function_tag.snap": "no 'tags' supplied",
-    "remove_function_tag.snap": "no 'tags' supplied",
-    "search_functions.snap": "no search term supplied",
+    # `add_function_tag` and `remove_function_tag` used to be here ("no 'tags'
+    # supplied"). `tags` was not in the name map at all, so it was never sent.
+    # Both now carry an explicit override, so neither records a refusal.
     # --- one parameter name, different meanings in different tools ----------
-    # `pattern` is a type name for search_data_types but a hex byte string here.
-    "search_byte_patterns.snap": "pattern='int' is not hex",
-    # `source_type` is a Ghidra reference SourceType, not a data type.
-    "add_memory_reference.snap": "source_type='int' is not a SourceType",
-    # `group` was filled with the tool CATEGORY name.
-    "get_program_options.snap": "group='function' is not an option group",
-    # `direction` must be forward|backward; the synthesizer sends 'both'.
-    "analyze_dataflow.snap": "direction='both' is not accepted here",
+    # `search_byte_patterns` (a hex byte string, not a type name),
+    # `add_memory_reference` (a Ghidra reference SourceType, not a data type),
+    # `get_program_options` (an option-group name, not the tool category) and
+    # `analyze_dataflow` (forward|backward, not 'both') used to be here. Each
+    # now carries an explicit override with the value its own schema
+    # description calls for.
     # `name` was filled with the function name for a tool that wants an address.
-    "get_function_labels.snap": "function lookup got '0xcalc_crc16'",
-    "get_function_tags.snap": "function lookup got '0xcalc_crc16'",
     # --- the synthesized address is real but wrong for this tool ------------
     "clear_instruction_flow_override.snap": "no instruction at the synthesized address",
     "suggest_field_names.snap": "no struct at the synthesized address",
@@ -66,11 +62,10 @@ KNOWN_ERROR_PAYLOAD_GOLDENS = {
     # --- the call is a no-op against already-existing state -----------------
     "create_function.snap": "a function already exists at that address",
     "create_property_map.snap": "the property map already exists",
-    # --- environment-gated: belongs in a skip, not a snapshot ---------------
-    "archive_ingest_function.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
-    "archive_ingest_program.snap": "archive exchange disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
-    "tool_goto_address.snap": "needs a GUI CodeBrowser session",
-    "tool_launch_codebrowser.snap": "needs a GUI CodeBrowser session",
+    # The environment-gated tools that used to be here are now skipped by the
+    # generator (see ENVIRONMENT_GATED in tests/conformance/cases.py), so they
+    # no longer produce a golden at all:
+    #   archive_ingest_function, archive_ingest_program, tool_goto_address
 }
 
 
@@ -155,6 +150,98 @@ class TestGeneratorOverrides:
             "the endpoint refuses a call with neither filter set"
         )
         assert "function" not in args, "the override drops the function scope"
+
+    def test_overrides_supply_the_value_the_tool_actually_wants(self):
+        """A parameter whose meaning differs per tool must not get the name-mapped value.
+
+        Each of these tools was refused by the server because the synthesizer
+        filled the parameter with a value of the wrong KIND: a type name where
+        a hex string was wanted, a category where an option group was wanted,
+        'both' where only forward|backward is accepted.
+        """
+        from tests.conformance.cases import ProgramFacts, synthesize_args
+
+        facts = ProgramFacts(program="Benchmark.dll",
+                             function_address="0x10001000",
+                             function_name="calc_crc16")
+        cases = [
+            ("/search_byte_patterns", [{"name": "pattern", "required": True},
+                                       {"name": "program", "required": False}],
+             "pattern", "9090"),
+            ("/add_memory_reference", [{"name": "from_address", "required": True},
+                                       {"name": "to_address", "required": True},
+                                       {"name": "source_type", "required": False},
+                                       {"name": "program", "required": False}],
+             "source_type", "USER_DEFINED"),
+            ("/get_program_options", [{"name": "group", "required": False},
+                                      {"name": "program", "required": False}],
+             "group", "Program Information"),
+            ("/analyze_dataflow", [{"name": "address", "required": True},
+                                   {"name": "direction", "required": False},
+                                   {"name": "program", "required": False}],
+             "direction", "forward"),
+        ]
+        for path, params, pname, expected in cases:
+            args, unresolved = synthesize_args({"path": path, "params": params}, facts)
+            assert unresolved is None, path
+            assert args.get(pname) == expected, path
+
+    def test_tag_cases_send_a_tag(self):
+        """`tags` was absent from the name map, so it was never sent at all."""
+        from tests.conformance.cases import ProgramFacts, synthesize_args
+
+        facts = ProgramFacts(program="Benchmark.dll",
+                             function_address="0x10001000",
+                             function_name="calc_crc16")
+        for path in ("/add_function_tag", "/remove_function_tag"):
+            args, unresolved = synthesize_args(
+                {"path": path, "params": [{"name": "function", "required": False},
+                                          {"name": "tags", "required": False},
+                                          {"name": "program", "required": False}]}, facts)
+            assert unresolved is None, path
+            assert args.get("tags"), path
+
+    def test_fact_sentinel_resolves_against_the_probed_program(self):
+        """`$fact.<name>` sends a live address instead of the function entry."""
+        from tests.conformance.cases import ProgramFacts, synthesize_args
+
+        facts = ProgramFacts(program="Benchmark.dll",
+                             function_address="0x10001000",
+                             function_name="calc_crc16",
+                             data_address="0x10005000")
+        tool = {"path": "/zz_fake_tool",
+                "params": [{"name": "address", "required": True}]}
+        args, unresolved = synthesize_args(tool, facts)
+        assert unresolved is None
+        # No override yet: the name mapping sends the function entry.
+        assert args["address"] == "0x10001000"
+
+        from tests.conformance.cases import TOOL_ARG_OVERRIDES
+        TOOL_ARG_OVERRIDES["zz_fake_tool"] = {"address": "$fact.data_address"}
+        try:
+            args, unresolved = synthesize_args(tool, facts)
+        finally:
+            del TOOL_ARG_OVERRIDES["zz_fake_tool"]
+        assert unresolved is None
+        assert args["address"] == "0x10005000"
+
+    def test_missing_fact_skips_the_case_instead_of_sending_a_refusal(self):
+        """A required fact the probe did not find must skip, not send nothing."""
+        from tests.conformance.cases import ProgramFacts, synthesize_args, TOOL_ARG_OVERRIDES
+
+        facts = ProgramFacts(program="Benchmark.dll",
+                             function_address="0x10001000",
+                             function_name="calc_crc16")
+        facts.struct_address = None
+        tool = {"path": "/zz_fake_tool",
+                "params": [{"name": "struct_address", "required": True}]}
+        TOOL_ARG_OVERRIDES["zz_fake_tool"] = {"struct_address": "$fact.struct_address"}
+        try:
+            args, unresolved = synthesize_args(tool, facts)
+        finally:
+            del TOOL_ARG_OVERRIDES["zz_fake_tool"]
+        assert unresolved is not None, "the case must be skipped"
+        assert "struct_address" not in args
 
     def test_override_none_drops_a_synthesized_param(self):
         from tests.conformance.cases import TOOL_ARG_OVERRIDES, ProgramFacts, synthesize_args

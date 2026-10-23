@@ -4,6 +4,12 @@
 **Audience**: Ghidra MCP users, contributors, and automation workflow authors  
 **Scope**: Python MCP bridge recovery orchestration plus Java health/status detail
 
+> **Status note, 2026-10-07.** The bridge this RFC refers to as
+> `bridge_mcp_ghidra.py` is now the `python/bridge_mcp_ghidra` package, run as
+> the `bridge-mcp-ghidra` console script. The hooks named below live in its
+> `discovery` (`discover_instances()`) and `dispatch` (`_try_reconnect()`,
+> `dispatch_get()`, `dispatch_post()`) modules.
+
 ## Summary
 
 Ghidra MCP currently reports failures cleanly when the bridge cannot reach Ghidra, but unattended workflows can get stuck in repeated `ghidra_offline` results until a human restarts Ghidra and reconnects the bridge.
@@ -107,7 +113,7 @@ Accessibility is the source of truth. A running process does not prove Ghidra MC
 
 Useful existing hooks:
 
-- Python bridge UDS/TCP routing in `bridge_mcp_ghidra.py`
+- Python bridge UDS/TCP routing in the `python/bridge_mcp_ghidra` package (`transport`, `discovery`)
 - Python `discover_instances()`
 - Python `_try_reconnect()`
 - Python `dispatch_get()` and `dispatch_post()`
@@ -130,7 +136,7 @@ Example recovery state:
   "ghidra_path": "F:/ghidra_12.1_PUBLIC",
   "project": "MyProject",
   "project_path": "C:/Users/benam/ghidra/projects/MyProject.gpr",
-  "program": "/Mods/PD2-S12/D2Common.dll",
+  "program": "/MyProduct/v2.0/engine.dll",
   "socket": "...",
   "tcp_url": "http://127.0.0.1:8089"
 }
@@ -211,12 +217,12 @@ Enhance `/mcp/instance_info` or `/mcp/health` to include richer recovery state:
   "project_path": "...",
   "open_programs": [
     {
-      "name": "D2Common.dll",
-      "project_path": "/Mods/PD2-S12/D2Common.dll",
+      "name": "engine.dll",
+      "project_path": "/MyProduct/v2.0/engine.dll",
       "language_id": "x86:LE:32:default"
     }
   ],
-  "current_program": "/Mods/PD2-S12/D2Common.dll",
+  "current_program": "/MyProduct/v2.0/engine.dll",
   "busy": false,
   "active_requests": 0
 }
@@ -227,7 +233,7 @@ Enhance `/mcp/instance_info` or `/mcp/health` to include richer recovery state:
 Keep recovery code isolated instead of growing the bridge dispatch functions:
 
 ```text
-bridge_mcp_ghidra.py
+python/bridge_mcp_ghidra/
 recovery/
   config.py
   state.py

@@ -3,22 +3,31 @@
 #
 # Launches Ghidra with the GHIDRA_MCP_PROJECT_FOLDER env var set to scope
 # all MCP getProgram() calls to a specific project folder. Use this for
-# focused work on one binary set (e.g. a D2 mod) so accidental wrong-folder
-# program references get rejected at the plugin layer instead of silently
-# writing to the wrong binary.
+# focused work on one binary set (e.g. one product version) so accidental
+# wrong-folder program references get rejected at the plugin layer instead
+# of silently writing to the wrong binary.
 #
-# Default scope is /Mods/PD2-S12 (the diablo2 PD2 Season 12 mod folder).
-# Override with -Scope or by setting $env:GHIDRA_MCP_PROJECT_FOLDER yourself
-# before invoking ghidraRun.bat.
+# Usage:
+#   ./tools/launch-ghidra-scoped.ps1 -Scope /MyProduct/v1.0 -GhidraPath F:\ghidra_12.1.4_PUBLIC
+#
+# -Scope is required. -GhidraPath falls back to $env:GHIDRA_INSTALL_DIR,
+# then $env:GHIDRA_PATH; there is no hard-coded default, because a stale
+# version-stamped path silently starts the wrong Ghidra.
 #
 # Do NOT use this wrapper for deploy/benchmark runs — the regression suite
 # operates on /testing/benchmark/* which would be rejected by the scope guard.
 # Plain `ghidraRun.bat` (no env var) keeps the default unscoped behavior.
 
 param(
-    [string]$GhidraPath = "F:\ghidra_12.1.2_PUBLIC",
-    [string]$Scope      = "/Mods/PD2-S12"
+    [Parameter(Mandatory = $true)]
+    [string]$Scope,
+    [string]$GhidraPath = $(if ($env:GHIDRA_INSTALL_DIR) { $env:GHIDRA_INSTALL_DIR } else { $env:GHIDRA_PATH })
 )
+
+if ([string]::IsNullOrWhiteSpace($GhidraPath)) {
+    Write-Error "No Ghidra installation given. Pass -GhidraPath or set GHIDRA_INSTALL_DIR."
+    exit 1
+}
 
 $ghidraRun = Join-Path $GhidraPath "ghidraRun.bat"
 if (-not (Test-Path $ghidraRun)) {

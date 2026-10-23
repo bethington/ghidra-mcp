@@ -3,6 +3,8 @@ package com.xebyte.offline;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
+import static org.mockito.Mockito.mock;
 import junit.framework.TestCase;
 
 /**
@@ -10,6 +12,8 @@ import junit.framework.TestCase;
  * class-member listing tool, issue #275). Runs offline with a stub provider.
  */
 public class FunctionServiceClassMembersTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private FunctionService functions;
 
@@ -20,21 +24,15 @@ public class FunctionServiceClassMembersTest extends TestCase {
     }
 
     public void testRequiresClassName() {
-        Response r = functions.listClassMembers("", 0, 200, "");
+        Response r = functions.listClassMembers("", 0, 200, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("class_name is required"));
     }
 
     public void testRequiresClassNameWhenWhitespace() {
-        Response r = functions.listClassMembers("   ", 0, 200, "");
+        Response r = functions.listClassMembers("   ", 0, 200, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("class_name is required"));
     }
 
-    public void testDegradesGracefullyWithNoProgram() {
-        Response r = functions.listClassMembers("UnitAny", 0, 200, "");
-        assertNotNull(r);
-        assertTrue("expected 'No program loaded', got: " + r.toJson(),
-                r.toJson().contains("No program loaded"));
-    }
 }

@@ -5,7 +5,7 @@
 //@author GhidraMCP
 //@category Documentation
 //@keybinding
-//@menupath D2.1a - Build Hash Index V2 (Multi-Phase)
+//@menupath GhidraMCP.1a - Build Hash Index V2 (Multi-Phase)
 //@toolbar
 
 import ghidra.app.script.GhidraScript;

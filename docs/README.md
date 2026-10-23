@@ -7,6 +7,8 @@ release notes for Ghidra MCP.
 
 - Start in the repo root `README.md` for installation, build, and day-to-day
   usage.
+- Read [INSTALL_GUI.md](INSTALL_GUI.md) to install the extension through
+  Ghidra's own dialogs, with a screenshot of every step.
 - Read `PROJECT_STRUCTURE.md` for the current layout of the codebase and where
   major subsystems live.
 - Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
@@ -34,19 +36,21 @@ release notes for Ghidra MCP.
 ```text
 docs/
 ├── README.md
+├── INSTALL_GUI.md
+├── images/install/
 ├── PROJECT_STRUCTURE.md
+├── TESTING.md
+├── connection-triage-guide.md
 ├── NAMING_CONVENTIONS.md
 ├── HUNGARIAN_NOTATION.md
 ├── PLATE_COMMENT_BEST_PRACTICES.md
+├── STRUCT_RESIZE_WORKFLOW.md
+├── THIS_POINTER_TYPING.md
 ├── GHIDRA_VARIABLE_APIS_EXPLAINED.md
-├── JAVA_HANDLER_REFACTORING.md
-├── MAVEN_VERSION_MANAGEMENT.md
-├── MULTI_PROGRAM_SUPPORT_ANALYSIS.md
-├── QUICK_REFERENCE_SCRIPTS.md
-├── SESSION_SUMMARY_DOCUMENTATION_SYSTEM.md
-├── WORKFLOW_DOCUMENTATION_PROPAGATION.md
-├── ORGANIZATION_SUMMARY.md
-├── project-management/
+├── Context-Window-Analysis.md
+├── archive/                 # history: retired designs and session notes
+├── project-management/      # RFCs, migration guide, response contract
+│   └── archive/             # history: finished plans and backlogs
 ├── prompts/
 └── releases/
 ```
@@ -70,7 +74,13 @@ docs/
 
 ### Project History
 
-- Older organization and project-management notes kept for context
+- `archive/` holds retired designs, analyses and session notes (handler
+  refactoring, multi-program survey, Maven version management, the
+  documentation-propagation session notes). Each opens with an archive banner
+  saying why it is no longer current.
+- `project-management/archive/` holds finished plans and backlogs: the 7.0.0
+  tool audit, the 2026-08 refocus, the 2026-06 structural backlog and Gradle
+  Phase 1, among older ones.
 
 ## Current Command Surface
 
@@ -82,6 +92,10 @@ The supported operator workflow is Python-first:
 - `python -m tools.setup deploy`
 - `python -m tools.setup start-ghidra`
 - `python -m tools.setup bump-version --new X.Y.Z`
+
+`tools.setup` uses Maven unless `TOOLS_SETUP_BACKEND=gradle` is set; for local
+builds, `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=<ghidra>` is the default
+and needs no Maven install.
 
 Documentation in this directory should prefer that command surface and should
 not point readers at removed wrapper-script workflows.
