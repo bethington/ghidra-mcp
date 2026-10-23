@@ -17,6 +17,7 @@ Changes on `dev` after 7.0.0.
 - `apply_local_variable` creates a stack local at an explicit frame offset,
   or retypes/renames the one already covering that offset. Reaches locals
   `set_local_variable_type` cannot, because no symbol exists for them.
+
 ### Added — equate management endpoints
 
 - `list_equates` lists equate definitions (name/value/reference count) with
