@@ -717,11 +717,42 @@ public final class ServiceUtils {
      * silently drop it.
      */
     private static String decoderOf(ghidra.program.model.lang.LanguageDescription d) {
-        if (d instanceof ghidra.program.model.lang.SleighLanguageDescription sld) {
-            generic.jar.ResourceFile sla = sld.getSlaFile();
-            if (sla != null) return sla.getAbsolutePath();
-        }
+        generic.jar.ResourceFile sla = slaFileOf(d);
+        if (sla != null) return sla.getAbsolutePath();
         return d.getLanguageID().getIdAsString();
+    }
+
+    /**
+     * The {@code .sla} behind a Sleigh language description, on either side of the Ghidra 12.2
+     * API move: 12.1.x has {@code ghidra.program.model.lang.SleighLanguageDescription#getSlaFile()};
+     * 12.2 moved the class to {@code ghidra.app.plugin.processors.sleigh} and reaches the file via
+     * {@code getLanguageFile().getSlaFile()}. Resolved reflectively so one build runs on both.
+     * Returns null for non-Sleigh descriptions or an unknown API shape.
+     */
+    private static generic.jar.ResourceFile slaFileOf(Object description) {
+        try {
+            if (invokeNoArg(description, "getSlaFile") instanceof generic.jar.ResourceFile direct) {
+                return direct;
+            }
+            Object languageFile = invokeNoArg(description, "getLanguageFile");
+            if (languageFile != null
+                    && invokeNoArg(languageFile, "getSlaFile") instanceof generic.jar.ResourceFile viaFile) {
+                return viaFile;
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // fall through: caller uses the language id instead
+        }
+        return null;
+    }
+
+    private static Object invokeNoArg(Object target, String methodName) throws ReflectiveOperationException {
+        java.lang.reflect.Method m;
+        try {
+            m = target.getClass().getMethod(methodName);
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
+        return m.invoke(target);
     }
 
     /** The variant a program is loaded under, or "" when it cannot be determined. */

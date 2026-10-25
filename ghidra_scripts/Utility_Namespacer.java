@@ -30,7 +30,7 @@ public class Utility_Namespacer extends GhidraScript {
 
         FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(currentAddress, true);
         while (funcIter.hasNext()) {
-            monitor.checkCanceled();
+            monitor.checkCancelled();
             Function f = funcIter.next();
             Namespace cn = f.getParentNamespace();
             if (cn.equals(targetNamespace)) {
