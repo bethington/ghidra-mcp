@@ -9,6 +9,32 @@ For the release preparation runbook, see
 
 ## Current Releases
 
+### Unreleased
+
+The catalog stands at **215 tools** — 211 served by the GUI plugin, 196 by the headless
+server, 192 by both:
+
+- **`list_decompiler_variables`** lists a function's decompiler symbols (SSA /
+  register temporaries) with their type and storage, so a DWARF
+  register-resident local can be matched to the temporary that has to be
+  renamed.
+- **`apply_local_variable`** creates a stack local at an explicit frame offset,
+  or retypes/renames the one already covering that offset. Reaches locals
+  `set_local_variable_type` cannot, because no symbol exists for them.
+The catalog stands at **213 tools** — 211 served by the GUI plugin, 196 by the headless
+server, 192 by both:
+
+- **`list_equates`** lists equate definitions (name/value/reference count) with
+  optional filters, optionally expanded into their (address, operand_index)
+  references.
+- **`apply_equate`** creates an equate and attaches it to scalar operand(s), so
+  a magic constant can be given a readable name. `dry_run=true` previews the
+  targets without writing.
+- **`remove_equate`** detaches an equate from operand(s) and optionally deletes
+  the shared definition.
+- **`rename_equate`** renames an equate definition, preserving every operand
+  reference — the GUI cannot do this once an equate has been applied.
+
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The first consolidation pass took the advertised
@@ -20,7 +46,7 @@ the same cycle (`/list_shadowed_globals`, `/batch_get_comments`), and rc.1
 shipped 253.
 
 After rc.1 a second pass removed 53 more tools and added 9, so
-**7.0.0 ships 209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186 by both:
+**7.0.0 ships 213 tools** — 209 served by the GUI plugin, 194 by the headless server, 190 by both:
 
 - **`get_functions`** reads one function, or up to 20, with `fields=` choosing
   what comes back. It replaces `decompile_function` and eight other per-function
@@ -78,7 +104,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (68 endpoints plus 8
+called. The bridge now loads `listing,function,program` (74 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 
