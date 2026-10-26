@@ -8,6 +8,16 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Added — decompiler variable endpoints
+
+- `list_decompiler_variables` lists a function's decompiler symbols (SSA /
+  register temporaries) with their type and storage, so a DWARF
+  register-resident local can be matched to the temporary that has to be
+  renamed.
+- `apply_local_variable` creates a stack local at an explicit frame offset,
+  or retypes/renames the one already covering that offset. Reaches locals
+  `set_local_variable_type` cannot, because no symbol exists for them.
+
 ### Fixed — integer and object-array parameters no longer bind lossily
 
 - Integer parameters reject fractional, out-of-range and missing required values
@@ -811,6 +821,10 @@ Measured against the spec and against what real clients do with each field.
   `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
+
+- **Decompiler variable endpoints** in `FunctionService`: `/list_decompiler_variables`
+  and `/apply_local_variable` (POST) — read local variable names/types from the
+  decompiler output and apply renames/retypes to a function's variables.
 
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
