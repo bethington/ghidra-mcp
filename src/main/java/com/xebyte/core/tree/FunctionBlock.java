@@ -256,6 +256,11 @@ public final class FunctionBlock {
                     + (Boolean.TRUE.equals(l.get("is_phantom")) ? " [phantom]" : "")
                     + (Boolean.FALSE.equals(l.get("in_decompiled_code")) ? " [not in code]" : ""));
         }
+        for (Object o : list(facts.get("decompiler_symbols"))) {
+            Map<?, ?> symbol = (Map<?, ?>) o;
+            line(sb, "decompiler_symbol", str(symbol.get("type")) + " " + str(symbol.get("name"))
+                + " @" + str(symbol.get("storage")));
+        }
         for (Object o : list(facts.get("labels"))) {
             Map<?, ?> l = (Map<?, ?>) o;
             line(sb, "label", offset(l.get("relative_offset")) + " " + str(l.get("name"))
@@ -400,7 +405,7 @@ public final class FunctionBlock {
             String key = raw.substring(3, colon);
             String value = raw.substring(colon + 2);
             switch (key) {
-                case "param", "local", "label", "comment", "xref", "jump", "context", "disasm",
+                case "param", "local", "decompiler_symbol", "label", "comment", "xref", "jump", "context", "disasm",
                         "plate_issue" -> {
                     @SuppressWarnings("unchecked")
                     List<String> items = (List<String>) out.computeIfAbsent(key, k -> new ArrayList<String>());

@@ -5,6 +5,9 @@ import com.xebyte.core.tree.TreeConfig;
 import com.xebyte.core.tree.TreeKey;
 import com.xebyte.core.tree.TreeLayout;
 import com.xebyte.core.tree.TreeRoot;
+import com.xebyte.core.tree.TreeRegistry;
+import com.xebyte.core.tree.SweepProgress;
+import com.xebyte.headless.DirectThreadingStrategy;
 import com.xebyte.core.tree.ExclusionRule;
 import com.xebyte.core.tree.SweepJob;
 import com.xebyte.core.tree.TreeReconciler;
@@ -34,6 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -53,6 +58,8 @@ public class TreeConvergenceGhidraTest {
     private ProgramBuilder builder;
     private ProgramDB program;
     private Path tmp;
+    private final TreeRegistry registry = TreeRegistry.getInstance();
+    private final DirectThreadingStrategy threading = new DirectThreadingStrategy();
 
     @BeforeClass
     public static void initializeGhidra() throws Exception {
@@ -69,6 +76,8 @@ public class TreeConvergenceGhidraTest {
 
     @Before
     public void setUp() throws Exception {
+        registry.clearForTests();
+        registry.setThreadingStrategyIfAbsent(threading);
         tmp = Files.createTempDirectory("tree-convergence");
         builder = new ProgramBuilder("converge", ProgramBuilder._X64, "gcc", this);
         program = builder.getProgram();
@@ -99,13 +108,27 @@ public class TreeConvergenceGhidraTest {
     }
 
     @After
-    public void tearDown() throws IOException {
-        if (builder != null) {
-            builder.dispose();
+    public void tearDown() throws Exception {
+        // A reconcile can queue a real sweep: do not dispose its ProgramDB or delete its files early.
+        try {
+            awaitSweeps();
+        } finally {
+            registry.clearForTests();
+            if (builder != null) {
+                builder.dispose();
+            }
+            if (tmp != null) {
+                try (Stream<Path> walk = Files.walk(tmp)) {
+                    walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+                }
+            }
         }
-        try (Stream<Path> walk = Files.walk(tmp)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
-        }
+    }
+
+    private void awaitSweeps() throws InterruptedException {
+        CountDownLatch drained = new CountDownLatch(1);
+        registry.enqueue(drained::countDown);
+        assertTrue("queued sweeps did not finish", drained.await(30, TimeUnit.SECONDS));
     }
 
     private DecompTree decompTree(String name, TreeConfig config) throws IOException {
@@ -117,7 +140,7 @@ public class TreeConvergenceGhidraTest {
 
     private DecompTree swept(String name, TreeConfig config) throws IOException {
         DecompTree c = decompTree(name, config);
-        new SweepJob(c, program, null).run();
+        new SweepJob(c, program, threading).run();
         return c;
     }
 
@@ -178,7 +201,7 @@ public class TreeConvergenceGhidraTest {
         DecompTree a = swept("a", TreeConfig.defaults());
         Map<String, java.nio.file.attribute.FileTime> before = mtimes(a);
         Thread.sleep(1100);
-        new SweepJob(a, program, null).run();
+        new SweepJob(a, program, threading).run();
         Map<String, java.nio.file.attribute.FileTime> after = mtimes(a);
         before.keySet().removeIf(k -> k.equals(TreeLayout.statusMd()) || k.equals(TreeLayout.treeJson())
                 || k.equals(TreeLayout.manifest()));
@@ -260,10 +283,15 @@ public class TreeConvergenceGhidraTest {
     }
 
     @Test
-    public void aTreeMissingWhatOnlyASweepWritesIsSweptNotPatched() throws IOException {
+    public void aTreeMissingWhatOnlyASweepWritesIsSweptNotPatched() throws Exception {
         DecompTree a = swept("a", TreeConfig.defaults());
-        Files.delete(a.root().path().resolve(TreeLayout.partitionsJson()));
+        Path partitions = a.root().path().resolve(TreeLayout.partitionsJson());
+        Files.delete(partitions);
         assertTrue(TreeReconciler.reconcile(a, program, null).sweepQueued());
+        awaitSweeps();
+        assertEquals(a.progress().lastError(), SweepProgress.Phase.COMPLETE, a.progress().phase());
+        assertTrue("the queued sweep must restore partition metadata", Files.isRegularFile(partitions));
+        assertSameTree("queued replacement sweep", swept("b", TreeConfig.defaults()), a);
     }
 
     @Test

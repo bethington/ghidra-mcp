@@ -8,28 +8,28 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
-### Added — decompiler variable endpoints
+### Added — decompiler symbols, stack locals and equates (#550, #551)
 
-- `list_decompiler_variables` lists a function's decompiler symbols (SSA /
-  register temporaries) with their type and storage, so a DWARF
-  register-resident local can be matched to the temporary that has to be
-  renamed.
-- `apply_local_variable` creates a stack local at an explicit frame offset,
-  or retypes/renames the one already covering that offset. Reaches locals
-  `set_local_variable_type` cannot, because no symbol exists for them.
-
-### Added — equate management endpoints
-
-- `list_equates` lists equate definitions (name/value/reference count) with
-  optional filters, optionally expanded into their (address, operand_index)
-  references.
-- `apply_equate` creates an equate and attaches it to scalar operand(s), so
-  a magic constant can be given a readable name. `dry_run=true` previews the
-  targets without writing.
-- `remove_equate` detaches an equate from operand(s) and optionally deletes
-  the shared definition.
-- `rename_equate` renames an equate definition, preserving every operand
-  reference — the GUI cannot do this once an equate has been applied.
+- `get_functions(fields=decompiler_symbols)` returns SSA/register symbols with
+  their name, type and storage, reusing the call's decompiler. Metadata-only
+  field selections still do not decompile.
+- `set_variables` can create stack locals with a `Stack[offset]` entry and
+  `{name, type, create: true, replace: false}`. Naming/type checks run before
+  replacement; `replace: true` removes overlapping locals, never parameters.
+  Empty parameter slots are also protected, and mixed stack/name failures roll
+  back the whole batch.
+- `list_program_items(kind=equates)` lists definitions and optional references
+  using the existing paginated envelope. `set_equate(action=apply|remove|rename)`
+  is the single writer. All mutations use the shared write lock and transaction;
+  negative scalars match, and applying a new name replaces the operand's old
+  equate for that value. Invalid selections and safety-cap violations make no
+  changes. Definition changes invalidate every interested function in the program.
+- Schema recordings no longer mistake identifier suffixes such as
+  `program_status:` for Windows drive prefixes and corrupt escaped JSON.
+- The six separate tools proposed during 7.1 development are folded into these
+  existing readers/writer surfaces before release; they were not in 7.0.0.
+  Original contributions by @sagasm; consolidation and regression fixes follow
+  the maintainer review. Contributor commits are retained.
 
 ### Fixed — integer and object-array parameters no longer bind lossily
 

@@ -11,26 +11,15 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **225 tools** — 221 served by the GUI plugin, 206 by the headless
-server, 202 by both:
+The catalog stands at **220 tools** — 216 served by the GUI plugin, 201 by the headless
+server, 197 by both:
 
-- **`list_decompiler_variables`** lists a function's decompiler symbols (SSA /
-  register temporaries) with their type and storage, so a DWARF
-  register-resident local can be matched to the temporary that has to be
-  renamed.
-- **`apply_local_variable`** creates a stack local at an explicit frame offset,
-  or retypes/renames the one already covering that offset. Reaches locals
-  `set_local_variable_type` cannot, because no symbol exists for them.
-- **`list_equates`** lists equate definitions (name/value/reference count) with
-  optional filters, optionally expanded into their (address, operand_index)
-  references.
-- **`apply_equate`** creates an equate and attaches it to scalar operand(s), so
-  a magic constant can be given a readable name. `dry_run=true` previews the
-  targets without writing.
-- **`remove_equate`** detaches an equate from operand(s) and optionally deletes
-  the shared definition.
-- **`rename_equate`** renames an equate definition, preserving every operand
-  reference — the GUI cannot do this once an equate has been applied.
+- **Decompiler symbols and stack locals** from @sagasm (#550):
+  `get_functions(fields=decompiler_symbols)` reads SSA/register storage, and
+  `set_variables` creates missing stack locals through the existing naming checks.
+- **Equates** from @sagasm (#551): `list_program_items(kind=equates)` reads them;
+  `set_equate(action=apply|remove|rename)` writes them under the shared lock, with
+  signed-value matching and operand replacement regression coverage.
 - **Function resources.** The bridge serves functions and decompilation trees as MCP
   resources keyed by address, and every write invalidates the resources it changed.
   **`get_change_token`** lets the bridge notice edits no write hook sees.

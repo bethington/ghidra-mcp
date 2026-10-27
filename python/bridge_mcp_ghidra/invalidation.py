@@ -100,12 +100,6 @@ ENDPOINT_TIER: dict[str, InvalidationTier] = {
     "/set_variables": InvalidationTier.LOCAL,
     "/rename_variables": InvalidationTier.LOCAL,
     "/set_variable_type": InvalidationTier.LOCAL,
-    # Equates and stack locals are function-scoped: they change the target
-    # function's decompilation and no caller's, so LOCAL is the tier.
-    "/apply_local_variable": InvalidationTier.LOCAL,
-    "/apply_equate": InvalidationTier.LOCAL,
-    "/remove_equate": InvalidationTier.LOCAL,
-    "/rename_equate": InvalidationTier.LOCAL,
     "/set_variable_storage": InvalidationTier.LOCAL,
     "/add_function_tag": InvalidationTier.LOCAL,
     "/remove_function_tag": InvalidationTier.LOCAL,
@@ -148,6 +142,8 @@ ENDPOINT_TIER: dict[str, InvalidationTier] = {
     "/resolve_duplicate_type": InvalidationTier.TYPE,
     "/apply_data_classification": InvalidationTier.TYPE,
     "/set_global": InvalidationTier.TYPE,
+    # Definition rename/removal can affect operands in multiple functions.
+    "/set_equate": InvalidationTier.UNBOUNDED,
     # --- UNBOUNDED: analysis, scripts, program lifecycle, project ops ---
     # Tree tools that can start a sweep: disassemble_missing (when on) writes the
     # program on the sweep thread, so the change-token poll is what sees it.

@@ -1243,218 +1243,6 @@ Map<String, Object> out = new LinkedHashMap<>();
     }
 
     /**
-     * List the decompiler's symbols (SSA / register temporaries) of a function, with their
-     * type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident
-     * local to the temporary that has to be renamed.
-     */
-    @McpTool(path = "/list_decompiler_variables",
-            description = "List the decompiler's symbols (SSA / register temporaries) of a function with their "
-                    + "type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident "
-                    + "local to the temporary that has to be renamed (rename_variables + "
-                    + "set_decompiler_variable_type).",
-            category = "function", access = ToolAccess.READ_ONLY)
-    public Response listDecompilerVariables(
-            @Param(value = "function_address", paramType = "address", defaultValue = "",
-                   description = "Function entry point address") String functionAddrStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Program name (default: current program)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("`function_address` is required");
-        }
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<List<Map<String, Object>>> result =
-                new AtomicReference<>(new ArrayList<>());
-        final AtomicReference<String> failure = new AtomicReference<>(null);
-        try {
-            threadingStrategy.executeRead(() -> {
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                if (func == null) {
-                    failure.set("No function at " + functionAddrStr);
-                    return null;
-                }
-                DecompileResults results = decompileFunction(func, program);
-                if (results == null || !results.decompileCompleted()) {
-                    failure.set("Decompilation failed for " + func.getName());
-                    return null;
-                }
-                HighFunction highFunction = results.getHighFunction();
-                if (highFunction == null) {
-                    failure.set("No high function for " + func.getName());
-                    return null;
-                }
-                List<Map<String, Object>> entries = new ArrayList<>();
-                Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
-                while (symbols.hasNext()) {
-                    HighSymbol symbol = symbols.next();
-                    String storageText = "";
-                    try {
-                        storageText = symbol.getStorage() == null ? ""
-                                : symbol.getStorage().toString();
-                    } catch (Exception ignored) {
-                        // storage is not always available for a symbol
-                    }
-                    Map<String, Object> entry = new LinkedHashMap<>();
-                    entry.put("name", symbol.getName());
-                    entry.put("type", symbol.getDataType() == null ? ""
-                            : symbol.getDataType().getName());
-                    entry.put("storage", storageText);
-                    entries.add(entry);
-                }
-                result.set(entries);
-                return null;
-            });
-        } catch (Exception e) {
-            Msg.error(this, "list_decompiler_variables failed: " + e.getMessage(), e);
-            return Response.err("list_decompiler_variables failed: " + e);
-        }
-        if (failure.get() != null) return Response.err(failure.get());
-        return Response.ok(JsonHelper.mapOf(
-                "function", functionAddrStr,
-                "count", result.get().size(),
-                "variables", result.get(),
-                "program", program.getName()));
-    }
-
-    /**
-     * Create (or replace) a stack local variable at an explicit frame offset.
-     *
-     * DWARF often knows a local (DW_OP_fbreg offset) that Ghidra never turned into a
-     * variable - large struct/array locals are the common case - and
-     * /set_local_variable_type cannot help there because it needs an existing symbol.
-     * StackFrame.createVariable() can, so this endpoint exposes it.
-     */
-    @McpTool(path = "/apply_local_variable", method = "POST",
-            description = "Create a stack local variable at an explicit frame offset, or retype/rename the one "
-                    + "already covering that offset. Use it when DWARF knows a local (DW_OP_fbreg offset) that "
-                    + "Ghidra never materialised - typically large struct/array locals, which set_local_variable_type "
-                    + "cannot reach because no symbol exists. stack_offset accepts -0x88, -136 or Stack[-0x88]; "
-                    + "replace=true overwrites whatever occupies the slot; remove=true deletes the local with "
-                    + "the given name (the undo path). dry_run=true previews (the framework rolls the transaction "
-                    + "back).",
-            category = "function", access = ToolAccess.WRITE)
-    public Response applyLocalVariable(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Function containing the variable (0x-prefixed, or space:offset)") String functionAddrStr,
-            @Param(value = "name", source = ParamSource.BODY,
-                   description = "Variable name to create/rename to (use the DWARF name)") String variableName,
-            @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
-                   description = "Data type name, e.g. uint32_t or EventParamTask_t (not needed with remove=true)") String newType,
-            @Param(value = "stack_offset", source = ParamSource.BODY, defaultValue = "",
-                   description = "Stack frame offset: -0x88, -136 or Stack[-0x88]") String stackOffsetText,
-            @Param(value = "replace", source = ParamSource.BODY, defaultValue = "false",
-                   description = "Overwrite the variable that already covers this offset") boolean replace,
-            @Param(value = "remove", source = ParamSource.BODY, defaultValue = "false",
-                   description = "Remove the local variable with this `name` instead of creating one "
-                           + "(the undo path for a bad create; type/offset are ignored)") boolean removeFlag,
-            @Param(value = "program", defaultValue = "",
-                   description = "Program name (default: current program)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("`function_address` is required");
-        }
-        if (variableName == null || variableName.isEmpty()) {
-            return Response.err("`name` is required");
-        }
-        final Integer offset = parseStackOffset(stackOffsetText);
-        DataType dataType = null;
-        if (!removeFlag) {
-            if (newType == null || newType.isEmpty()) {
-                return Response.err("`type` is required");
-            }
-            if (offset == null) {
-                return Response.err("`stack_offset` (-0x88, -136 or Stack[-0x88]) is required");
-            }
-            dataType = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
-            if (dataType == null) return Response.err("Could not resolve data type: " + newType);
-        }
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-        final DataType finalType = dataType;
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        try {
-            threadingStrategy.executeWrite(program, "Apply local variable", () -> {
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                if (func == null) {
-                    resultMsg.append("No function at ").append(functionAddrStr);
-                    return null;
-                }
-                Variable created;
-                if (removeFlag) {
-                    Variable target = null;
-                    for (Variable existing : func.getLocalVariables()) {
-                        if (existing.getName().equals(variableName)) {
-                            target = existing;
-                            break;
-                        }
-                    }
-                    if (target == null) {
-                        resultMsg.append("no local variable named '").append(variableName).append("'");
-                        return null;
-                    }
-                    String storageText = target.getVariableStorage() == null ? "?"
-                            : target.getVariableStorage().toString();
-                    func.removeVariable(target);
-                    resultMsg.append("removed ").append(variableName).append(" (").append(storageText)
-                            .append(")");
-                    success.set(true);
-                    return null;
-                }
-                StackFrame frame = func.getStackFrame();
-                if (frame == null) {
-                    resultMsg.append("No stack frame for ").append(func.getName());
-                    return null;
-                }
-                Variable occupant = frame.getVariableContaining(offset);
-                if (occupant != null && !replace) {
-                    resultMsg.append("offset ").append(offset).append(" already holds '")
-                            .append(occupant.getName()).append("' (")
-                            .append(occupant.getDataType().getName())
-                            .append("); pass replace=true to overwrite it");
-                    return null;
-                }
-                if (occupant != null) {
-                    frame.clearVariable(occupant.getStackOffset());
-                }
-                created = frame.createVariable(variableName, offset, finalType,
-                                               SourceType.USER_DEFINED);
-                if (created == null) {
-                    resultMsg.append("could not create ").append(variableName);
-                    return null;
-                }
-                resultMsg.append("OK ").append(created.getName()).append(" : ")
-                        .append(created.getDataType().getName()).append(" at ")
-                        .append(created.getVariableStorage());
-                success.set(true);
-                return null;
-            });
-        } catch (Exception e) {
-            Msg.error(this, "apply_local_variable failed: " + e.getMessage(), e);
-            return Response.err("apply_local_variable failed: " + e);
-        }
-        if (!success.get()) {
-            return Response.err(resultMsg.length() > 0 ? resultMsg.toString() : "nothing was applied");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "applied", true,
-                "function", functionAddrStr,
-                "name", variableName,
-                "type", finalType == null ? "" : finalType.getName(),
-                "stack_offset", offset,
-                "message", resultMsg.toString(),
-                "program", program.getName()));
-    }
-
-    /**
      * Build the decompiler-default-name guidance appended to a "variable not found"
      * error from set_variable_type. Pure function of the requested name and the
      * current high-symbol names, so it is unit-testable without a live decompile.
@@ -3664,17 +3452,95 @@ Map<String, Object> out = new LinkedHashMap<>();
 
 
 
+    private record StackVariablePlan(int offset, String name, DataType type, Variable target,
+            List<Variable> overlaps, boolean create, boolean nameRequested, boolean typeRequested) {}
+
+    private static boolean stackOverlap(Variable variable, int offset, int length) {
+        return variable.isStackVariable() && (long) variable.getStackOffset() < (long) offset + length
+            && (long) offset < (long) variable.getStackOffset() + variable.getLength();
+    }
+
+    /** Validate the entire interval, not just the byte at the requested offset. */
+    private static StackVariablePlan planStackVariable(Program program, Function func, String key,
+            Map<String, String> spec, List<StackVariablePlan> staged, List<String> warnings)
+            throws InvalidInputException {
+        if (!key.matches("Stack\\[[^\\]]+\\](?::[0-9]+)?")) throw new InvalidInputException("Invalid stack storage: " + key);
+        Integer offset = parseStackOffset(key);
+        if (offset == null) throw new InvalidInputException("Invalid stack offset: " + key);
+        if (func.getStackFrame() == null) throw new InvalidInputException("No stack frame for function");
+        boolean create = Boolean.parseBoolean(spec.get("create"));
+        boolean replace = Boolean.parseBoolean(spec.get("replace"));
+        Variable target = null;
+        for (Variable local : func.getLocalVariables()) {
+            if (local.isStackVariable() && local.getStackOffset() == offset) { target = local; break; }
+        }
+        if (!create && target == null) throw new InvalidInputException("Variable not found: " + key + "; use create:true with name and type");
+        if (replace && !create) throw new InvalidInputException("replace:true requires create:true");
+        String name = spec.get("name");
+        String typeName = spec.get("type");
+        if (create && (name == null || typeName == null)) throw new InvalidInputException("Creating a local requires name and type");
+        if (name == null) name = target.getName();
+        ghidra.program.model.symbol.SymbolUtilities.validateName(name);
+        if (typeName != null && (typeName.startsWith("undefined")
+                || NamingConventions.isUndefinedToUndefined("undefined", typeName))) {
+            throw new InvalidInputException("Rejected: new type '" + typeName + "' is still undefined");
+        }
+        DataType type = typeName == null ? target.getDataType()
+            : ServiceUtils.resolveDataType(program.getDataTypeManager(), typeName);
+        if (type == null || type.getLength() <= 0) throw new InvalidInputException("Unknown or unsized type: " + typeName);
+        long endOffset = (long) offset + type.getLength() - 1;
+        if (endOffset > Integer.MAX_VALUE) throw new InvalidInputException("Stack interval exceeds offset range");
+        // An unoccupied parameter slot is still a parameter slot: createVariable
+        // would insert a parameter there and enable custom storage. Check both ends
+        // before removing locals, including intervals that cross the frame boundary.
+        StackFrame frame = func.getStackFrame();
+        if (frame.isParameterOffset(offset) || frame.isParameterOffset((int) endOffset)) {
+            throw new InvalidInputException("Stack interval enters the parameter region: " + key);
+        }
+        String warning = NamingConventions.validateHungarianPrefix(name, type.getName());
+        if (warning != null) warnings.add(warning);
+        for (Parameter parameter : func.getParameters()) {
+            if (stackOverlap(parameter, offset, type.getLength())) throw new InvalidInputException("Stack storage overlaps parameter " + parameter.getName());
+            if (name.equals(parameter.getName())) throw new InvalidInputException("Variable name already exists: " + name);
+        }
+        List<Variable> overlaps = new ArrayList<>();
+        for (Variable local : func.getLocalVariables()) {
+            boolean overlap = stackOverlap(local, offset, type.getLength());
+            if (overlap && (create || local != target)) {
+                if (!replace) throw new InvalidInputException("Stack storage already occupied; pass create:true, replace:true to replace locals");
+                overlaps.add(local);
+            }
+            if (name.equals(local.getName()) && local != target && !overlaps.contains(local)) {
+                throw new InvalidInputException("Variable name already exists: " + name);
+            }
+        }
+        for (StackVariablePlan plan : staged) {
+            if (name.equals(plan.name()) || ((long) offset < (long) plan.offset() + plan.type().getLength()
+                    && (long) plan.offset() < (long) offset + type.getLength())) {
+                throw new InvalidInputException("Conflicting stack variable requests: " + key);
+            }
+        }
+        return new StackVariablePlan(offset, name, type, target, overlaps, create,
+            spec.containsKey("name"), spec.containsKey("type"));
+    }
+
     @McpTool(path = "/set_variables", method = "POST",
-            description = "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. "
-                        + "Hungarian prefix validation is enforced: the new name's prefix must match the type. "
+            description = "Set types and names for multiple variables in a single transaction. Named-variable types are applied before renames. "
+                        + "Stack-local names are validated for naming syntax; Hungarian prefix/type mismatches produce warnings. "
+                        + "Create stack locals using a Stack[-0x8] key and {name,type,create:true,replace:false}. "
+                        + "replace:true replaces overlapping locals after validation. Stack operations are local-only: "
+                        + "intervals entering the parameter region or overlapping parameters are refused, even in empty slots. "
+                        + "Mixed stack/named batches roll back entirely on any named type, rename, or decompilation error. "
                         + "On programs with multiple address spaces, prefix addresses with the space name.",
             category = "function", access = ToolAccess.WRITE)
     public Response setVariables(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Function name or any address within the function (entry point address)") Function func,
-            @Param(value = "variables", source = ParamSource.BODY,
+            @Param(value = "variables", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON object mapping old variable names to {name, type} objects. "
                                + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
+                               + "Stack[offset] keys (signed decimal or hex, optional :size) select storage. "
+                               + "For missing locals require name, type, create:true; replace:true permits overlapping locals. "
                                + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
             @Param(value = "program") Program program) {
 
@@ -3717,6 +3583,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                 if (value instanceof Map<?, ?> mapVal) {
                     if (mapVal.containsKey("name")) spec.put("name", String.valueOf(mapVal.get("name")));
                     if (mapVal.containsKey("type")) spec.put("type", String.valueOf(mapVal.get("type")));
+                    for (String flag : List.of("create", "replace")) {
+                        if (mapVal.containsKey(flag)) {
+                            if (!(mapVal.get(flag) instanceof Boolean)) {
+                                return Response.err("variables['" + entry.getKey() + "']." + flag + " must be boolean");
+                            }
+                            spec.put(flag, String.valueOf(mapVal.get(flag)));
+                        }
+                    }
                 } else if (value instanceof String strVal) {
                     // Shape 2: {"local_8": "dwFlags"} — rename-only shorthand.
                     if (!strVal.isEmpty()) spec.put("name", strVal);
@@ -3754,7 +3628,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                 "message", "No variables to set (empty payload)"));
         }
 
-        record SetVariablesOutcome(int typesSet, int namesSet, int failed, List<String> warnings, List<String> errors) {}
+        record SetVariablesOutcome(int typesSet, int namesSet, int failed, List<String> warnings, List<String> errors) {
+            SetVariablesOutcome requireSuccess(boolean atomic) throws InvalidInputException {
+                if (atomic && (failed > 0 || !errors.isEmpty())) {
+                    throw new InvalidInputException("Mixed variable batch rolled back: " + String.join("; ", errors));
+                }
+                return this;
+            }
+        }
         SetVariablesOutcome outcome;
         try {
             outcome = threadingStrategy.executeWrite(program, "Set Variables", () -> {
@@ -3765,8 +3646,41 @@ Map<String, Object> out = new LinkedHashMap<>();
                 List<String> errorsLocal = new ArrayList<>();
 
 
-                    // Phase 1: Set types
+                // Stage every storage change before removing anything. Exceptions during
+                // application escape executeWrite so the transaction rolls back in full.
+                List<StackVariablePlan> stackPlans = new ArrayList<>();
+                try {
                     for (Map.Entry<String, Map<String, String>> entry : variables.entrySet()) {
+                        if (entry.getKey().startsWith("Stack[")) {
+                            stackPlans.add(planStackVariable(program, func, entry.getKey(), entry.getValue(), stackPlans, warningsLocal));
+                        } else if (entry.getValue().containsKey("create") || entry.getValue().containsKey("replace")) {
+                            throw new InvalidInputException("create/replace require a Stack[offset] storage key");
+                        }
+                    }
+                } catch (InvalidInputException e) {
+                    return new SetVariablesOutcome(0, 0, 1, warningsLocal, List.of(e.getMessage()));
+                }
+                for (StackVariablePlan plan : stackPlans) {
+                    for (Variable overlap : plan.overlaps()) func.removeVariable(overlap);
+                    if (plan.create()) {
+                        Variable created = func.getStackFrame().createVariable(plan.name(), plan.offset(), plan.type(), SourceType.USER_DEFINED);
+                        if (created == null) throw new InvalidInputException("Could not create local " + plan.name());
+                    } else {
+                        if (plan.typeRequested()) plan.target().setDataType(plan.type(), SourceType.USER_DEFINED);
+                        if (plan.nameRequested()) plan.target().setName(plan.name(), SourceType.USER_DEFINED);
+                    }
+                    if (plan.typeRequested()) typesSetLocal++;
+                    if (plan.nameRequested()) namesSetLocal++;
+                }
+                // Storage operations have already been applied, never reprocess them as SSA names.
+                Map<String, Map<String, String>> namedVariables = new LinkedHashMap<>(variables);
+                namedVariables.keySet().removeIf(key -> key.startsWith("Stack["));
+                if (namedVariables.isEmpty()) {
+                    return new SetVariablesOutcome(typesSetLocal, namesSetLocal, 0, warningsLocal, errorsLocal);
+                }
+
+                    // Phase 1: Set types
+                    for (Map.Entry<String, Map<String, String>> entry : namedVariables.entrySet()) {
                         String oldName = entry.getKey();
                         String newType = entry.getValue().get("type");
                         if (newType == null) continue;
@@ -3810,6 +3724,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
 
+                    if (namedVariables.values().stream().noneMatch(spec -> spec.containsKey("name"))) {
+                        return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
+                                .requireSuccess(!stackPlans.isEmpty());
+                    }
                     // Phase 2: Decompile to get fresh SSA variables for renaming
                     DecompInterface decomp = null;
                     try {
@@ -3817,12 +3735,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                         DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                         if (decompResult == null || !decompResult.decompileCompleted()) {
                             errorsLocal.add("Decompilation failed after type changes; renames skipped");
-                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
+                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
+                                .requireSuccess(!stackPlans.isEmpty());
                         }
                         HighFunction highFunction = decompResult.getHighFunction();
                         if (highFunction == null) {
                             errorsLocal.add("No HighFunction after decompile; renames skipped");
-                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
+                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
+                                .requireSuccess(!stackPlans.isEmpty());
                         }
 
                         // Commit params if needed
@@ -3844,7 +3764,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         while (symbols.hasNext()) {
                             HighSymbol symbol = symbols.next();
                             String currentName = symbol.getName();
-                            Map<String, String> spec = variables.get(currentName);
+                            Map<String, String> spec = namedVariables.get(currentName);
                             if (spec == null || !spec.containsKey("name")) continue;
 
                             String newName = spec.get("name");
@@ -3878,7 +3798,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                             for (Variable lowVar : func.getAllVariables()) {
                                 String oldName = lowVar.getName();
                                 if (renamedHere.contains(oldName)) continue;
-                                Map<String, String> spec = variables.get(oldName);
+                                Map<String, String> spec = namedVariables.get(oldName);
                                 if (spec == null || !spec.containsKey("name")) continue;
                                 String newName = spec.get("name");
                                 if (newName == null || newName.isEmpty() || newName.equals(oldName)) continue;
@@ -3892,13 +3812,15 @@ Map<String, Object> out = new LinkedHashMap<>();
                                 }
                             }
                         } catch (Exception e) {
+                            errorsLocal.add("Storage-rename fallback failed: " + e.getMessage());
+                            failedLocal++;
                             Msg.warn(this, "set_variables storage-rename fallback encountered error: " + e.getMessage());
                         }
 
                         // Phase 3c: Caller-visibility — surface any rename specs
                         // that matched neither path so workers can tell at a
                         // glance that part of their request didn't apply.
-                        for (Map.Entry<String, Map<String, String>> e : variables.entrySet()) {
+                        for (Map.Entry<String, Map<String, String>> e : namedVariables.entrySet()) {
                             String oldName = e.getKey();
                             Map<String, String> spec = e.getValue();
                             if (!spec.containsKey("name")) continue;
@@ -3915,7 +3837,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                             try { decomp.dispose(); } catch (Exception ignored) {}
                         }
                     }
-                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
+                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
+                                .requireSuccess(!stackPlans.isEmpty());
             });
         } catch (Exception e) {
             return ServiceUtils.fail(e);

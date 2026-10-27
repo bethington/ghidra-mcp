@@ -75,7 +75,7 @@ public final class FunctionFacts {
             "body_start", "body_end", "decompiled_code",
             "plate_comment", "comments", "labels", "tags", "parameters", "locals",
             "callers", "call_context", "callees", "xrefs", "disassembly",
-            "jump_targets", "refs");
+            "jump_targets", "refs", "decompiler_symbols");
 
     /**
      * The bundle's own decompiler settings: show EOL comments, in {@code //} style.
@@ -167,7 +167,7 @@ public final class FunctionFacts {
         boolean wantsAll = fields == null;
         // refs takes the addresses the decompiled code loads and stores, so it decompiles too.
         boolean needsTargetDecompile = wantsAll || wantsField(fields, "decompiled_code")
-            || wantsField(fields, "refs");
+            || wantsField(fields, "refs") || wantsField(fields, "decompiler_symbols");
         boolean needsCallContext = wantsField(fields, "call_context")
             && includeCallContext && callContextLimit > 0;
 
@@ -231,6 +231,34 @@ public final class FunctionFacts {
                     out.put("decompile_failed", true);
                     out.put("decompile_error", decompileError(decomp));
                 }
+            }
+        }
+
+        if (wantsField(fields, "decompiler_symbols")) {
+            HighFunction high = decomp != null && decomp.decompileCompleted()
+                ? decomp.getHighFunction() : null;
+            if (high == null || high.getLocalSymbolMap() == null) {
+                out.put("decompiler_symbols", null);
+                out.put("decompile_failed", true);
+                out.put("decompile_error", high == null ? decompileError(decomp) : "No local symbol map");
+            } else {
+                List<Map<String, Object>> symbols = new ArrayList<>();
+                Iterator<HighSymbol> iterator = high.getLocalSymbolMap().getSymbols();
+                while (iterator.hasNext()) {
+                    HighSymbol symbol = iterator.next();
+                    String storage = "";
+                    try {
+                        if (symbol.getStorage() != null) storage = symbol.getStorage().toString();
+                    } catch (Exception ignored) {
+                        // Some SSA temporaries have no persisted storage.
+                    }
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("name", symbol.getName());
+                    item.put("type", symbol.getDataType() == null ? "" : symbol.getDataType().getName());
+                    item.put("storage", storage);
+                    symbols.add(item);
+                }
+                out.put("decompiler_symbols", symbols);
             }
         }
 
@@ -636,7 +664,8 @@ public final class FunctionFacts {
 
     /** Whether a {@code fields=} subset pays for target decompilation. */
     public static boolean requiresTargetDecompile(Set<String> fields) {
-        return fields == null || fields.contains("decompiled_code");
+        return fields == null || fields.contains("decompiled_code")
+            || fields.contains("refs") || fields.contains("decompiler_symbols");
     }
 
     /** Why a decompile produced no code, in the decompiler's own words when it gave any. */

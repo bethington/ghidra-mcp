@@ -1,5 +1,5 @@
 {
-  "count": 220,
+  "count": 215,
   "tools": [
     {
       "category": "function",
@@ -415,7 +415,7 @@
     {
       "category": "analysis",
       "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
-      "description": "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
+      "description": "Comprehensive single-call function analysis. Accepts function name or address. For a cacheable read of decompile+callers+comments+xrefs prefer ghidra://function/{program}/{address} (or /get_functions). decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -877,7 +877,7 @@
         },
         {
           "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "description": "Program every documentation step runs against (single or batch). Omit for the active program; always specify on a headless server or when several programs are open.",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1085,7 +1085,7 @@
             "address",
             "function_address"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "address",
           "required": true,
@@ -1694,7 +1694,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping member name to integer value, e.g. {\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal strings, or 0x-prefixed hex strings; floats and non-numeric strings are rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any complaint comes back as a warning, not a failure.",
+          "description": "JSON object mapping member name to integer value, e.g. { \"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal strings, or 0x-prefixed hex strings; floats and non-numeric strings are rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any complaint comes back as a warning, not a failure.",
           "name": "values",
           "required": true,
           "source": "body",
@@ -1803,7 +1803,7 @@
           "type": "string"
         },
         {
-          "description": "JSON array of parameter objects, e.g. [{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. Only the TYPES are used: parameter names are discarded and the created signature has unnamed arguments. Parsing is a plain comma/colon split, so a type containing a comma or a colon does not survive it, and a parameter whose type cannot be resolved is dropped silently.",
+          "description": "JSON array of parameter objects, e.g. [{ \"name\":\"dwId\", \"type\":\"uint\"},{ \"name\":\"pUnit\", \"type\":\"void *\"}]. Only the TYPES are used: parameter names are discarded and the created signature has unnamed arguments. Parsing is a plain comma/colon split, so a type containing a comma or a colon does not survive it, and a parameter whose type cannot be resolved is dropped silently.",
           "name": "parameters",
           "required": true,
           "source": "body",
@@ -2024,7 +2024,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).",
+      "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -2036,7 +2036,7 @@
           "type": "string"
         },
         {
-          "description": "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]",
+          "description": "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]",
           "name": "fields",
           "required": true,
           "source": "body",
@@ -2408,6 +2408,276 @@
       "read_only": true
     },
     {
+      "category": "decompile-tree",
+      "description": "Change a tree's configuration: exclusions (tag: / partition: / range:), enabled strategies, band size, max file bytes, throttle. Exclusions are how you keep library code out of the tree — on a driver DLL, excluding two CRT compartments took it from 3,230 functions to 2,036. Classifies the change and acts on it: narrowing deletes now-out-of-scope bodies immediately (leaving them would be a lie a Grep would still hit); widening marks STALE with pending_functions; repartitioning sets requires_full_resweep. Never starts a sweep.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "DecompTree id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Ignored for now — root is identity; changing it needs a new tree.",
+          "name": "root",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated partition strategies. Omit to leave unchanged.",
+          "name": "strategies",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Address-band width. Omit to leave unchanged.",
+          "name": "band_size",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Read-budget bytes per .c file. Omit to leave unchanged. Changing this repartitions file paths.",
+          "name": "max_file_bytes",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "CSV of exclusion specs. Omit to leave unchanged.",
+          "name": "exclusions",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "CSV of include-only specs. Omit to leave unchanged.",
+          "name": "include_only",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Interactive yield 0..90. Omit to leave unchanged.",
+          "name": "throttle_percent",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "When true, the next sweep disassembles missing entries (program write). Off by default. Omit to leave unchanged.",
+          "name": "disassemble_missing",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_configure",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the root and reconciles it against the live program; trees this server created are also adopted automatically when their program opens. The root must be empty, absent, or an existing tree (it holds tree.json). Unrelated to Ghidra version-control checkouts (/server/version_control/*).",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Absolute tree root. Omit for the default under java.io.tmpdir/ghidra-mcp-tree/.",
+          "name": "root",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated partition strategies. Empty = full cascade.",
+          "name": "strategies",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "20",
+          "description": "Address-band width when bands apply.",
+          "name": "band_size",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "32768",
+          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths.",
+          "name": "max_file_bytes",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "CSV of tag:/partition:/range: exclusion specs.",
+          "name": "exclusions",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "CSV of tag:/partition:/range: include-only specs.",
+          "name": "include_only",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "10",
+          "description": "Interactive yield 0..90 after each decompiled function.",
+          "name": "throttle_percent",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "false",
+          "description": "Off by default. When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies — a program write, not filesystem-only.",
+          "name": "disassemble_missing",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_create",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Deregister a tree; with delete_files=true also remove the files it recorded writing, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched.",
+      "destructive": true,
+      "method": "POST",
+      "params": [
+        {
+          "description": "DecompTree id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "When true, delete the files the tree recorded writing.",
+          "name": "delete_files",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        }
+      ],
+      "path": "/decompile_tree_delete",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Pin a function to a tree compartment forever. Use this when you have learned the real module boundary — e.g. after reading evidence that a function belongs with driver code despite the cascade placing it in an address band — and you want that placement to stick across resweeps, tree delete/recreate, and every other tool. Stored as a program property map (TreeModule) at the function entry, not in tree config. Empty module string unpins. Does not rewrite the tree by itself — the next sweep (or reconcile) honours the pin ahead of the whole partitioner cascade.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "aliases": [
+            "address",
+            "name",
+            "function_address",
+            "function_name"
+          ],
+          "description": "Function name or entry address to pin.",
+          "name": "function",
+          "param_type": "function_ref",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Compartment slug to pin to. Empty string removes the pin.",
+          "name": "module",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_pin_module",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Start or stop the sweep that fills a tree. action=start enqueues it (then poll decompile_tree_status): returns in milliseconds with phase queued and the resource URI. Sweeps run one at a time JVM-wide and yield to auto-analysis and to interactive requests. Measured: ~4 s for a 700-function firmware, ~28 s for a 3,200-function driver DLL, ~11 min for a 25,000-function static binary. action=stop cancels a queued or running sweep and is idempotent: stopping an idle or complete tree is success, not an error. The partial tree is left in place and STATUS.md records state: cancelled, so whatever was already written stays safe to Grep.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "DecompTree id, program name, or domain path.",
+          "name": "tree",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "description": "start (enqueue the sweep) or stop (cancel it).",
+          "name": "action",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_run",
+      "read_only": false
+    },
+    {
+      "category": "decompile-tree",
+      "description": "Status, config and root path of a decompilation tree — poll this after decompile_tree_run(action=start), then Grep the reported root. READ_ONLY, so it is safe to call while planning. Reports phase, progress, and freshness against the live program. Never errors when the program is closed or the root is missing — reports program:\"closed\" / root_present:false instead, because that is exactly when you are asking. With no selector, lists every tree plus adoptable trees found on disk.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "DecompTree id, program name, or domain path. Omit to list all + scan for adoptable on-disk trees.",
+          "name": "tree",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/decompile_tree_status",
+      "read_only": true
+    },
+    {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
       "description": "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -2720,16 +2990,18 @@
           "type": "string"
         },
         {
+          "default": "",
           "description": "First program name",
           "name": "program_a",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },
         {
+          "default": "",
           "description": "Second program name",
           "name": "program_b",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         }
@@ -2852,7 +3124,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function to emulate (entry point address)",
+          "description": "Function name or any address within the function to emulate",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3422,9 +3694,10 @@
           "type": "string"
         },
         {
+          "default": "",
           "description": "Source program name",
           "name": "source_program",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },
@@ -3453,6 +3726,55 @@
         }
       ],
       "path": "/find_similar_functions_fuzzy",
+      "read_only": true
+    },
+    {
+      "category": "datatype",
+      "description": "Functions whose decompilation references a data type (or one of its fields). Runs without the server lock, with a hard timeout; a timeout returns the partial set with timed_out=true rather than failing.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "aliases": [
+            "name",
+            "data_type",
+            "datatype"
+          ],
+          "description": "Data type name (resolved across all categories).",
+          "name": "type_name",
+          "required": true,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "aliases": [
+            "field_name"
+          ],
+          "default": "",
+          "description": "Optional field name. When set, only references to that field are returned (FieldMatcher).",
+          "name": "field",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "10",
+          "description": "Hard timeout for the finder (1–60). Default 10.",
+          "name": "timeout_seconds",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/find_type_users",
       "read_only": true
     },
     {
@@ -3574,6 +3896,24 @@
         }
       ],
       "path": "/get_assembly_context",
+      "read_only": true
+    },
+    {
+      "category": "program",
+      "description": "Return the program's change token: '<saved time>:<open epoch>:<modification number>'. It moves on every DB change (rename, comment, struct edit, undo/redo, GUI writes, scripts), on a save, and on a reopen or server restart, and never on a read. Compare the whole token; the modification number alone starts over on every open. Used by the bridge to invalidate cached function resources after out-of-band edits.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/get_change_token",
       "read_only": true
     },
     {
@@ -3980,7 +4320,7 @@
     },
     {
       "category": "function",
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused.",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); decompiled_code, refs, and decompiler_symbols (and call_context when enabled) pay that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -4009,7 +4349,7 @@
         },
         {
           "default": "",
-          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
+          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, decompiler_symbols, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
           "name": "fields",
           "required": false,
           "source": "query",
@@ -4870,12 +5210,12 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values.",
+      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items, list_external_locations and list_equates — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}; equates -> {name, value, display_value, reference_count, enum_based, references?}, where references are {address, operand_index}. Equate filters: value, name_contains, address, include_references. Unknown kind is an error listing the valid values.",
       "destructive": false,
       "method": "GET",
       "params": [
         {
-          "description": "classes | methods | namespaces | imports | exports | segments | data_items | external_locations",
+          "description": "classes | methods | namespaces | imports | exports | segments | data_items | external_locations | equates",
           "name": "kind",
           "required": true,
           "source": "query",
@@ -4896,6 +5236,39 @@
           "required": false,
           "source": "query",
           "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Equates only: decimal, 0x hex, or single character literal",
+          "name": "value",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Equates only: case-insensitive name substring",
+          "name": "name_contains",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Equates only: include definitions referenced at this address",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Equates only: include address/operand_index references",
+          "name": "include_references",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
         },
         {
           "default": "",
@@ -5304,7 +5677,7 @@
     },
     {
       "category": "headless",
-      "description": "Open a Ghidra project: local .gpr/directory, or ghidr<PATH>//host[:port]/repo (persistent shared project; does not auto-open repo files — max ~5 shared programs). GUI mode adds optional `headless` (default true) and `program`; the headless server ignores those. Local tree mirrors YOUR working copy.",
+      "description": "Open a Ghidra project: local .gpr/directory, or ghidra://host[:port]/repo (persistent shared project; does not auto-open repo files — max ~5 shared programs). GUI mode adds optional `headless` (default true) and `program`; the headless server ignores those. Local tree mirrors YOUR working copy.",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -5332,6 +5705,48 @@
       ],
       "path": "/open_project",
       "read_only": false
+    },
+    {
+      "category": "analysis",
+      "description": "Group a program's functions into compartments so you can decide which regions to ignore before reading any of them — on a driver DLL the two library compartments were 42% of the binary and identifiable from their referenced strings alone. Uses a cascade of structural strategies (class names in log strings, peripheral register pages, linker literal locality, address banding); each reports whether it applied and why, and every partition carries the evidence that formed it. Slugs are machine-generated and assert nothing about content. Read-only: reports the partitioning, does not write the Program Tree. Runs without the server lock; costs one pass over every instruction.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "20",
+          "description": "Functions per file for the address-band fallback.",
+          "name": "band_size",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "1",
+          "description": "Omit partitions smaller than this from the response.",
+          "name": "min_size",
+          "required": false,
+          "source": "query",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Comma-separated subset of strategy names to run (qualified-name, mmio-page, literal-locality, address-band). Omit to run the full cascade.",
+          "name": "strategies",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/partition_program",
+      "read_only": true
     },
     {
       "category": "system",
@@ -5826,7 +6241,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -6666,6 +7081,104 @@
       "read_only": false
     },
     {
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "description": "Apply, remove or rename equates. Apply replaces other equate names for the same scalar at each selected operand, preserving different scalar values. Select one instruction with address or a function with function_address (name or containing address), never both. Remove with no scope selects references by name and/or value across the program. delete_definition requires name, refuses enum-owned definitions and refuses references outside the selection. Rename requires name and new_name, refuses duplicate names, and preserves every reference. max_hits caps all affected references before any mutation. dry_run previews via rollback.",
+      "destructive": true,
+      "method": "POST",
+      "params": [
+        {
+          "description": "apply | remove | rename",
+          "name": "action",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "aliases": [
+            "old_name"
+          ],
+          "default": "",
+          "description": "Equate name; required for apply and rename; exact filter for remove",
+          "name": "name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Scalar value: signed decimal, 0x hex, or single character literal",
+          "name": "value",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Instruction address, mutually exclusive with function_address",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "-1",
+          "description": "Operand index, or -1 for all operands in the selected scope",
+          "name": "operand_index",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "aliases": [
+            "function",
+            "function_name"
+          ],
+          "default": "",
+          "description": "Function name or containing address; mutually exclusive with address",
+          "name": "function_address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Rename destination; an existing different definition is always refused",
+          "name": "new_name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Remove only: delete a non-enum named definition if no unselected references remain",
+          "name": "delete_definition",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "1000",
+          "description": "Positive maximum affected scalar operands/references, checked before mutation",
+          "name": "max_hits",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/set_equate",
+      "read_only": false
+    },
+    {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -6933,7 +7446,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels.",
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels. Every function may decompile differently afterwards, so decompilation trees are marked stale (resweep).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -7102,7 +7615,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -7188,7 +7701,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name.",
+      "description": "Set types and names for multiple variables in a single transaction. Named-variable types are applied before renames. Stack-local names are validated for naming syntax; Hungarian prefix/type mismatches produce warnings. Create stack locals using a Stack[-0x8] key and {name,type,create:true,replace:false}. replace:true replaces overlapping locals after validation. Stack operations are local-only: intervals entering the parameter region or overlapping parameters are refused, even in empty slots. Mixed stack/named batches roll back entirely on any named type, rename, or decompilation error. On programs with multiple address spaces, prefix addresses with the space name.",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -7207,11 +7720,11 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping old variable names to {name, type} objects. Both fields optional: omit 'type' to rename only, omit 'name' to retype only. Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}",
+          "description": "JSON object mapping old variable names to {name, type} objects. Both fields optional: omit 'type' to rename only, omit 'name' to retype only. Stack[offset] keys (signed decimal or hex, optional :size) select storage. For missing locals require name, type, create:true; replace:true permits overlapping locals. Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}",
           "name": "variables",
           "required": true,
           "source": "body",
-          "type": "string"
+          "type": "json"
         },
         {
           "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
@@ -7352,7 +7865,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -7383,718 +7896,6 @@
         }
       ],
       "path": "/validate_function_prototype",
-      "read_only": true
-    },
-    {
-      "path": "/list_decompiler_variables",
-      "method": "GET",
-      "description": "List the decompiler's symbols (SSA / register temporaries) of a function with their type and storage (e.g. r6:4, Stack[-0x8c]:4). Use it to match a DWARF register-resident local to the temporary that has to be renamed (rename_variables + set_decompiler_variable_type).",
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "read_only": true,
-      "destructive": false,
-      "params": [
-        {
-          "name": "function_address",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Function entry point address",
-          "param_type": "address"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Program name (default: current program)"
-        }
-      ]
-    },
-    {
-      "path": "/apply_local_variable",
-      "method": "POST",
-      "description": "Create a stack local variable at an explicit frame offset, or retype/rename the one already covering that offset. Use it when DWARF knows a local (DW_OP_fbreg offset) that Ghidra never materialised - typically large struct/array locals, which set_local_variable_type cannot reach because no symbol exists. stack_offset accepts -0x88, -136 or Stack[-0x88]; replace=true overwrites whatever occupies the slot; remove=true deletes the local with the given name (the undo path). dry_run=true previews (the framework rolls the transaction back).",
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "read_only": false,
-      "destructive": false,
-      "params": [
-        {
-          "name": "function_address",
-          "type": "string",
-          "source": "body",
-          "required": true,
-          "description": "Function containing the variable (0x-prefixed, or space:offset)",
-          "param_type": "address"
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "source": "body",
-          "required": true,
-          "description": "Variable name to create/rename to (use the DWARF name)"
-        },
-        {
-          "name": "type",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Data type name, e.g. uint32_t or EventParamTask_t (not needed with remove=true)"
-        },
-        {
-          "name": "stack_offset",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Stack frame offset: -0x88, -136 or Stack[-0x88]"
-        },
-        {
-          "name": "replace",
-          "type": "boolean",
-          "source": "body",
-          "required": false,
-          "default": "false",
-          "description": "Overwrite the variable that already covers this offset"
-        },
-        {
-          "name": "remove",
-          "type": "boolean",
-          "source": "body",
-          "required": false,
-          "default": "false",
-          "description": "Remove the local variable with this `name` instead of creating one (the undo path for a bad create; type/offset are ignored)"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Program name (default: current program)"
-        }
-      ]
-    },
-    {
-      "path": "/list_equates",
-      "method": "GET",
-      "description": "List equate definitions (name/value/reference count) with optional filters, optionally expanded into their (address, operand_index) references. Equate names are printed verbatim by the decompiler.",
-      "category": "listing",
-      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "read_only": true,
-      "destructive": false,
-      "params": [
-        {
-          "name": "value",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Only equates with this value: decimal, 0x-hex, or a character literal like '\\x03'"
-        },
-        {
-          "name": "name_contains",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Only equates whose name contains this substring (case-insensitive)"
-        },
-        {
-          "name": "address",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Only equates referenced at this address",
-          "param_type": "address"
-        },
-        {
-          "name": "include_references",
-          "type": "boolean",
-          "source": "query",
-          "required": false,
-          "default": "false",
-          "description": "Expand each equate into its (address, operand_index) references"
-        },
-        {
-          "name": "offset",
-          "type": "integer",
-          "source": "query",
-          "required": false,
-          "default": "0",
-          "description": "Number of equates to skip before this page starts; 0 begins at the first match"
-        },
-        {
-          "name": "limit",
-          "type": "integer",
-          "source": "query",
-          "required": false,
-          "default": "200",
-          "description": "Maximum number of equates to return in this page"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
-        }
-      ]
-    },
-    {
-      "path": "/apply_equate",
-      "method": "POST",
-      "description": "Create an equate (if it does not exist yet) and attach it to scalar operand(s). Use it to give magic constants a readable name: value 404 -> \"sizeof(tagIecTaskNode)\", value 3 -> \"TASKSTAT_SUSPEND\". Select one instruction with `address` (plus `operand_index`; -1 = every operand of that instruction) or a whole function with `function_address`; `value` filters which scalars match, and may be omitted when a single operand is selected. Pass dry_run=true to see the targets without writing (the framework rolls the transaction back).",
-      "category": "listing",
-      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "read_only": false,
-      "destructive": false,
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "source": "body",
-          "required": true,
-          "description": "Equate name — arbitrary text, printed verbatim by the decompiler"
-        },
-        {
-          "name": "value",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Scalar value to match: decimal, 0x-hex, or a character literal like '\\x03'"
-        },
-        {
-          "name": "address",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Instruction address (single-operand mode)",
-          "param_type": "address"
-        },
-        {
-          "name": "operand_index",
-          "type": "integer",
-          "source": "body",
-          "required": false,
-          "default": "-1",
-          "description": "Operand index at `address`; -1 = every operand carrying a matching scalar"
-        },
-        {
-          "name": "function_address",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Scan every instruction of the function containing this address",
-          "param_type": "address"
-        },
-        {
-          "name": "max_hits",
-          "type": "integer",
-          "source": "body",
-          "required": false,
-          "default": "1000",
-          "description": "Safety cap on how many operands may be modified by one call"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
-        }
-      ]
-    },
-    {
-      "path": "/remove_equate",
-      "method": "POST",
-      "description": "Detach an equate from operand(s) and optionally delete the definition itself. Operand selection is the same as /apply_equate (`address` or `function_address`, plus optional `name` and `value` filters); with neither selector every reference of `name` is removed. Pass dry_run=true to preview (the framework rolls the transaction back).",
-      "category": "listing",
-      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "read_only": false,
-      "destructive": true,
-      "params": [
-        {
-          "name": "name",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Only touch equates with exactly this name"
-        },
-        {
-          "name": "value",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Only touch equates with this value (decimal, 0x-hex, or a character literal)"
-        },
-        {
-          "name": "address",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Instruction address; omit together with function_address to clear all references of `name`",
-          "param_type": "address"
-        },
-        {
-          "name": "operand_index",
-          "type": "integer",
-          "source": "body",
-          "required": false,
-          "default": "-1",
-          "description": "Operand index at `address`; -1 = every operand"
-        },
-        {
-          "name": "function_address",
-          "type": "string",
-          "source": "body",
-          "required": false,
-          "default": "",
-          "description": "Scan every instruction of the function containing this address",
-          "param_type": "address"
-        },
-        {
-          "name": "delete_definition",
-          "type": "boolean",
-          "source": "body",
-          "required": false,
-          "default": "false",
-          "description": "After detaching, also delete the equate definition (it is shared by every reference)"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
-        }
-      ]
-    },
-    {
-      "path": "/rename_equate",
-      "method": "POST",
-      "description": "Rename an equate definition; every operand reference is preserved (the GUI cannot do this once an equate has been applied). Pass dry_run=true to preview (the framework rolls the transaction back).",
-      "category": "listing",
-      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "read_only": false,
-      "destructive": false,
-      "params": [
-        {
-          "name": "old_name",
-          "type": "string",
-          "source": "body",
-          "required": true,
-          "description": "Existing equate name"
-        },
-        {
-          "name": "new_name",
-          "type": "string",
-          "source": "body",
-          "required": true,
-          "description": "New name (arbitrary text, printed verbatim by the decompiler)"
-        },
-        {
-          "name": "program",
-          "type": "string",
-          "source": "query",
-          "required": false,
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open."
-        }
-      ]
-    }
-,
-    {
-      "category": "decompile-tree",
-      "description": "Change a tree's configuration: exclusions (tag: / partition: / range:), enabled strategies, band size, max file bytes, throttle. Exclusions are how you keep library code out of the tree — on a driver DLL, excluding two CRT compartments took it from 3,230 functions to 2,036. Classifies the change and acts on it: narrowing deletes now-out-of-scope bodies immediately (leaving them would be a lie a Grep would still hit); widening marks STALE with pending_functions; repartitioning sets requires_full_resweep. Never starts a sweep.",
-      "destructive": false,
-      "method": "POST",
-      "params": [
-        {
-          "description": "Checkout id, program name, or domain path.",
-          "name": "tree",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Ignored for now — root is identity; changing it needs a new checkout.",
-          "name": "root",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Comma-separated partition strategies. Omit to leave unchanged.",
-          "name": "strategies",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Address-band width. Omit to leave unchanged.",
-          "name": "band_size",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Read-budget bytes per .c file. Omit to leave unchanged. Changing this repartitions file paths.",
-          "name": "max_file_bytes",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "CSV of exclusion specs. Omit to leave unchanged.",
-          "name": "exclusions",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "CSV of include-only specs. Omit to leave unchanged.",
-          "name": "include_only",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Interactive yield 0..90. Omit to leave unchanged.",
-          "name": "throttle_percent",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "When true, the next sweep disassembles missing entries (program write). Off by default. Omit to leave unchanged.",
-          "name": "disassemble_missing",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        }
-      ],
-      "path": "/decompile_tree_configure",
-      "read_only": false
-    },
-    {
-      "category": "decompile-tree",
-      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the derived root, reconciling swept_at_modification_number against the live program. Unrelated to Ghidra version-control checkouts (/server/version_control/*).",
-      "destructive": false,
-      "method": "POST",
-      "params": [
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Absolute checkout root. Omit for the default under java.io.tmpdir/ghidra-mcp-tree/.",
-          "name": "root",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Comma-separated partition strategies. Empty = full cascade.",
-          "name": "strategies",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "20",
-          "description": "Address-band width when bands apply.",
-          "name": "band_size",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "32768",
-          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths.",
-          "name": "max_file_bytes",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "CSV of tag:/partition:/range: exclusion specs.",
-          "name": "exclusions",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "CSV of tag:/partition:/range: include-only specs.",
-          "name": "include_only",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "10",
-          "description": "Interactive yield 0..90 after each decompiled function.",
-          "name": "throttle_percent",
-          "required": false,
-          "source": "body",
-          "type": "integer"
-        },
-        {
-          "default": "false",
-          "description": "Off by default. When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies — a program write, not filesystem-only.",
-          "name": "disassemble_missing",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        }
-      ],
-      "path": "/decompile_tree_create",
-      "read_only": false
-    },
-    {
-      "category": "decompile-tree",
-      "description": "Deregister a tree; with delete_files=true also remove the files it recorded writing, then the directories that leaves empty. Anything else under the root stays and is listed under kept. The program itself is untouched.",
-      "destructive": true,
-      "method": "POST",
-      "params": [
-        {
-          "description": "Checkout id, program name, or domain path.",
-          "name": "tree",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "false",
-          "description": "When true, delete the files the tree recorded writing.",
-          "name": "delete_files",
-          "required": false,
-          "source": "body",
-          "type": "boolean"
-        }
-      ],
-      "path": "/decompile_tree_delete",
-      "read_only": false
-    },
-    {
-      "category": "decompile-tree",
-      "description": "Pin a function to a tree compartment forever. Use this when you have learned the real module boundary — e.g. after reading evidence that a function belongs with driver code despite the cascade placing it in an address band — and you want that placement to stick across resweeps, tree delete/recreate, and every other tool. Stored as a program property map (TreeModule) at the function entry, not in tree config. Empty module string unpins. Does not rewrite the tree by itself — the next sweep (or reconcile) honours the pin ahead of the whole partitioner cascade.",
-      "destructive": false,
-      "method": "POST",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Function name or entry address to pin.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Compartment slug to pin to. Empty string removes the pin.",
-          "name": "module",
-          "required": false,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/decompile_tree_pin_module",
-      "read_only": false
-    },
-    {
-      "category": "decompile-tree",
-      "description": "Start or stop the sweep that fills a tree. action=start enqueues it (then poll decompile_tree_status): returns in milliseconds with phase queued and the resource URI. Sweeps run one at a time JVM-wide and yield to auto-analysis and to interactive requests. Measured: ~4 s for a 700-function firmware, ~28 s for a 3,200-function driver DLL, ~11 min for a 25,000-function static binary. action=stop cancels a queued or running sweep and is idempotent: stopping an idle or complete tree is success, not an error. The partial tree is left in place and STATUS.md records state: cancelled, so whatever was already written stays safe to Grep.",
-      "destructive": false,
-      "method": "POST",
-      "params": [
-        {
-          "description": "Checkout id, program name, or domain path.",
-          "name": "tree",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        },
-        {
-          "description": "start (enqueue the sweep) or stop (cancel it).",
-          "name": "action",
-          "required": true,
-          "source": "body",
-          "type": "string"
-        }
-      ],
-      "path": "/decompile_tree_run",
-      "read_only": false
-    },
-    {
-      "category": "decompile-tree",
-      "description": "Status, config and root path of a decompilation tree — poll this after decompile_tree_run(action=start), then Grep the reported root. READ_ONLY, so it is safe to call while planning. Reports phase, progress, and freshness against the live program. Never errors when the program is closed or the root is missing — reports program:\"closed\" / root_present:false instead, because that is exactly when you are asking. With no selector, lists every tree plus adoptable trees found on disk.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "default": "",
-          "description": "Checkout id, program name, or domain path. Omit to list all + scan for adoptable on-disk trees.",
-          "name": "tree",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/decompile_tree_status",
-      "read_only": true
-    },
-    {
-      "category": "datatype",
-      "description": "Functions whose decompilation references a data type (or one of its fields). Runs without the server lock, with a hard timeout; a timeout returns the partial set with timed_out=true rather than failing.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "name",
-            "data_type",
-            "datatype"
-          ],
-          "description": "Data type name (resolved across all categories).",
-          "name": "type_name",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "aliases": [
-            "field_name"
-          ],
-          "default": "",
-          "description": "Optional field name. When set, only references to that field are returned (FieldMatcher).",
-          "name": "field",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "10",
-          "description": "Hard timeout for the finder (1–60). Default 10.",
-          "name": "timeout_seconds",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/find_type_users",
-      "read_only": true
-    },
-    {
-      "category": "program",
-      "description": "Return program.getModificationNumber() — a cheap monotonic token that moves on real DB changes (rename, comment, struct edit, undo/redo, GUI writes, scripts) and never on a read. Used by the bridge to invalidate cached function resources after out-of-band edits.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/get_change_token",
-      "read_only": true
-    },
-    {
-      "category": "analysis",
-      "description": "Group a program's functions into compartments so you can decide which regions to ignore before reading any of them — on a driver DLL the two library compartments were 42% of the binary and identifiable from their referenced strings alone. Uses a cascade of structural strategies (class names in log strings, peripheral register pages, linker literal locality, address banding); each reports whether it applied and why, and every partition carries the evidence that formed it. Slugs are machine-generated and assert nothing about content. Read-only: reports the partitioning, does not write the Program Tree. Runs without the server lock; costs one pass over every instruction.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "default": "20",
-          "description": "Functions per file for the address-band fallback.",
-          "name": "band_size",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "1",
-          "description": "Omit partitions smaller than this from the response.",
-          "name": "min_size",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Comma-separated subset of strategy names to run (qualified-name, mmio-page, literal-locality, address-band). Omit to run the full cascade.",
-          "name": "strategies",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/partition_program",
       "read_only": true
     }
   ]
