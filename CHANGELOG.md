@@ -8,6 +8,13 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Security - Docker build verifies the Ghidra download
+
+- `docker/Dockerfile` checks the downloaded Ghidra release zip against
+  `GHIDRA_SHA256` (the SHA-256 from the upstream release notes) before
+  unpacking it. A tampered or truncated download now fails the build
+  instead of installing unverified JARs.
+
 ### Added — decompiler symbols, stack locals and equates (#550, #551)
 
 - `get_functions(fields=decompiler_symbols)` returns SSA/register symbols with

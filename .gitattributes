@@ -1,0 +1,27 @@
+# Text files are stored LF in the index and checked out LF on every platform.
+#
+# Why: the index was already ~225 of 637 tracked files CRLF, so any code that
+# reads a repo file and compares it against a literal containing \n was silently
+# sensitive to how the reader cloned the repo. Git for Windows defaults to
+# core.autocrlf=true, so a Windows clone put CRLF on disk where a Linux clone
+# put LF. #458 fixed the two known instances and added a guard, but a
+# normalised repository removes the whole class of bug rather than the two
+# instances that happened to be noticed. See #476.
+#
+# The one-time normalisation of the files already in the index is a separate
+# commit, to be made when the merge queue is empty -- it touches ~225 files and
+# would collide with every open pull request. This file only sets the policy
+# going forward.
+* text=auto eol=lf
+
+# Windows-native scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Recorded byte-for-byte: these are recordings, not source. Their line endings
+# are part of the recorded bytes and must not be converted by anyone, ever.
+# The conformance goldens are compared as bytes, and the context-window figures
+# were measured against a shipped release.
+tests/conformance/snapshots/*.snap -text
+docs/Context-Window-Analysis.md -text
