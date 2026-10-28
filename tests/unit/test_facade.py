@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -167,3 +168,80 @@ def test_facade_dispatch_failures_have_mcp_error_semantics(monkeypatch, catalog)
     with pytest.raises(dispatch.GhidraToolError, match="rejected by Ghidra"):
         asyncio.run(facade.ghidra_call("read_function", {"function": "0x1000"}))
     invalidated.assert_not_awaited()
+
+
+@pytest.mark.parametrize("dry_run", [True, "true", "1", "yes"])
+def test_static_import_preview_is_refused_without_dispatch(monkeypatch, dry_run):
+    dispatched = Mock(return_value='{"status": "success"}')
+    monkeypatch.setattr(facade.dispatch, "dispatch_post", dispatched)
+    # The synchronous helper itself must refuse before even the mocked write.
+    result = facade._call_import_file_sync({"file_path": "mock-only.dll", "dry_run": dry_run})
+    dispatched.assert_not_called()
+    assert "dry_run" in json.loads(result)["error"]
+
+
+@pytest.mark.parametrize("dry_run", [False, "false", "0"])
+def test_static_import_false_preview_preserves_payload_and_result(monkeypatch, dry_run):
+    response = '{"status": "success", "data": {"name": "mock-only.dll"}}'
+    dispatched = Mock(return_value=response)
+    monkeypatch.setattr(facade.dispatch, "dispatch_post", dispatched)
+    result = asyncio.run(facade.ghidra_call("import_file", {
+        "file_path": "mock-only.dll", "project_folder": "/mock", "language": "x86:LE:32:default",
+        "compiler_spec": "gcc", "auto_analyze": False, "dry_run": dry_run,
+    }))
+    assert result == response
+    dispatched.assert_called_once_with("/import_file", {
+        "file_path": "mock-only.dll", "project_folder": "/mock", "language": "x86:LE:32:default",
+        "compiler_spec": "gcc", "auto_analyze": False,
+    })
+
+
+def test_static_import_failures_have_dev_mcp_error_semantics(monkeypatch):
+    from bridge_mcp_ghidra import dispatch
+    monkeypatch.setattr(facade.dispatch, "dispatch_post", Mock(return_value='{"error": "import refused"}'))
+    with pytest.raises(dispatch.GhidraToolError, match="import refused"):
+        asyncio.run(facade.ghidra_call("import_file", {"file_path": "mock-only.dll"}))
+
+
+def test_static_import_cancellation_aborts_registered_mock_connection(monkeypatch):
+    started, released = threading.Event(), threading.Event()
+    handles, snapshots = [], []
+    connection = Mock()
+    connection.close.side_effect = released.set
+
+    def blocking_mock_dispatch(*args, **kwargs):
+        handle = state.get_request_cancel_handle()
+        handles.append(handle)
+        snapshots.append(state.get_request_connection_snapshot())
+        if handle is not None:
+            handle.register_connection(connection)
+        started.set()
+        released.wait(3)
+        return '{"status": "success"}'
+
+    monkeypatch.setattr(facade.dispatch, "dispatch_post", blocking_mock_dispatch)
+
+    async def cancel_call():
+        task = asyncio.create_task(facade.ghidra_call("import_file", {"file_path": "mock-only.dll"}))
+        try:
+            assert await asyncio.to_thread(started.wait, 2), "mock write never started"
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            released.set()
+
+    asyncio.run(cancel_call())
+    assert handles and handles[0] is not None, "static dispatch bypassed request cancellation binding"
+    assert handles[0].aborted
+    assert snapshots[0] is not None
+    connection.close.assert_called_once()
+
+
+def test_static_import_preview_error_propagates_without_dispatch(monkeypatch):
+    from bridge_mcp_ghidra import dispatch
+    dispatched = Mock(return_value='{"status": "success"}')
+    monkeypatch.setattr(facade.dispatch, "dispatch_post", dispatched)
+    with pytest.raises(dispatch.GhidraToolError, match="dry_run is not supported"):
+        asyncio.run(facade.ghidra_call("import_file", {"file_path": "mock-only.dll", "dry_run": True}))
+    dispatched.assert_not_called()

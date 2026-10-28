@@ -16,6 +16,8 @@ Changes on `dev` after 7.0.0.
 - Facade calls accept schema parameter aliases and retain parameter descriptions
   in `ghidra_describe`. Calls use the current error, progress, and write-resource
   invalidation hooks.
+- Static facade imports refuse unsupported previews before dispatch, retain
+  cancellation/socket-abort handling, and report failed imports as MCP errors.
 
 ### Security - Docker build verifies the Ghidra download
 

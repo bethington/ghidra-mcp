@@ -36,7 +36,7 @@ import json
 from . import dispatch
 from . import registry
 from . import state
-from .config import logger
+from .config import logger, parse_bool
 from .server import Context, mcp
 
 # --------------------------------------------------------------------------
@@ -244,6 +244,14 @@ def _tool_brief(tool_def: dict) -> dict:
 
 def _call_import_file_sync(args: dict) -> str:
     """Sync import_file equivalent (no ctx polling) for facade dispatch."""
+    # import_file has no server-side preview contract. Never strip a requested
+    # dry run into an actual import, including the registry's boolean spellings.
+    try:
+        preview = parse_bool(str(args.get("dry_run", False)), default=False, on_unknown="error")
+    except ValueError as error:
+        return json.dumps({"error": f"Invalid dry_run: {error}", "tool": "import_file"})
+    if preview:
+        return json.dumps({"error": "dry_run is not supported for import_file; no import was performed", "tool": "import_file"})
     if not args.get("file_path"):
         return json.dumps(
             {
@@ -555,9 +563,9 @@ async def ghidra_call(tool: str, args: dict | None = None, ctx: Context | None =
         )
     # Hidden static tools (import/debugger/oracle) stay reachable here so the
     # 5-tool surface covers 100% of the old surface.
-    static_hit = await state.run_in_worker(_call_static_sync, tool, params)
+    static_hit = await state.run_blocking_ghidra_call(_call_static_sync, tool, params)
     if static_hit is not None:
-        return static_hit
+        return dispatch.raise_on_failure(static_hit)
     if not state._full_schema:
         return json.dumps(
             {
