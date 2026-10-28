@@ -56,6 +56,7 @@ public class FunctionBlockParityGhidraTest {
         FIELD_TO_HEADER.put("tags", "tags");
         FIELD_TO_HEADER.put("parameters", "param");
         FIELD_TO_HEADER.put("locals", "local");
+        FIELD_TO_HEADER.put("decompiler_symbols", "decompiler_symbol");
         FIELD_TO_HEADER.put("callers", "callers");
         FIELD_TO_HEADER.put("callees", "calls");
         FIELD_TO_HEADER.put("xrefs", "xref");

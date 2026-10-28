@@ -44,7 +44,7 @@ public record CoreServices(
             new DocumentationHashService(provider, ts, new BinaryComparisonService());
         documentationHash.setFunctionService(function);
         return new CoreServices(
-            new ListingService(provider),
+            new ListingService(provider, ts),
             new CommentService(provider, ts),
             new SymbolLabelService(provider, ts),
             function,

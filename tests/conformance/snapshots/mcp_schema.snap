@@ -1,5 +1,5 @@
 {
-  "count": 214,
+  "count": 215,
   "tools": [
     {
       "category": "function",
@@ -487,6 +487,14 @@
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.",
+          "name": "variant",
+          "required": false,
+          "source": "query",
+          "type": "string"
         }
       ],
       "path": "/analyze_function_complete",
@@ -869,7 +877,7 @@
         },
         {
           "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "description": "Program every documentation step runs against (single or batch). Omit for the active program; always specify on a headless server or when several programs are open.",
           "name": "program",
           "required": false,
           "source": "query",
@@ -1077,7 +1085,7 @@
             "address",
             "function_address"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "address",
           "required": true,
@@ -1686,7 +1694,7 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping member name to integer value, e.g. {\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal strings, or 0x-prefixed hex strings; floats and non-numeric strings are rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any complaint comes back as a warning, not a failure.",
+          "description": "JSON object mapping member name to integer value, e.g. { \"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal strings, or 0x-prefixed hex strings; floats and non-numeric strings are rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any complaint comes back as a warning, not a failure.",
           "name": "values",
           "required": true,
           "source": "body",
@@ -1795,7 +1803,7 @@
           "type": "string"
         },
         {
-          "description": "JSON array of parameter objects, e.g. [{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. Only the TYPES are used: parameter names are discarded and the created signature has unnamed arguments. Parsing is a plain comma/colon split, so a type containing a comma or a colon does not survive it, and a parameter whose type cannot be resolved is dropped silently.",
+          "description": "JSON array of parameter objects, e.g. [{ \"name\":\"dwId\", \"type\":\"uint\"},{ \"name\":\"pUnit\", \"type\":\"void *\"}]. Only the TYPES are used: parameter names are discarded and the created signature has unnamed arguments. Parsing is a plain comma/colon split, so a type containing a comma or a colon does not survive it, and a parameter whose type cannot be resolved is dropped silently.",
           "name": "parameters",
           "required": true,
           "source": "body",
@@ -2016,7 +2024,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).",
+      "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -2028,7 +2036,7 @@
           "type": "string"
         },
         {
-          "description": "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]",
+          "description": "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]",
           "name": "fields",
           "required": true,
           "source": "body",
@@ -2406,7 +2414,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Checkout id, program name, or domain path.",
+          "description": "DecompTree id, program name, or domain path.",
           "name": "tree",
           "required": true,
           "source": "body",
@@ -2414,7 +2422,7 @@
         },
         {
           "default": "",
-          "description": "Ignored for now — root is identity; changing it needs a new checkout.",
+          "description": "Ignored for now — root is identity; changing it needs a new tree.",
           "name": "root",
           "required": false,
           "source": "body",
@@ -2482,7 +2490,7 @@
     },
     {
       "category": "decompile-tree",
-      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the derived root, reconciling swept_at_modification_number against the live program. Unrelated to Ghidra version-control checkouts (/server/version_control/*).",
+      "description": "Create a decompilation tree: a program's decompiled C materialised as a file tree you can Grep and Glob. Use this when you need corpus-wide search — 'which functions reference this string, constant or peripheral' — which is impractical one function at a time. Registers the tree and writes tree.json / STATUS.md; does NOT sweep (call decompile_tree_run(action=start)). Adopts an existing tree at the root and reconciles it against the live program; trees this server created are also adopted automatically when their program opens. The root must be empty, absent, or an existing tree (it holds tree.json). Unrelated to Ghidra version-control checkouts (/server/version_control/*).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -2496,7 +2504,7 @@
         },
         {
           "default": "",
-          "description": "Absolute checkout root. Omit for the default under java.io.tmpdir/ghidra-mcp-tree/.",
+          "description": "Absolute tree root. Omit for the default under java.io.tmpdir/ghidra-mcp-tree/.",
           "name": "root",
           "required": false,
           "source": "body",
@@ -2569,7 +2577,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Checkout id, program name, or domain path.",
+          "description": "DecompTree id, program name, or domain path.",
           "name": "tree",
           "required": true,
           "source": "body",
@@ -2634,7 +2642,7 @@
       "method": "POST",
       "params": [
         {
-          "description": "Checkout id, program name, or domain path.",
+          "description": "DecompTree id, program name, or domain path.",
           "name": "tree",
           "required": true,
           "source": "body",
@@ -2659,7 +2667,7 @@
       "params": [
         {
           "default": "",
-          "description": "Checkout id, program name, or domain path. Omit to list all + scan for adoptable on-disk trees.",
+          "description": "DecompTree id, program name, or domain path. Omit to list all + scan for adoptable on-disk trees.",
           "name": "tree",
           "required": false,
           "source": "query",
@@ -2982,16 +2990,18 @@
           "type": "string"
         },
         {
+          "default": "",
           "description": "First program name",
           "name": "program_a",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },
         {
+          "default": "",
           "description": "Second program name",
           "name": "program_b",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         }
@@ -3114,7 +3124,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function to emulate (entry point address)",
+          "description": "Function name or any address within the function to emulate",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -3684,9 +3694,10 @@
           "type": "string"
         },
         {
+          "default": "",
           "description": "Source program name",
           "name": "source_program",
-          "required": true,
+          "required": false,
           "source": "query",
           "type": "string"
         },
@@ -3889,7 +3900,7 @@
     },
     {
       "category": "program",
-      "description": "Return program.getModificationNumber() — a cheap monotonic token that moves on real DB changes (rename, comment, struct edit, undo/redo, GUI writes, scripts) and never on a read. Used by the bridge to invalidate cached function resources after out-of-band edits.",
+      "description": "Return the program's change token: '<saved time>:<open epoch>:<modification number>'. It moves on every DB change (rename, comment, struct edit, undo/redo, GUI writes, scripts), on a save, and on a reopen or server restart, and never on a read. Compare the whole token; the modification number alone starts over on every open. Used by the bridge to invalidate cached function resources after out-of-band edits.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -4178,7 +4189,7 @@
     {
       "category": "documentation",
       "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
-      "description": "Export all documentation for a function. Prefer ghidra://function/{program}/{address} (or /get_functions) when you want decompile + docs + callers in one cacheable read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+      "description": "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -4309,7 +4320,7 @@
     },
     {
       "category": "function",
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused.",
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); decompiled_code, refs, and decompiler_symbols (and call_context when enabled) pay that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -4338,7 +4349,7 @@
         },
         {
           "default": "",
-          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
+          "description": "Comma-separated subset: signature, classification, return_type, entry_point, body_start, body_end, decompiled_code, decompiler_symbols, plate_comment, comments, labels, tags, parameters, locals, callers, call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute addresses the function uses: data references, the values of literal-pool words, and the memory the decompiled code reads and writes, so a register reached as base + offset is listed by its own address; a pool value is written value<word; asking for refs decompiles). Omit or leave empty for the full bundle.",
           "name": "fields",
           "required": false,
           "source": "query",
@@ -5199,12 +5210,12 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values.",
+      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items, list_external_locations and list_equates — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}; equates -> {name, value, display_value, reference_count, enum_based, references?}, where references are {address, operand_index}. Equate filters: value, name_contains, address, include_references. Unknown kind is an error listing the valid values.",
       "destructive": false,
       "method": "GET",
       "params": [
         {
-          "description": "classes | methods | namespaces | imports | exports | segments | data_items | external_locations",
+          "description": "classes | methods | namespaces | imports | exports | segments | data_items | external_locations | equates",
           "name": "kind",
           "required": true,
           "source": "query",
@@ -5225,6 +5236,39 @@
           "required": false,
           "source": "query",
           "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Equates only: decimal, 0x hex, or single character literal",
+          "name": "value",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Equates only: case-insensitive name substring",
+          "name": "name_contains",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Equates only: include definitions referenced at this address",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Equates only: include address/operand_index references",
+          "name": "include_references",
+          "required": false,
+          "source": "query",
+          "type": "boolean"
         },
         {
           "default": "",
@@ -5633,7 +5677,7 @@
     },
     {
       "category": "headless",
-      "description": "Open a Ghidra project: local .gpr/directory, or ghidr<PATH>//host[:port]/repo (persistent shared project; does not auto-open repo files — max ~5 shared programs). GUI mode adds optional `headless` (default true) and `program`; the headless server ignores those. Local tree mirrors YOUR working copy.",
+      "description": "Open a Ghidra project: local .gpr/directory, or ghidra://host[:port]/repo (persistent shared project; does not auto-open repo files — max ~5 shared programs). GUI mode adds optional `headless` (default true) and `program`; the headless server ignores those. Local tree mirrors YOUR working copy.",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -6197,7 +6241,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -7037,6 +7081,104 @@
       "read_only": false
     },
     {
+      "category": "listing",
+      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+      "description": "Apply, remove or rename equates. Apply replaces other equate names for the same scalar at each selected operand, preserving different scalar values. Select one instruction with address or a function with function_address (name or containing address), never both. Remove with no scope selects references by name and/or value across the program. delete_definition requires name, refuses enum-owned definitions and refuses references outside the selection. Rename requires name and new_name, refuses duplicate names, and preserves every reference. max_hits caps all affected references before any mutation. dry_run previews via rollback.",
+      "destructive": true,
+      "method": "POST",
+      "params": [
+        {
+          "description": "apply | remove | rename",
+          "name": "action",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "aliases": [
+            "old_name"
+          ],
+          "default": "",
+          "description": "Equate name; required for apply and rename; exact filter for remove",
+          "name": "name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Scalar value: signed decimal, 0x hex, or single character literal",
+          "name": "value",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Instruction address, mutually exclusive with function_address",
+          "name": "address",
+          "param_type": "address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "-1",
+          "description": "Operand index, or -1 for all operands in the selected scope",
+          "name": "operand_index",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "aliases": [
+            "function",
+            "function_name"
+          ],
+          "default": "",
+          "description": "Function name or containing address; mutually exclusive with address",
+          "name": "function_address",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Rename destination; an existing different definition is always refused",
+          "name": "new_name",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Remove only: delete a non-enum named definition if no unselected references remain",
+          "name": "delete_definition",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "1000",
+          "description": "Positive maximum affected scalar operands/references, checked before mutation",
+          "name": "max_hits",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/set_equate",
+      "read_only": false
+    },
+    {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -7473,7 +7615,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,
@@ -7559,7 +7701,7 @@
     {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name.",
+      "description": "Set types and names for multiple variables in a single transaction. Named-variable types are applied before renames. Stack-local names are validated for naming syntax; Hungarian prefix/type mismatches produce warnings. Create stack locals using a Stack[-0x8] key and {name,type,create:true,replace:false}. replace:true replaces overlapping locals after validation. Stack operations are local-only: intervals entering the parameter region or overlapping parameters are refused, even in empty slots. Mixed stack/named batches roll back entirely on any named type, rename, or decompilation error. On programs with multiple address spaces, prefix addresses with the space name.",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -7578,11 +7720,11 @@
           "type": "string"
         },
         {
-          "description": "JSON object mapping old variable names to {name, type} objects. Both fields optional: omit 'type' to rename only, omit 'name' to retype only. Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}",
+          "description": "JSON object mapping old variable names to {name, type} objects. Both fields optional: omit 'type' to rename only, omit 'name' to retype only. Stack[offset] keys (signed decimal or hex, optional :size) select storage. For missing locals require name, type, create:true; replace:true permits overlapping locals. Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}",
           "name": "variables",
           "required": true,
           "source": "body",
-          "type": "string"
+          "type": "json"
         },
         {
           "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
@@ -7723,7 +7865,7 @@
             "function_address",
             "function_name"
           ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
           "name": "function",
           "param_type": "function_ref",
           "required": true,

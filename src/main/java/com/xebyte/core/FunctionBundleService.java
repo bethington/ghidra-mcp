@@ -80,8 +80,8 @@ public class FunctionBundleService {
             + "as a comma-separated subset to skip work you do not need — omitted or empty "
             + "returns everything. When the requested fields need no decompiled text (e.g. "
             + "fields=callers,callees,signature,labels,entry_point), the target function is "
-            + "NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code "
-            + "(and call_context when enabled) pays that cost. Decompiled text renders EOL "
+            + "NOT decompiled (238 ms cold / 5–10 ms warm per function); decompiled_code, refs, and decompiler_symbols "
+            + "(and call_context when enabled) pay that cost. Decompiled text renders EOL "
             + "comments (// style), so comments written with set_comment are visible in the "
             + "code. Replaces get_function_by_address, get_function_variables, "
             + "get_function_xrefs, decompile_function, and the former "
@@ -105,7 +105,7 @@ public class FunctionBundleService {
                                + "keyed by the reference asked for.") String functionsParam,
             @Param(value = "fields", defaultValue = "",
                    description = "Comma-separated subset: signature, classification, return_type, "
-                               + "entry_point, body_start, body_end, decompiled_code, "
+                               + "entry_point, body_start, body_end, decompiled_code, decompiler_symbols, "
                                + "plate_comment, comments, labels, tags, parameters, locals, callers, "
                                + "call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute "
                                + "addresses the function uses: data references, the values of "

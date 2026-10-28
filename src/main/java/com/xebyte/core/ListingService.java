@@ -15,15 +15,19 @@ import java.util.regex.Pattern;
 
 /**
  * Service for listing and enumeration endpoints.
- * All methods are read-only and do not require transactions.
+ * Inventory reads and equate mutations shared by GUI and headless servers.
  */
 @McpToolGroup(value = "listing", description = "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items")
 public class ListingService {
 
-    private final ProgramProvider programProvider;
+    private final EquateService equates;
 
     public ListingService(ProgramProvider programProvider) {
-        this.programProvider = programProvider;
+        this(programProvider, new com.xebyte.headless.DirectThreadingStrategy());
+    }
+
+    public ListingService(ProgramProvider programProvider, ThreadingStrategy threading) {
+        this.equates = new EquateService(threading);
     }
 
     // ========================================================================
@@ -33,22 +37,24 @@ public class ListingService {
     /** Kinds accepted by {@link #listProgramItems}; unknown values are rejected. */
     private static final Set<String> PROGRAM_ITEM_KINDS = Set.of(
             "classes", "methods", "namespaces", "imports", "exports",
-            "segments", "data_items", "external_locations");
+            "segments", "data_items", "external_locations", "equates");
 
     @McpTool(path = "/list_program_items",
         description = "List one kind of program inventory with pagination. "
             + "Replaces list_classes, list_methods, list_namespaces, list_imports, "
-            + "list_exports, list_segments, list_data_items and list_external_locations — "
+            + "list_exports, list_segments, list_data_items, list_external_locations and list_equates — "
             + "one envelope ({kind, items, count, total, limit, offset}), item shape varies "
             + "by kind: classes|methods|namespaces → string names; imports|exports → "
             + "{address, name}; segments → {name, start, end, size, readable, writable, "
             + "executable, initialized}; data_items → {address, block, label, size, type}; "
-            + "external_locations → {name, library, address, original_imported_name?}. "
-            + "Unknown kind is an error listing the valid values.",
+            + "external_locations → {name, library, address, original_imported_name?}; "
+            + "equates -> {name, value, display_value, reference_count, enum_based, references?}, "
+            + "where references are {address, operand_index}. Equate filters: value, name_contains, "
+            + "address, include_references. Unknown kind is an error listing the valid values.",
         category = "listing", access = ToolAccess.READ_ONLY)
     public Response listProgramItems(
             @Param(value = "kind", description = "classes | methods | namespaces | imports | "
-                        + "exports | segments | data_items | external_locations") String kind,
+                        + "exports | segments | data_items | external_locations | equates") String kind,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -57,16 +63,31 @@ public class ListingService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
+            @Param(value = "value", defaultValue = "",
+                   description = "Equates only: decimal, 0x hex, or single character literal") String value,
+            @Param(value = "name_contains", defaultValue = "",
+                   description = "Equates only: case-insensitive name substring") String nameContains,
+            @Param(value = "address", paramType = Param.ADDRESS, defaultValue = "",
+                   description = "Equates only: include definitions referenced at this address") Address address,
+            @Param(value = "include_references", defaultValue = "false",
+                   description = "Equates only: include address/operand_index references") boolean includeReferences,
             @Param(value = "program", defaultValue = "") Program program) {
         if (kind == null || kind.isBlank()) {
             return Response.err("kind parameter is required");
         }
-        String normalized = kind.trim().toLowerCase();
+        String normalized = kind.trim().toLowerCase(Locale.ROOT);
         if (!PROGRAM_ITEM_KINDS.contains(normalized)) {
             return Response.err("Unknown kind: " + kind + ". Valid kinds: "
                     + String.join(", ", PROGRAM_ITEM_KINDS));
         }
 
+        if ("equates".equals(normalized)) {
+            return equates.list(program, value, nameContains, address, includeReferences, offset, limit);
+        }
+        if ((value != null && !value.isBlank()) || (nameContains != null && !nameContains.isBlank())
+                || address != null || includeReferences) {
+            return Response.err("value, name_contains, address and include_references require kind=equates");
+        }
         List<?> all = switch (normalized) {
             case "classes" -> collectClassNames(program);
             case "methods" -> collectMethodNames(program);
@@ -79,6 +100,11 @@ public class ListingService {
             default -> List.of();
         };
         return ServiceUtils.pagedProgramItems(normalized, all, offset, limit);
+    }
+
+    /** Source compatibility for callers of the original unfiltered inventory API. */
+    public Response listProgramItems(String kind, int offset, int limit, Program program) {
+        return listProgramItems(kind, offset, limit, null, null, null, false, program);
     }
 
     private List<String> collectMethodNames(Program program) {
@@ -1057,6 +1083,41 @@ public class ListingService {
     private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr) {
         Address extAddr = extLoc.getAddress();
         return extAddr != null && extAddr.equals(addr);
+    }
+
+    @McpTool(path = "/set_equate", method = "POST",
+        description = "Apply, remove or rename equates. Apply replaces other equate names for the same "
+            + "scalar at each selected operand, preserving different scalar values. Select one instruction "
+            + "with address or a function with function_address (name or containing address), never both. "
+            + "Remove with no scope selects references by name and/or value across the program. "
+            + "delete_definition requires name, refuses enum-owned definitions and refuses references "
+            + "outside the selection. Rename requires name and new_name, refuses duplicate names, and "
+            + "preserves every reference. max_hits caps all affected references before any mutation. "
+            + "dry_run previews via rollback.",
+        category = "listing", access = ToolAccess.DESTRUCTIVE)
+    public Response setEquate(
+            @Param(value = "action", source = ParamSource.BODY,
+                   description = "apply | remove | rename") String action,
+            @Param(value = "name", aliases = {"old_name"}, source = ParamSource.BODY, defaultValue = "",
+                   description = "Equate name; required for apply and rename; exact filter for remove") String name,
+            @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
+                   description = "Scalar value: signed decimal, 0x hex, or single character literal") String value,
+            @Param(value = "address", paramType = Param.ADDRESS, source = ParamSource.BODY, defaultValue = "",
+                   description = "Instruction address, mutually exclusive with function_address") Address address,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "Operand index, or -1 for all operands in the selected scope") int operandIndex,
+            @Param(value = "function_address", aliases = {"function", "function_name"},
+                   source = ParamSource.BODY, defaultValue = "",
+                   description = "Function name or containing address; mutually exclusive with address") Function function,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Rename destination; an existing different definition is always refused") String newName,
+            @Param(value = "delete_definition", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Remove only: delete a non-enum named definition if no unselected references remain") boolean deleteDefinition,
+            @Param(value = "max_hits", source = ParamSource.BODY, defaultValue = "1000",
+                   description = "Positive maximum affected scalar operands/references, checked before mutation") int maxHits,
+            @Param(value = "program", defaultValue = "") Program program) {
+        return equates.set(program, action, name, value, address, operandIndex, function,
+            newName, deleteDefinition, maxHits);
     }
 
     // ======================================================================

@@ -881,3 +881,52 @@ identifiable from referenced strings alone.
 List the functions whose decompilation references a data type, or one field of it. Runs
 off the EDT with a hard timeout; a timeout returns the partial set with `timed_out=true`
 rather than failing.
+
+## Decompiler symbols, missing stack locals and equates
+
+Read SSA/register temporaries with `get_functions(function="0x1000",
+fields="decompiler_symbols")`. Each symbol has `name`, `type` and `storage`.
+Use the returned storage to identify variables; requesting ordinary metadata
+fields such as `signature` does not open the decompiler.
+
+Create a missing stack local through `set_variables`:
+
+```json
+{
+  "function": "0x1000",
+  "variables": {
+    "Stack[-0x8]": {"name": "nCount", "type": "int", "create": true}
+  }
+}
+```
+
+`create` and `replace` are booleans. Existing variable-name mappings retain their
+rename/retype behavior. Creation validates the name and concrete type before
+changing the frame. Overlap is refused unless `replace: true`; parameters are
+always protected, including when a new local starts outside the parameter but
+extends into it. Review replacement carefully: it can remove multiple locals. Empty parameter
+slots are protected too. A mixed stack/name batch rolls back entirely if any
+named operation or decompilation fails.
+
+List equates with `list_program_items(kind="equates", include_references=true)`.
+Optional `value`, `name_contains` and `address` filters apply only to this kind.
+`limit <= 0` means no limit, as on other program-item listings.
+
+Use the single writer for all three mutations:
+
+```json
+{"action":"apply","name":"COUNT_SENTINEL","value":"-1","address":"0x1000","operand_index":1}
+{"action":"rename","name":"COUNT_SENTINEL","new_name":"COUNT_UNKNOWN"}
+{"action":"remove","name":"COUNT_UNKNOWN","address":"0x1000","operand_index":1}
+```
+
+For a function-wide apply/remove, supply `function_address` (function name or
+any address inside it) instead of `address`. `max_hits` is a positive safety cap
+checked before mutation. Applying a name replaces other names for the same
+scalar at the selected operand, preserving equates for other scalar values.
+Rename preserves references and refuses an existing different destination name.
+Removing without an address/function operates across the program; supply an
+exact name and/or value. `delete_definition: true` requires a name and refuses
+unselected remaining references. Pass `dry_run: true` to the writer for a
+transactional preview that rolls back. These operations are program mutations;
+review the selected references before applying them.

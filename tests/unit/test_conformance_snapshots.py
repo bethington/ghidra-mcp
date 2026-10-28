@@ -500,3 +500,21 @@ def test_conformance_transport_disables_lazy_tool_loading():
     assert "--no-lazy" in transport.command, (
         f"bridge_transport must disable lazy loading; got {transport.command}"
     )
+
+
+def test_normalize_schema_does_not_treat_identifier_suffix_as_windows_drive():
+    from tests.conformance.runner import normalize
+    description = 'Reports program_status:"closed" / root_present:false instead.'
+    schema = json.dumps({'tools': [{'description': description}]})
+    assert json.loads(normalize(schema))['tools'][0]['description'] == description
+
+
+def test_normalize_still_masks_real_windows_drive_paths():
+    from tests.conformance.runner import normalize
+    assert '<PATH>/' in normalize('Read C:/Users/example/project/file.bin')
+
+
+def test_normalize_masks_windows_paths_inside_json_without_corrupting_json():
+    from tests.conformance.runner import normalize
+    payload = json.dumps({'description': r'Read C:\Users\example\project\file.bin'})
+    assert json.loads(normalize(payload))['description'] == 'Read <PATH>/file.bin'

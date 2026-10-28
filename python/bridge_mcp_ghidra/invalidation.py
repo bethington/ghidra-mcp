@@ -142,6 +142,8 @@ ENDPOINT_TIER: dict[str, InvalidationTier] = {
     "/resolve_duplicate_type": InvalidationTier.TYPE,
     "/apply_data_classification": InvalidationTier.TYPE,
     "/set_global": InvalidationTier.TYPE,
+    # Definition rename/removal can affect operands in multiple functions.
+    "/set_equate": InvalidationTier.UNBOUNDED,
     # --- UNBOUNDED: analysis, scripts, program lifecycle, project ops ---
     # Tree tools that can start a sweep: disassemble_missing (when on) writes the
     # program on the sweep thread, so the change-token poll is what sees it.
