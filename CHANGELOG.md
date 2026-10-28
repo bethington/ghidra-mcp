@@ -8,6 +8,17 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — facade mode compatibility (#527)
+
+- Keep the full tool surface as the default; register the five facade tools only
+  for explicit facade/hybrid mode. Preserve the current CLI options and resource
+  handlers when selecting a surface.
+- Facade calls accept schema parameter aliases and retain parameter descriptions
+  in `ghidra_describe`. Calls use the current error, progress, and write-resource
+  invalidation hooks.
+- Static facade imports refuse unsupported previews before dispatch, retain
+  cancellation/socket-abort handling, and report failed imports as MCP errors.
+
 ### Fixed: builds and runs on Ghidra 12.2
 
 Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on

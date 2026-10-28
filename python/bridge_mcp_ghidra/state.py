@@ -616,6 +616,11 @@ _loaded_groups: set[str] = set()
 _lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)
 
+# MCP surface mode: "full" (legacy dynamic tools), "facade" (5 stable
+# ghidra_* tools for Copilot-style clients), "hybrid" (both). Set by
+# cli.main via facade.apply_expose_mode; read through this module.
+_expose_mode = "full"
+
 
 def lazy_mode_from_env(default: bool = True) -> bool:
     """Resolve lazy mode from GHIDRA_MCP_LAZY, falling back to the default.

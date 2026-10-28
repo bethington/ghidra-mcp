@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import discovery
+from . import discovery, facade
 from . import dispatch
 from . import registry
 from . import state
@@ -678,7 +678,7 @@ def _auto_connect(project: str | None = None) -> bool:
                         active_tcp=None,
                         connected_project=inst.get("project"),
                     )
-                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                facade._log_auto_connect(count, project=inst.get("project"))
                 return True
             except Exception as e:
                 logger.warning(f"UDS auto-connect schema fetch failed: {e}")
@@ -707,7 +707,7 @@ def _auto_connect(project: str | None = None) -> bool:
                         active_tcp=inst["url"],
                         connected_project=inst.get("project"),
                     )
-                logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                facade._log_auto_connect(count, project=inst.get("project"))
                 return True
             except Exception as e:
                 logger.warning(f"TCP auto-connect schema fetch failed: {e}")
@@ -744,7 +744,7 @@ def _auto_connect(project: str | None = None) -> bool:
                 active_tcp=tcp_url,
                 connected_project=None,
             )
-        logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+        facade._log_auto_connect(count, tcp_url=tcp_url)
         return True
     except Exception:
         if not instances:
