@@ -40,6 +40,7 @@ def ghidraDir   = ghidraRoot
     : null
 
 def ghidraVersion  = null
+def ghidraJavaVersion = 21  // fallback when the install doesn't declare one
 def buildTimestamp = new Date().format('yyyyMMdd-HHmmss')
 
 if (ghidraDir) {
@@ -48,16 +49,30 @@ if (ghidraDir) {
         def props = new Properties()
         appProps.withReader { props.load(it) }
         ghidraVersion = props.getProperty('application.version')
+        // The Java release the target Ghidra was built for (12.1 = 21, 12.2 = 25).
+        def javaCompiler = props.getProperty('application.java.compiler')
+        if (javaCompiler) {
+            ghidraJavaVersion = javaCompiler.trim().toInteger()
+        }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Java toolchain
+// Compile with --release at the target Ghidra's Java level. Any JDK at least that
+// new works (e.g. JDK 27 for Ghidra 12.2); a toolchain is only requested when the
+// JDK running Gradle is older, since a Java 21 compiler cannot read 12.2's classes.
 // ---------------------------------------------------------------------------
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+if (JavaVersion.current().majorVersion.toInteger() < ghidraJavaVersion) {
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(ghidraJavaVersion)
+        }
     }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = ghidraJavaVersion
 }
 
 // ---------------------------------------------------------------------------

@@ -85,7 +85,7 @@ public class Export_OrdinalLister extends GhidraScript {
 
         List<ExportResult> results = new ArrayList<>();
         for (int i = 0; i < numFunctions; i++) {
-            monitor.checkCanceled();
+            monitor.checkCancelled();
             int functionRVA = currentProgram.getMemory().getInt(functionsArray.add(i * 4));
             if (functionRVA == 0) continue;
 
