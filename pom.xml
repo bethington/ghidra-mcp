@@ -163,6 +163,31 @@
             <version>2.0.6.1</version>
             <scope>test</scope>
         </dependency>
+        <!-- Offline variable tests call real SymbolUtilities and built-in data types.
+             SymbolUtilities -> ClassSearcher needs LogManager; IntegerDataType ->
+             DataUtilities needs StringUtils; SettingsImpl needs JavaHelp's
+             UnsupportedOperationException even without a Ghidra application.
+             Raw install-file module POMs carry no transitive dependencies. Match
+             Ghidra's bundled versions (also used by ghidra-runtime-tests below),
+             and keep these test-scoped so they do not enter target/lib. -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>2.26.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.20.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>javax.help</groupId>
+            <artifactId>javahelp</artifactId>
+            <version>2.0.05</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Graph (test only) — ghidra.program.database.data.CompositeDBAdapter and the
              SLEIGH language loader reach ghidra.graph.GEdge while a real Program is being
              built. No main source touches ghidra.graph, so this must NOT be compile- or
