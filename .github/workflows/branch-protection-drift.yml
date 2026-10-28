@@ -1,0 +1,106 @@
+name: Branch Protection Drift
+
+# GitHub fires `branch_protection_rule` whenever a ruleset is created, edited
+# or deleted -- including rulesets this repository never sees in its files.
+# That event is the only permission-free way to learn that enforcement moved:
+# the ruleset itself lives outside the repository, and the default GITHUB_TOKEN
+# cannot read the rulesets API.
+#
+# When the rulesets move, the checked-in snapshot
+# (tests/ci/required_status_checks.json) stops describing reality, and
+# tests/unit/test_branch_protection.py starts guarding a fiction.  This
+# workflow notices the change and opens an issue so the snapshot gets
+# refreshed and the drift gets a human decision.
+
+on:
+  branch_protection_rule:
+    types: [created, edited, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect-drift:
+    name: Compare live rulesets with the snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+      - name: Read the live rulesets
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          python3 tools/refresh_branch_protection_snapshot.py \
+            --check --repo "$REPO" --out tests/ci/required_status_checks.json
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          case "$status" in
+            0) echo "The snapshot matches the live rulesets." ;;
+            1) echo "The live rulesets differ from the snapshot." ;;
+            2) echo "The live rulesets could not be read with the default token." ;;
+            *) echo "Unexpected exit code $status." ;;
+          esac
+
+      - name: Open or update the drift issue
+        if: steps.compare.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXIT_CODE: ${{ steps.compare.outputs.exit_code }}
+          RULESET_ID: ${{ github.event.ruleset_id }}
+          EVENT_ACTION: ${{ github.event.event_action }}
+        run: |
+          set -euo pipefail
+          title="[ci] branch protection ruleset changed -- refresh the snapshot"
+
+          if [ "$EXIT_CODE" = "2" ]; then
+            reason="The rulesets API could not be read with the default token (HTTP 403 is usual: reading rulesets needs repository administration). The ruleset changed, and this repository's snapshot cannot be verified automatically."
+          else
+            reason="The live rulesets no longer match \`tests/ci/required_status_checks.json\`. Either the enforcement moved, or the snapshot is stale."
+          fi
+
+          body=$(cat <<EOF
+          The branch protection ruleset for \`$REPO\` changed.
+
+          - event: \`$EVENT_ACTION\`
+          - ruleset id: \`$RULESET_ID\`
+          - reason: $reason
+
+          ## What to do
+
+          1. Refresh the snapshot:
+
+             \`\`\`bash
+             python3 tools/refresh_branch_protection_snapshot.py
+             \`\`\`
+
+             It needs a token that can read repository rulesets (\`gh auth token\` works locally).
+
+          2. Check the refreshed snapshot against what the repo expects:
+             \`tests/unit/test_branch_protection.py\` fails when a required check
+             is not a context the workflows report, and when a blocking job is
+             not covered by any required check.
+
+          3. If the new ruleset is what you intended, delete the now-stale
+             entries in \`KNOWN_DRIFT\` in that test so the ratchet tightens.
+          EOF
+          )
+
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" \
+            --json number --jq '.[0].number' 2>/dev/null || true)
+
+          if [ -n "$existing" ]; then
+            echo "Commenting on issue #$existing"
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            echo "Opening a new issue"
+            gh issue create --repo "$REPO" --title "$title" --body "$body" \
+              --label ci-drift 2>/dev/null \
+              || gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi

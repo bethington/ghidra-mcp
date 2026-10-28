@@ -39,6 +39,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 # ---------------------------------------------------------------------------
 
 
+class _StubSession:
+    """Weak-referenceable session double.
+
+    The bridge tracks sessions by weakref so a dropped one cannot pin a
+    ServerSession, and SimpleNamespace cannot be weak-referenced.
+    """
+
+    def __init__(self):
+        self.send_tool_list_changed = AsyncMock()
+        self.send_log_message = AsyncMock()
+
+
 def make_ctx():
     """A minimal FastMCP Context double.
 
@@ -47,10 +59,7 @@ def make_ctx():
     tools/list_changed notification was actually sent (clients that cache
     tools/list depend on it after load/unload).
     """
-    session = SimpleNamespace(
-        send_tool_list_changed=AsyncMock(),
-        send_log_message=AsyncMock(),
-    )
+    session = _StubSession()
     return SimpleNamespace(
         _request_context=object(),
         request_context=SimpleNamespace(session=session),

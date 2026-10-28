@@ -15,6 +15,9 @@ FROM eclipse-temurin:21-jdk AS builder
 # version on the upstream NSA/ghidra GitHub release.
 ARG GHIDRA_VERSION=12.1.4
 ARG GHIDRA_DATE=20260921
+# SHA-256 of the release zip, as published in the upstream release notes.
+# Keep in sync with GHIDRA_VERSION/GHIDRA_DATE.
+ARG GHIDRA_SHA256=ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -31,6 +34,9 @@ RUN wget -q \
     wget -q \
     "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC.zip" \
     -O ghidra.zip
+
+# Verify the download before anything from it is unpacked or installed.
+RUN echo "${GHIDRA_SHA256}  ghidra.zip" | sha256sum -c -
 
 RUN unzip -q ghidra.zip && \
     rm ghidra.zip && \
