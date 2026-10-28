@@ -20,7 +20,7 @@ public class ProgramParamDescriptionTest {
     @Test
     public void anUndescribedProgramParamGetsTheSharedText() {
         AnnotationScanner.ParamDescriptor program = SCANNER.getDescriptors().stream()
-            .filter(t -> t.path().equals("/get_function_count"))
+            .filter(t -> t.path().equals("/get_change_token"))
             .flatMap(t -> t.params().stream())
             .filter(p -> p.name().equals("program"))
             .findFirst().orElseThrow();
