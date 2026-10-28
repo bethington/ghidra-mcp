@@ -11,9 +11,15 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **219 tools** — 215 served by the GUI plugin, 200 by the headless
-server, 196 by both:
+The catalog stands at **220 tools** — 216 served by the GUI plugin, 201 by the headless
+server, 197 by both:
 
+- **Decompiler symbols and stack locals** from @sagasm (#550):
+  `get_functions(fields=decompiler_symbols)` reads SSA/register storage, and
+  `set_variables` creates missing stack locals through the existing naming checks.
+- **Equates** from @sagasm (#551): `list_program_items(kind=equates)` reads them;
+  `set_equate(action=apply|remove|rename)` writes them under the shared lock, with
+  signed-value matching and operand replacement regression coverage.
 - **Function resources.** The bridge serves functions and decompilation trees as MCP
   resources keyed by address, and every write invalidates the resources it changed.
   **`get_change_token`** lets the bridge notice edits no write hook sees.
@@ -98,7 +104,7 @@ longer leaks a session, and the HTTP transports gain an optional bearer token
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one
 `tools/list` is over a hard limit for at least one major provider — Gemini
 rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
-called. The bridge now loads `listing,function,program` (69 endpoints plus 8
+called. The bridge now loads `listing,function,program` (75 endpoints plus 8
 static tools) on connect and registers the rest on demand; `--no-lazy` restores
 the old behaviour for clients that ignore `tools/list_changed`.
 

@@ -497,3 +497,16 @@ class TestCheckoutFileRefreshRemoved(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestEquateDefinitionInvalidation(unittest.TestCase):
+    def test_definition_rename_invalidates_all_interested_functions_in_program(self):
+        first = 'ghidra://function/sample/00001000'
+        second = 'ghidra://function/sample/00002000'
+        other = 'ghidra://function/other/00003000'
+        with mock.patch.object(invalidation.state, 'known_resource_uris',
+                               return_value={first, second, other}):
+            blast = asyncio.run(invalidation.resolve_blast_radius(
+                '/set_equate', ENDPOINT_TIER['/set_equate'],
+                {'program': 'sample', 'action': 'rename', 'name': 'OLD', 'new_name': 'NEW'}))
+        self.assertEqual(blast.uris, frozenset({first, second}))
+        self.assertTrue(blast.list_changed)

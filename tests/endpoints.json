@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 219,
+  "total_endpoints": 220,
   "categories": {
     "analysis": "Completeness analysis, control flow, similarity, memory inspection",
     "comment": "Plate, decompiler, disassembly and repeatable comments",
@@ -1888,7 +1888,7 @@
         "gui",
         "headless"
       ],
-      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code (and call_context when enabled) pays that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), and on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE) also carries variant_ambiguous + variant_candidates; pass variant= to have that assumption checked: naming a variant the program is not loaded under is refused."
+      "description": "Everything about one or many functions in a single call. Pass functions= as a comma-separated list of names or addresses for bulk mode (up to 20); omit it and pass function=/name=/address= for one. Pass fields= as a comma-separated subset to skip work you do not need — omitted or empty returns everything. When the requested fields need no decompiled text (e.g. fields=callers,callees,signature,labels,entry_point), the target function is NOT decompiled (238 ms cold / 5–10 ms warm per function); decompiled_code, refs, and decompiler_symbols (and call_context when enabled) pay that cost. Decompiled text renders EOL comments (// style), so comments written with set_comment are visible in the code. Replaces get_function_by_address, get_function_variables, get_function_xrefs, decompile_function, and the former get_function_callers/callees/labels/signature tools. Completeness scoring is NOT included — call analyze_function_completeness for that. A bundle carrying decompiled_code or call_context is stamped with language_id + variant (in bulk mode, every entry), so the dialect that produced the C can be audited later; on a processor whose variants load different SLEIGH decoders (PowerPC vs PowerPC VLE, ARM v4 vs v8) it also carries variant_ambiguous + variant_candidates, because the loader GUESSED that column and a wrong guess returns confident, wrong C. Pass variant= to have that assumption checked rather than assumed: naming a variant the program is not loaded under is refused."
     },
     {
       "path": "/get_language_metadata",
@@ -2241,13 +2241,17 @@
         "kind",
         "offset",
         "limit",
+        "value",
+        "name_contains",
+        "address",
+        "include_references",
         "program"
       ],
       "servers": [
         "gui",
         "headless"
       ],
-      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items and list_external_locations — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}. Unknown kind is an error listing the valid values."
+      "description": "List one kind of program inventory with pagination. Replaces list_classes, list_methods, list_namespaces, list_imports, list_exports, list_segments, list_data_items, list_external_locations and list_equates — one envelope ({kind, items, count, total, limit, offset}), item shape varies by kind: classes|methods|namespaces → string names; imports|exports → {address, name}; segments → {name, start, end, size, readable, writable, executable, initialized}; data_items → {address, block, label, size, type}; external_locations → {name, library, address, original_imported_name?}; equates -> {name, value, display_value, reference_count, enum_based, references?}, where references are {address, operand_index}. Equate filters: value, name_contains, address, include_references. Unknown kind is an error listing the valid values."
     },
     {
       "path": "/list_project_files",
@@ -3114,6 +3118,31 @@
       "description": "Set a listing comment of a given kind (plate/pre/eol/post/repeatable) at ANY address, including data addresses. Symmetric writer for get_comment; sets a PLATE comment on a function or a data global alike."
     },
     {
+      "path": "/set_equate",
+      "method": "POST",
+      "category": "listing",
+      "params": [
+        "action",
+        "name",
+        "old_name",
+        "value",
+        "address",
+        "operand_index",
+        "function_address",
+        "function",
+        "function_name",
+        "new_name",
+        "delete_definition",
+        "max_hits",
+        "program"
+      ],
+      "servers": [
+        "gui",
+        "headless"
+      ],
+      "description": "Apply, remove or rename equates. Apply replaces other equate names for the same scalar at each selected operand, preserving different scalar values. Select one instruction with address or a function with function_address (name or containing address), never both. Remove with no scope selects references by name and/or value across the program. delete_definition requires name, refuses enum-owned definitions and refuses references outside the selection. Rename requires name and new_name, refuses duplicate names, and preserves every reference. max_hits caps all affected references before any mutation. dry_run previews via rollback."
+    },
+    {
       "path": "/set_function_no_return",
       "method": "POST",
       "category": "function",
@@ -3239,7 +3268,7 @@
         "gui",
         "headless"
       ],
-      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels. Every function may decompile differently afterwards, so decompilation trees are marked stale (resweep)."
+      "description": "Change an existing memory block's permissions or volatility. The one that matters most: firmware loaders often mark the flash block writable, and the decompiler then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of folding it into the constant it holds; marking flash read-only lets peripheral and RAM addresses show as constants or their labels."
     },
     {
       "path": "/set_program_option",
@@ -3332,7 +3361,7 @@
         "gui",
         "headless"
       ],
-      "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name."
+      "description": "Set types and names for multiple variables in a single transaction. Named-variable types are applied before renames. Stack-local names are validated for naming syntax; Hungarian prefix/type mismatches produce warnings. Create stack locals using a Stack[-0x8] key and {name,type,create:true,replace:false}. replace:true replaces overlapping locals after validation. Stack operations are local-only: intervals entering the parameter region or overlapping parameters are refused, even in empty slots. Mixed stack/named batches roll back entirely on any named type, rename, or decompilation error. On programs with multiple address spaces, prefix addresses with the space name."
     },
     {
       "path": "/suggest_field_names",

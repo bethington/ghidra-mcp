@@ -34,6 +34,29 @@ APIs present in both 12.1 and 12.2.
   unpacking it. A tampered or truncated download now fails the build
   instead of installing unverified JARs.
 
+### Added — decompiler symbols, stack locals and equates (#550, #551)
+
+- `get_functions(fields=decompiler_symbols)` returns SSA/register symbols with
+  their name, type and storage, reusing the call's decompiler. Metadata-only
+  field selections still do not decompile.
+- `set_variables` can create stack locals with a `Stack[offset]` entry and
+  `{name, type, create: true, replace: false}`. Naming/type checks run before
+  replacement; `replace: true` removes overlapping locals, never parameters.
+  Empty parameter slots are also protected, and mixed stack/name failures roll
+  back the whole batch.
+- `list_program_items(kind=equates)` lists definitions and optional references
+  using the existing paginated envelope. `set_equate(action=apply|remove|rename)`
+  is the single writer. All mutations use the shared write lock and transaction;
+  negative scalars match, and applying a new name replaces the operand's old
+  equate for that value. Invalid selections and safety-cap violations make no
+  changes. Definition changes invalidate every interested function in the program.
+- Schema recordings no longer mistake identifier suffixes such as
+  `program_status:` for Windows drive prefixes and corrupt escaped JSON.
+- The six separate tools proposed during 7.1 development are folded into these
+  existing readers/writer surfaces before release; they were not in 7.0.0.
+  Original contributions by @sagasm; consolidation and regression fixes follow
+  the maintainer review. Contributor commits are retained.
+
 ### Fixed — integer and object-array parameters no longer bind lossily
 
 - Integer parameters reject fractional, out-of-range and missing required values
@@ -938,10 +961,15 @@ Measured against the spec and against what real clients do with each field.
   `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
-- **Doctor mode fails fast when nothing is listening.** A refused
-  `/check_connection` is not retried, and the later instance, health, schema,
-  and MCP probes are not run. Timeouts and unexpected HTTP statuses still use
-  the existing retry budget.
+
+- **Decompiler variable endpoints** in `FunctionService`: `/list_decompiler_variables`
+  and `/apply_local_variable` (POST) — read local variable names/types from the
+  decompiler output and apply renames/retypes to a function's variables.
+- **Equate management tools** in `ListingService`: `/list_equates`,
+  `/apply_equate`, `/remove_equate`, `/rename_equate` — enumerate, apply (to
+  operands matching a scalar value), delete, and rename named constants
+  (equates). Includes the `OperandHit` helper record plus `collectScalarOperands`
+  / `parseEquateValue` utilities used to locate operand matches.
 
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
