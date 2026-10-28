@@ -1021,7 +1021,7 @@ public class DataTypeService {
                 // Check if type is in use (simplified check)
                 // Note: Ghidra will prevent deletion if type is in use during remove operation
 
-                boolean deleted = dtm.remove(dataType, null);
+                boolean deleted = dtm.remove(dataType);
                 if (!deleted) {
                     throw new Refusal("Failed to delete data type '" + typeName
                             + "' (may be in use). Try resolve_duplicate_type if a /Demangler 1-byte stub blocks a full struct.");
@@ -1261,7 +1261,7 @@ public class DataTypeService {
                 originalBackup = existing.copy(dtm);
                 try {
                     threadingStrategy.executeWrite(program, "Recreate struct delete", () -> {
-                        if (dtm.remove(existing, null)) {
+                        if (dtm.remove(existing)) {
                             return null;
                         }
                         throw new Refusal("Could not delete '" + name + "' (may be in use)");
@@ -1513,7 +1513,7 @@ public class DataTypeService {
         try {
             String message = threadingStrategy.executeWrite(program, "Delete placeholder type " + logicalName, () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                boolean deleted = dtm.remove(dataType, null);
+                boolean deleted = dtm.remove(dataType);
                 if (deleted) {
                     return "Removed placeholder '" + dataType.getPathName() + "'";
                 }

@@ -23,7 +23,7 @@ public class Repair_ThisCallReplacer extends GhidraScript {
         try {
             FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(true);
             while (funcIter.hasNext()) {
-                monitor.checkCanceled();
+                monitor.checkCancelled();
                 Function func = funcIter.next();
                 if ("__thiscall".equals(func.getCallingConventionName())) {
                     count++;

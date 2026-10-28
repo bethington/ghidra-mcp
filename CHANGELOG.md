@@ -19,6 +19,14 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Fixed: builds and runs on Ghidra 12.2
+
+Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on
+12.2 `get_functions`, `get_language_metadata` and `delete_data_type` failed at
+runtime and the build did not compile. The build now targets the Java level the
+installed Ghidra declares, using any JDK at least that new, and the code calls only
+APIs present in both 12.1 and 12.2.
+
 ### Security - Docker build verifies the Ghidra download
 
 - `docker/Dockerfile` checks the downloaded Ghidra release zip against

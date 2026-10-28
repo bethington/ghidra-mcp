@@ -135,7 +135,7 @@ public class Repair_ClearCallReturnOverrides extends GhidraScript {
 
         try {
             while (instructions.hasNext() && !monitor.isCancelled()) {
-                monitor.checkCanceled();
+                monitor.checkCancelled();
                 Instruction instruction = instructions.next();
 
                 // Check if this is a CALL instruction
@@ -239,7 +239,7 @@ public class Repair_ClearCallReturnOverrides extends GhidraScript {
                 if (monitor.isCancelled()) {
                     break;
                 }
-                monitor.checkCanceled();
+                monitor.checkCancelled();
 
                 // Remove noreturn attribute
                 function.setNoReturn(false);
@@ -274,7 +274,7 @@ public class Repair_ClearCallReturnOverrides extends GhidraScript {
                 if (monitor.isCancelled()) {
                     break;
                 }
-                monitor.checkCanceled();
+                monitor.checkCancelled();
 
                 // Check if address needs disassembly
                 CodeUnit codeUnit = currentProgram.getListing().getCodeUnitAt(addr);
@@ -319,7 +319,7 @@ public class Repair_ClearCallReturnOverrides extends GhidraScript {
 
         try {
             while (instructions.hasNext() && !monitor.isCancelled()) {
-                monitor.checkCanceled();
+                monitor.checkCancelled();
                 Instruction instruction = instructions.next();
 
                 // Get the current flow override state
