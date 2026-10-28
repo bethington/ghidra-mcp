@@ -1,4 +1,4 @@
-"""Unit tests for scripts/upgrade_project_language.py.
+"""Unit tests for tools/upgrade_project_language.py.
 
 Pure Python -- no Ghidra, no server, no subprocess. Every behaviour pinned here
 is one that produced a silent wrong answer during development:
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = REPO_ROOT / "scripts" / "upgrade_project_language.py"
+MODULE_PATH = REPO_ROOT / "tools" / "upgrade_project_language.py"
 
 
 def _load():
@@ -133,11 +133,14 @@ def test_no_private_destination_is_baked_into_the_module():
 def test_server_and_repo_come_from_the_live_instance(monkeypatch, tmp_path):
     monkeypatch.setattr(
         upl, "mcp_get",
-        lambda base, endpoint, **kw: {"project": "someproj", "server_info": "host.example:13100"},
+        lambda base, endpoint, **kw: {"project_name": "local-name", "server_repo": "someproj",
+                                      "server_info": "host.example:13100"},
     )
     server, repo, origin = upl.resolve_server_and_repo("http://x", tmp_path, None, None)
+    # The repository, not the local project's name: the two differ whenever the
+    # project was created under another name than the repo it binds to.
     assert (server, repo) == ("host.example:13100", "someproj")
-    assert "project/info" in origin
+    assert "get_project_info" in origin
 
 
 def test_explicit_flags_win_over_discovery(monkeypatch, tmp_path):
@@ -370,9 +373,15 @@ def test_checkout_census_is_unscoped(monkeypatch):
 
 
 def test_mcp_get_unwraps_double_encoded_envelope(monkeypatch):
-    import io
+    from tools import mcp_http
 
-    class FakeResponse(io.BytesIO):
+    class FakeResponse:
+        status = 200
+        headers = {}
+
+        def read(self, size=-1):
+            return b'{"result": "{\\"a\\": 1}"}'
+
         def __enter__(self):
             return self
 
@@ -380,9 +389,9 @@ def test_mcp_get_unwraps_double_encoded_envelope(monkeypatch):
             return False
 
     monkeypatch.setattr(
-        upl.urllib.request,
+        mcp_http.urllib.request,
         "urlopen",
-        lambda url, timeout=None: FakeResponse(b'{"result": "{\\"a\\": 1}"}'),
+        lambda url, timeout=None: FakeResponse(),
     )
     assert upl.mcp_get("http://x", "y") == {"a": 1}
 
@@ -394,11 +403,17 @@ def test_mcp_get_accepts_a_path_query_parameter(monkeypatch):
     dies with "got multiple values for argument 'path'" -- which the verify pass
     then reports as `unknown` for every single program.
     """
-    import io
+    from tools import mcp_http
 
     seen: dict[str, str] = {}
 
-    class FakeResponse(io.BytesIO):
+    class FakeResponse:
+        status = 200
+        headers = {}
+
+        def read(self, size=-1):
+            return b'{"result": "{\\"success\\": true}"}'
+
         def __enter__(self):
             return self
 
@@ -407,9 +422,9 @@ def test_mcp_get_accepts_a_path_query_parameter(monkeypatch):
 
     def fake_urlopen(url, timeout=None):
         seen["url"] = url
-        return FakeResponse(b'{"result": "{\\"success\\": true}"}')
+        return FakeResponse()
 
-    monkeypatch.setattr(upl.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", fake_urlopen)
     result = upl.mcp_get("http://x", "open_program", path="/Vanilla/1.01/D2Game.dll")
     assert result == {"success": True}
     assert "open_program?" in seen["url"]

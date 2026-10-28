@@ -37,7 +37,7 @@ from . import dispatch
 from . import registry
 from . import state
 from .config import logger
-from .server import mcp
+from .server import Context, mcp
 
 # --------------------------------------------------------------------------
 # Public catalog names (also used by apply_expose_mode for pruning).
@@ -84,6 +84,25 @@ _SEARCH_DEFAULT_LIMIT = 10
 _SEARCH_MAX_LIMIT = 50
 
 
+# Keep registration deferred until CLI mode selection so importing the package
+# preserves the legacy full surface. Retain decorators for facade/hybrid startup.
+_FACADE_REGISTRATIONS = {}
+
+
+def _log_auto_connect(count: int, *, project: str | None = None, tcp_url: str | None = None) -> None:
+    """Describe cache-only facade connections without inflating static_tools."""
+    if state._expose_mode == "facade":
+        target = f"via TCP to {tcp_url}" if tcp_url else f"from {project or 'unknown'}"
+        logger.info(
+            "Auto-cached %d catalog actions %s (facade mode: 5 ghidra_* tools visible, dispatch by name)",
+            len(state._full_schema), target,
+        )
+    elif tcp_url:
+        logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+    else:
+        logger.info(f"Auto-registered {count} tools from {project or 'unknown'}")
+
+
 def _facade_tool(*dargs, **dkwargs):
     """Register a facade tool on the shared FastMCP server.
 
@@ -94,7 +113,9 @@ def _facade_tool(*dargs, **dkwargs):
     registrar = mcp.tool(*dargs, **dkwargs)
 
     def _register(fn):
-        registrar(fn)
+        _FACADE_REGISTRATIONS[fn.__name__] = lambda: registrar(fn)
+        if state._expose_mode in {"facade", "hybrid"}:
+            registrar(fn)
         return fn
 
     return _register
@@ -289,6 +310,21 @@ def _call_catalog_sync(tool_def: dict, args: dict) -> str:
     props = schema.get("properties", {}) or {}
     required = schema.get("required", []) or []
     allow_empty = {k for k, v in props.items() if isinstance(v, dict) and v.get("allow_empty")}
+
+    # Fold the current registry's published aliases before validating required
+    # fields. A facade call must accept the same spellings as a dynamic call.
+    args = dict(args)
+    claimed_aliases = set()
+    for canonical, pdef in props.items():
+        for alias in pdef.get("aliases") or ():
+            if alias in props or alias in claimed_aliases:
+                continue
+            claimed_aliases.add(alias)
+            value = args.pop(alias, None)
+            current = args.get(canonical)
+            absent = current is None or (current == "" and canonical not in allow_empty)
+            if value is not None and absent:
+                args[canonical] = value
 
     unknown = [k for k in args if k != "dry_run" and k not in props]
     if unknown:
@@ -496,7 +532,7 @@ def ghidra_describe(tool: str) -> str:
 
 
 @_facade_tool()
-async def ghidra_call(tool: str, args: dict | None = None) -> str:
+async def ghidra_call(tool: str, args: dict | None = None, ctx: Context | None = None) -> str:
     """Call ANY catalog action by name. The only way to act on Ghidra.
 
     Never invent a tool name: resolve via ghidra_search first. Unknown names
@@ -542,7 +578,19 @@ async def ghidra_call(tool: str, args: dict | None = None) -> str:
     tool_def = next(td for td in state._full_schema if td.get("name") == resolved)
     if resolved != tool:
         logger.info("ghidra_call: resolved %r -> %r", tool, resolved)
-    return await state.run_blocking_ghidra_call(_call_catalog_sync, tool_def, params)
+    heartbeat = registry._start_progress_heartbeat(ctx, resolved)
+    try:
+        result = await state.run_blocking_ghidra_call(_call_catalog_sync, tool_def, params)
+    finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+    # Match the current dynamic wrapper: failed dispatches carry isError, and
+    # successful writes invalidate resources before the response stream closes.
+    ok = dispatch.raise_on_failure(result)
+    from . import invalidation
+
+    await invalidation.after_successful_write(tool_def, params, ctx, ok)
+    return ok
 
 
 # --------------------------------------------------------------------------
@@ -566,6 +614,10 @@ def apply_expose_mode(mode: str) -> dict:
     except AttributeError:
         logger.warning("apply_expose_mode: FastMCP internals changed; cannot prune tools")
         return {"mode": normalized, "pruned": False}
+    if normalized in {"facade", "hybrid"}:
+        for name, register in _FACADE_REGISTRATIONS.items():
+            if name not in tools:
+                register()
     if normalized == "hybrid":
         return {"mode": normalized, "visible": sorted(tools)}
     if normalized == "facade":

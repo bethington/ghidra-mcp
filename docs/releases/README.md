@@ -9,15 +9,75 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite
+### Unreleased
 
-**Major release, breaking.** The advertised surface consolidates **272 → 251
-tools**: five rename tools collapse into `rename_symbol`, four variable-type
-setters into `set_variable_type`, six `batch_*` tools into their one-or-many
-survivors, and the comment family into `set_comment` / `get_comment` with an
-explicit kind. No capability is removed — every operation the deleted tools
-performed is reachable through the survivor — and there are no
-backward-compatibility aliases.
+The catalog stands at **219 tools** — 215 served by the GUI plugin, 200 by the headless
+server, 196 by both:
+
+- **Function resources.** The bridge serves functions and decompilation trees as MCP
+  resources keyed by address, and every write invalidates the resources it changed.
+  **`get_change_token`** lets the bridge notice edits no write hook sees.
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C as files
+  an agent searches with its own Grep, Read and Glob, and keeps them current as the
+  program changes.
+- **`partition_program`** groups functions into compartments by evidence before any
+  decompile.
+- **`find_type_users`** lists the functions whose decompilation uses a type or one
+  field of it.
+
+### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
+
+**Major release, breaking.** The first consolidation pass took the advertised
+surface from **272 to 251 tools**: five rename tools collapse into
+`rename_symbol`, four variable-type setters into `set_variable_type`, six
+`batch_*` tools into their one-or-many survivors, and the comment family into
+`set_comment` / `get_comment` with an explicit kind. Two endpoints were added in
+the same cycle (`/list_shadowed_globals`, `/batch_get_comments`), and rc.1
+shipped 253.
+
+After rc.1 a second pass removed 53 more tools and added 9, so
+**7.0.0 ships 209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186 by both:
+
+- **`get_functions`** reads one function, or up to 20, with `fields=` choosing
+  what comes back. It replaces `decompile_function` and eight other per-function
+  readers. Every function-scoped tool now takes `function=` (a name or an
+  address); `address`, `name`, `function_name` and `function_address` remain
+  aliases.
+- **`find_functions`** replaces `list_functions`, `list_functions_enhanced`,
+  `search_functions`, `search_functions_enhanced` and `search_functions_by_tag`.
+- **`list_program_items(kind=...)`** replaces the eight program inventories
+  (`list_classes`, `list_imports`, `list_exports`, `list_segments`, ...).
+- **`get_ui_cursor(type=...)`** replaces the four `get_current_*` tools.
+- **`check_connection`** returns `{status, server_kind, version}` on both
+  servers and replaces `get_version` and headless `/health`.
+- **One program model and one name per operation on both servers:**
+  `import_file` replaces headless `load_program`, `open_program` replaces
+  `load_program_from_project`, `get_project_info` replaces GUI `project/info`,
+  `checkin_program` replaces `server/version_control/checkin`. Either server
+  opens a program the first time any endpoint names it.
+- **`apply_documentation`** replaces `apply_function_documentation` and
+  `batch_apply_documentation`, and takes what `get_function_documentation`
+  exports (one function, or `entries=[...]` for many).
+- **The decompilation tree** (`decompile_tree_*`) writes a program's decompiled C to
+  disk as a file tree an agent searches with its own Grep, Read and Glob, and keeps
+  it current as the program changes. `partition_program` and `find_type_users` come
+  with it, and `get_change_token` tells a client when what it read has gone stale.
+- Smaller folds: `get_xrefs_to(addresses=)` for `get_bulk_xrefs`,
+  `get_comment(addresses=)` for `batch_get_comments`, `find_data_types`,
+  `create_derived_type`, `debugger/step(kind=)`.
+
+No capability is removed — every operation the deleted tools performed is
+reachable through a survivor — and there are no backward-compatibility aliases.
+`tests/unit/test_migration_guide_coverage.py` fails if any tool removed since
+6.0.0 is missing from the migration guide, and
+`tests/unit/test_migration_guide_successors.py` if a named successor is not in
+the shipped catalog.
+
+The same cycle fixed writes that lost work or reported success for what did
+not happen (#569): a nested write rolled back its caller's transaction,
+`dry_run` was offered where a rollback cannot undo the effect, headless closed
+modified programs without saving, and `import_program(overwrite=true)` deleted
+the new import.
 
 Every endpoint that answered in prose now answers **JSON**. List-shaped tools
 return a named plural key plus `count`/`total`; errors are `{"error": ...}`.
@@ -28,10 +88,35 @@ contract is in
 A new **MCP-protocol conformance suite** drives the server through a real MCP
 client rather than raw HTTP, and is the reason a dozen genuine bugs are known —
 including two that could freeze the server (`close_program` and auto-analysis).
+The bridge itself now follows the protocol more closely (#553): failures come
+back with `isError` set, every tool declares `readOnlyHint` / `destructiveHint`,
+long calls send progress notifications, a bare `OPTIONS` is answered and no
+longer leaks a session, and the HTTP transports gain an optional bearer token
+(`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
+`--tools-page-size`.
 
-Also: `doc_lint.py`, a documentation *correctness* linter backed by Ghidra's
-Function ID analyzer, and a `rename_function` gate that refuses to overwrite an
-FID-produced name.
+**Lazy tool loading is the default.** Advertising all 209 endpoints in one
+`tools/list` is over a hard limit for at least one major provider — Gemini
+rejects the whole request with `400 INVALID_ARGUMENT` before a tool is ever
+called. The bridge now loads `listing,function,program` (69 endpoints plus 8
+static tools) on connect and registers the rest on demand; `--no-lazy` restores
+the old behaviour for clients that ignore `tools/list_changed`.
+
+**An offline test tier** runs the read-only integration suite against a strict
+fake of the plugin's HTTP surface, with no Ghidra installed at all. Alongside
+it, the real-Ghidra Java tier now actually executes (it had been self-skipping
+as a pass everywhere), and the live-regression release gate can now block a
+tagged release — it previously could not, because the job it depended on is
+always skipped on a tag push.
+
+**The MCP bridge ships as a container.** `docker compose up -d --build` brings
+up the Ghidra REST server on `:8089` and the bridge on `:8081`, speaking MCP
+over streamable-http at `/mcp`.
+
+Also: a `rename_function` gate that refuses to bury a name Ghidra's Function ID
+analyzer produced, unless `strict_mode=warn`.
+
+**Targets Ghidra 12.1.2**, as pinned in `pom.xml` and the three CI workflows.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 
@@ -413,8 +498,7 @@ internal fun-doc improvement (library-code auto-classification). 241 → 243 too
   default on all platforms; TCP port-range fallback scans
   `8089..8104` when the configured port is taken; actual bound port
   surfaced via `/mcp/instance_info → tcp_port`.
-- **P-code endpoints** (#192, PR #197) — `/get_function_pcode` (basic
-  + high granularity, full HighFunction graph with SSA flags),
+- **P-code endpoints** (#192, PR #197) — `/get_function_pcode` (basic + high granularity, full HighFunction graph with SSA flags),
   `/get_language_metadata` (SLEIGH facts, register relations,
   default symbols).
 - **Library-code auto-classification (fun-doc)** (PR #198) — heuristic
@@ -434,6 +518,7 @@ Major release: fun-doc's per-function workflow state moves out of `state.json` (
 - **Tier-2 doc-quality regression** (`fun-doc/benchmark/bh/`) — grades BH.dll documentation against the upstream Project-Diablo-2/BH source as ground truth. Baseline corpus score 0.442 captured.
 
 Migration path for existing users:
+
 ```bash
 pip install -r fun-doc/requirements.txt
 python fun-doc/scripts/migrate_state_to_sql.py [--state ... --runs ... --inventory ... --global-inventory ...]
@@ -450,7 +535,7 @@ Known follow-ups (not blockers): globals worker run-write path is JSON-only; `ru
 Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, plus an extension of the v5.7.1 toggle.
 
 - **Bridge `duplicate parameter name: 'dry_run'` fix** (synthol, [#193](https://github.com/bethington/ghidra-mcp/pull/193), closes [#187](https://github.com/bethington/ghidra-mcp/issues/187)) — the bridge no longer collides its synthetic `dry_run` param with schema-declared ones. Affected every v5.7.0/v5.7.1 user whose plugin exposed `archive_ingest_function` or `archive_ingest_program`; the bridge failed to register tools on startup.
-- **Linux/Nix `tools.setup` compat** ([#194](https://github.com/bethington/ghidra-mcp/pull/194), closes [#190](https://github.com/bethington/ghidra-mcp/issues/190) + [#191](https://github.com/bethington/ghidra-mcp/issues/191)) — new `pip_command()` helper probes `python -m pip` first then falls back to a bare `pip` on PATH, fixing setup on Nix-managed Python environments where pip is exposed as a binary but not importable. `find_ghidra_executable` is platform-aware so `ghidraRun.bat` is no longer preferred on Linux. Reported by @Molkars + @letsjustfixit.
+- **Linux/Nix `tools.setup` compat** ([#194](https://github.com/bethington/ghidra-mcp/pull/194), closes [#190](https://github.com/bethington/ghidra-mcp/issues/190) + [#191](https://github.com/bethington/ghidra-mcp/issues/189)) — new `pip_command()` helper probes `python -m pip` first then falls back to a bare `pip` on PATH, fixing setup on Nix-managed Python environments where pip is exposed as a binary but not importable. `find_ghidra_executable` is platform-aware so `ghidraRun.bat` is no longer preferred on Linux. Reported by @Molkars + @letsjustfixit.
 - **Strict Naming Enforcement extended to globals** (Hummer12007, [#188](https://github.com/bethington/ghidra-mcp/pull/188)) — the existing Ghidra Tool Option remains strict by default, but disabling it now downgrades the hard name-quality rejects in `rename_data`, `rename_global_variable`, `set_global`, and the `apply_data_type` prefix/type guard to warnings, matching `rename_function_by_address`. Legacy saved values from the **Strict Function Name Enforcement** Tool Option migrate automatically.
 
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
@@ -459,8 +544,8 @@ Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, pl
 
 Patch release bundling five community-contributed PRs and three post-release bug fixes.
 
-- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 231 → 241.
-- **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/177).
+- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 205 → 241.
+- **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/181).
 - **Function-name enforcement toggle** (Hummer12007, [#171](https://github.com/bethington/ghidra-mcp/pull/171)) — Ghidra Tool Option to switch verb-tier rejection between hard-reject (default) and warning-only. Power-user escape hatch.
 - **Headless startup crash fix** ([#180](https://github.com/bethington/ghidra-mcp/issues/180), originally diagnosed by @MMOStars) — duplicate route registration of `/create_folder` and `/delete_file` was tripping `HttpServerImpl.createContext` with `IllegalArgumentException`. Removed the manual registrations; the `@McpTool` annotations carry them. Affected every Docker/headless deployment.
 - **8051 (and similar) address-space fix** ([#184](https://github.com/bethington/ghidra-mcp/issues/184), reported by @Artem-B) — bridge no longer lowercases space names, which broke `CODE:123` etc. on architectures with uppercase-declared spaces.
@@ -589,7 +674,7 @@ Function-name quality enforcement:
 Summarized below; detailed per-release docs are in [archive/](archive/).
 
 | Version | Type | Highlights |
-|---------|------|-----------|
+| --------- | ------ | ----------- |
 | v3.2.0 | fixes | Trailing slash, fuzzy match JSON, completeness checker overhaul |
 | v3.1.0 | feature | Server control menu, deployment automation, TCD auto-activation |
 | v3.0.0 | major | Headless server parity, 8 new tool categories, 179 tools |

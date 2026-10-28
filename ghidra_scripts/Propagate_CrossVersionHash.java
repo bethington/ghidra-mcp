@@ -2,13 +2,13 @@
 //
 // Computes opcode hashes for FUN_* functions in a target program and matches them against documented functions in a source program. Renames matched functions automatically.
 //
-// Usage: Args: [0]='source_path|target_path' (e.g., /Vanilla/1.13d/D2Game.dll|/Vanilla/1.13c/D2Game.dll).
+// Usage: Args: [0]='source_path|target_path' (e.g., /v2.0/engine.dll|/v1.9/engine.dll).
 // Output: Renames matched FUN_* functions in the target program.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Propagate names via cross-version hash matching
-// @menupath Diablo 2.Propagation.Cross Version Hash
+// @menupath GhidraMCP.Propagation.Cross Version Hash
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

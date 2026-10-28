@@ -51,6 +51,21 @@ GATE_REASONS = {
     "headless": "needs the standalone headless server (Phase 2 fixture)",
 }
 
+# Environment-gated, with a reason specific to each tool. These calls are
+# refused (or meaningless) without configuration or a session that a plain GUI
+# recording run does not have -- the archive tools need GHIDRA_MCP_ARCHIVE_URL
+# pointed at a running archive exchange, and the GUI cursor tools need a live
+# CodeBrowser window.
+#
+# They are skipped rather than recorded. Recording them made the refusal
+# itself the golden, so the case asserted that the tool stays broken and
+# reported green (see #474). A skip says plainly: this was not proven here.
+ENVIRONMENT_GATED = {
+    "archive_ingest_function": "archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
+    "archive_ingest_program": "archive exchange is disabled (GHIDRA_MCP_ARCHIVE_URL unset)",
+    "tool_goto_address": "needs a live GUI CodeBrowser session",
+}
+
 # Tools whose output describes the *operator's session* rather than the program
 # under test: which programs happen to be open, the project name, the Ghidra
 # Server address, file counts. Snapshotting these is wrong twice over -- the
@@ -64,7 +79,7 @@ ENVIRONMENT_COUPLED = {
     "project_info", "list_open_programs", "list_project_files", "list_instances",
     "mcp_instance_info", "mcp_health", "compare_programs_documentation",
     "merge_program_documentation", "tool_running_tools", "server_status",
-    "get_current_program_info", "analysis_status", "list_scripts",
+    "get_ui_cursor", "analysis_status", "list_scripts",
 }
 
 
@@ -93,6 +108,83 @@ class ProgramFacts:
         self.segment_name = segment_name
         self.second_function_address = second_function_address or function_address
         self.second_program = second_program or program
+
+
+# Per-tool argument overrides, applied AFTER name-keyed synthesis.
+#
+# The synthesizer maps a parameter *name* to a value globally, which is what
+# makes it able to bootstrap ~250 cases at all. It has two blind spots that no
+# amount of name mapping can close:
+#
+# 1. A schema records each parameter's type, not the relationships BETWEEN
+#    parameters. `/search_instructions` declares `mnemonic` and
+#    `operand_pattern` both optional with `defaultValue = ""`, but rejects the
+#    call when both are empty ("At least one of 'mnemonic' or 'operand_pattern'
+#    must be non-empty"). The synthesizer filled only the parameters it had
+#    names for -- `function`, `limit`, `program` -- producing a structurally
+#    valid call that the endpoint correctly refuses.
+# 2. One name means different things in different tools. `pattern` is a type
+#    name for `/find_data_types` and a hex byte string for
+#    `/search_byte_patterns`; `source_type` is a Ghidra reference SourceType for
+#    `/add_memory_reference`, not a data type.
+#
+# Both produce a case that runs, returns `{"error": ...}`, and still passes --
+# the generated assertions are `is_error: false` (the MCP protocol flag, which
+# an error *payload* does not set) plus `nonempty: true` (an error string is
+# non-empty). Worse, `--record` then wrote that refusal out as the golden.
+#
+# A value of `None` drops a parameter the name mapping would otherwise supply.
+TOOL_ARG_OVERRIDES: dict[str, dict[str, Any]] = {
+    # Needs at least one of mnemonic/operand_pattern. `ret` is chosen because
+    # every ordinary function terminates in one, so the case has matches on any
+    # target rather than depending on what the benchmark happens to contain.
+    # `function` is dropped so the case exercises the default program-wide
+    # scope, which is the path callers actually take.
+    "search_instructions": {"mnemonic": "ret", "function": None},
+
+    # --- the synthesizer filled a parameter with the wrong KIND of value ---
+    # The name mapping is global, so a parameter that means one thing here and
+    # something else elsewhere gets the wrong value. Each of these is refused
+    # by the server, and the refusal used to be recorded as the golden.
+    #
+    # `tags` is not in the name map at all, so it was omitted entirely and the
+    # tool refused with "no 'tags' supplied". The two tag cases are ordered --
+    # add_function_tag runs first (corpus line 7), so the tag this one
+    # detaches exists by the time it runs.
+    "add_function_tag": {"tags": "conformance_test"},
+    "remove_function_tag": {"tags": "conformance_test"},
+    # `pattern` is a TYPE NAME for /find_data_types but a hex byte string here.
+    "search_byte_patterns": {"pattern": "9090"},
+    # `source_type` is a Ghidra reference SourceType, not a data type.
+    # USER_DEFINED is the documented default and survives re-analysis.
+    "add_memory_reference": {"source_type": "USER_DEFINED"},
+    # `group` was filled with the tool CATEGORY name; it wants an option
+    # group, e.g. 'Program Information'.
+    "get_program_options": {"group": "Program Information"},
+    # `direction` must be forward|backward; the name mapping sent 'both'.
+    "analyze_dataflow": {"direction": "forward"},
+}
+
+# An override value of the form "$fact.<name>" is resolved against the probed
+# ProgramFacts rather than sent literally, so a tool that needs a live address
+# other than the function entry can ask for one by name. A fact that the probe
+# did not find leaves the parameter unresolved: a required one skips the case
+# (rather than sending a refusal), an optional one is dropped so the server's
+# default applies.
+FACT_SENTINEL_PREFIX = "$fact."
+
+
+def _resolve_fact(facts: "ProgramFacts", attr: str) -> Any:
+    """Resolve a `$fact.<attr>` sentinel against the probed program facts."""
+    if attr == "unique_name":
+        # Unique per call. Deliberately NOT used for anything whose value
+        # appears in the response body: a golden that embeds a fresh name
+        # drifts on every run.
+        import uuid
+        return f"conformance_{uuid.uuid4().hex[:12]}"
+    value = getattr(facts, attr, None)
+    return value if value else None
+
 
 
 def synthesize_args(tool: dict[str, Any], facts: ProgramFacts) -> tuple[dict[str, Any], str | None]:
@@ -151,12 +243,38 @@ def synthesize_args(tool: dict[str, Any], facts: ProgramFacts) -> tuple[dict[str
         elif param.get("required"):
             unresolved.append(pname)
 
+    # Per-tool overrides win over the name mapping: they encode cross-parameter
+    # validity constraints and per-tool meanings the schema cannot express.
+    tool_name = (tool.get("path") or "").lstrip("/").replace("/", "_")
+    for oname, ovalue in TOOL_ARG_OVERRIDES.get(tool_name, {}).items():
+        if ovalue is None:
+            args.pop(oname, None)
+        else:
+            args[oname] = ovalue
+        if oname in unresolved and ovalue is not None:
+            unresolved.remove(oname)
+
+    # Overrides may name a live fact instead of a literal value.
+    required = {p.get("name") for p in (tool.get("params") or []) if p.get("required")}
+    for oname, ovalue in list(args.items()):
+        if not (isinstance(ovalue, str) and ovalue.startswith(FACT_SENTINEL_PREFIX)):
+            continue
+        value = _resolve_fact(facts, ovalue[len(FACT_SENTINEL_PREFIX):])
+        if value is None:
+            args.pop(oname, None)
+            if oname in required:
+                unresolved.append(oname)
+        else:
+            args[oname] = value
+
     if unresolved:
         return args, f"no synthetic value for required param(s): {sorted(unresolved)}"
     return args, None
 
 
 def gate_reason(tool_name: str, category: str) -> str | None:
+    if tool_name in ENVIRONMENT_GATED:
+        return ENVIRONMENT_GATED[tool_name]
     if category in GATE_REASONS:
         return GATE_REASONS[category]
     if tool_name in GATED_EXACT:
@@ -233,6 +351,7 @@ def load_cases(path: Path) -> list[Case]:
             name=raw.get("name"),
             normalize_extra=[tuple(p) for p in (raw.get("normalize") or [])],
             extract=raw.get("extract") or {},
+            expect_error_payload=bool(raw.get("expect_error_payload", False)),
         ))
     return out
 
@@ -253,6 +372,7 @@ def dump_cases(cases: list[Case], path: Path, header: str = "") -> None:
                     "snapshot": c.snapshot,
                     "skip": c.skip,
                     "extract": c.extract or None,
+                    "expect_error_payload": c.expect_error_payload or None,
                 }.items() if v not in (None, {}, [])
             }
             for c in cases

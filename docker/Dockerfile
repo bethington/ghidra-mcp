@@ -13,8 +13,11 @@ FROM eclipse-temurin:21-jdk AS builder
 # the Ghidra release zip. A mismatch means Maven can't resolve dependencies
 # (see #183). GHIDRA_DATE must match the asset filename of the chosen
 # version on the upstream NSA/ghidra GitHub release.
-ARG GHIDRA_VERSION=12.1.2
-ARG GHIDRA_DATE=20260605
+ARG GHIDRA_VERSION=12.1.4
+ARG GHIDRA_DATE=20260921
+# SHA-256 of the release zip, as published in the upstream release notes.
+# Keep in sync with GHIDRA_VERSION/GHIDRA_DATE.
+ARG GHIDRA_SHA256=ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -31,6 +34,9 @@ RUN wget -q \
     wget -q \
     "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC.zip" \
     -O ghidra.zip
+
+# Verify the download before anything from it is unpacked or installed.
+RUN echo "${GHIDRA_SHA256}  ghidra.zip" | sha256sum -c -
 
 RUN unzip -q ghidra.zip && \
     rm ghidra.zip && \
@@ -65,6 +71,8 @@ RUN mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Generic/lib/
         -DgroupId=ghidra -DartifactId=DB -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Emulation/lib/Emulation.jar \
         -DgroupId=ghidra -DartifactId=Emulation -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
+    mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Graph/lib/Graph.jar \
+        -DgroupId=ghidra -DartifactId=Graph -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar \
         -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=${GHIDRA_VERSION} -Dpackaging=jar && \
     mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar \
@@ -136,9 +144,18 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 # it; /data and /projects are chown'd before the VOLUME declaration so the
 # anonymous volumes inherit ghidra ownership. HOME drives Java's user.home,
 # where Ghidra writes its per-user settings.
-RUN groupadd --gid 1000 ghidra \
-    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/ghidra ghidra \
-    && chown -R ghidra:ghidra /app /data /projects /home/ghidra
+# Preserve UID/GID 1000 for existing data and project volumes. Ubuntu Noble
+# reserves these IDs for its default ubuntu account, so reclaim them first.
+RUN set -eux; \
+    if getent passwd 1000 >/dev/null; then \
+        userdel --remove "$(getent passwd 1000 | cut -d: -f1)"; \
+    fi; \
+    if getent group 1000 >/dev/null; then \
+        groupdel "$(getent group 1000 | cut -d: -f1)"; \
+    fi; \
+    groupadd --gid 1000 ghidra; \
+    useradd --uid 1000 --gid 1000 --create-home --home-dir /home/ghidra ghidra; \
+    chown -R ghidra:ghidra /app /data /projects /home/ghidra
 ENV HOME=/home/ghidra
 USER ghidra
 

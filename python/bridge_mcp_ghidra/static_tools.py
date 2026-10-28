@@ -5,13 +5,22 @@ import json
 import os
 import threading
 import time
+from typing import Annotated
 
-from . import discovery
+from pydantic import Field
+
+from . import discovery, facade
 from . import dispatch
 from . import registry
 from . import state
 from . import transport
-from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
+from .config import (
+    DEFAULT_TCP_URL,
+    READ_ONLY_TOOL,
+    STATIC_TOOL_NAMES,
+    WRITE_TOOL,
+    logger,
+)
 from .server import Context, mcp
 from .validation import validate_server_url
 
@@ -204,8 +213,14 @@ def _load_groups_sync(group_names: list[str]) -> list[str]:
     return loaded
 
 
-@mcp.tool(name="list_instances")
+@mcp.tool(name="list_instances", annotations=READ_ONLY_TOOL, structured_output=False)
 async def _list_instances_tool() -> str:
+    """
+    List known Ghidra instances from UDS discovery and the active TCP fallback.
+
+    Returns JSON with each instance's project name, PID, open programs, and
+    socket path or TCP URL. Also shows which instance is currently connected.
+    """
     return await state.run_in_worker(_list_instances_sync)
 
 
@@ -226,8 +241,10 @@ def _summarize_instance(inst: dict) -> dict:
     when it was connected to something worth listing. Nothing downstream reads
     the roster: connect_instance matches on project name.
 
-    Entries are dicts ({name, path, open}) from /mcp/instance_info, or bare
-    strings from /list_open_programs — where being listed *is* being open.
+    Entries are dicts ({name, path, open}) from /mcp/instance_info, or entries
+    from the /list_open_programs fallback — dicts with no `open` key, or bare
+    strings — where being listed *is* being open. Only an explicit open=False
+    filters an entry out (#565).
     """
     programs = inst.get("programs")
     if not isinstance(programs, list):
@@ -237,7 +254,7 @@ def _summarize_instance(inst: dict) -> dict:
     open_names = [
         (p.get("path") or p.get("name")) if isinstance(p, dict) else p
         for p in programs
-        if not isinstance(p, dict) or p.get("open")
+        if not isinstance(p, dict) or p.get("open", True)
     ]
     summary["program_count"] = len(programs)
     summary["open_programs"] = open_names[:MAX_OPEN_PROGRAMS_LISTED]
@@ -246,8 +263,11 @@ def _summarize_instance(inst: dict) -> dict:
     return summary
 
 
-@mcp.tool()
-async def connect_instance(project: str, ctx: Context | None = None) -> str:
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
+async def connect_instance(
+    project: Annotated[str, Field(description="Project name (or substring) to connect to")],
+    ctx: Context | None = None,
+) -> str:
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
@@ -276,7 +296,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     return json.dumps(result)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
 def list_tool_groups() -> str:
     """
     List all available tool groups with their tool counts and loaded status.
@@ -290,8 +310,11 @@ def list_tool_groups() -> str:
     return json.dumps({"groups": groups, "total_tools": len(state._full_schema)}, indent=2)
 
 
-@mcp.tool()
-async def load_tool_group(group: str, ctx: Context | None = None) -> str:
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
+async def load_tool_group(
+    group: Annotated[str, Field(description='Category name (e.g. "function", "datatype") or "all"')],
+    ctx: Context | None = None,
+) -> str:
     """
     Load all tools in a category. Accepts a category name or "all" to load everything.
 
@@ -360,8 +383,11 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
     )
 
 
-@mcp.tool()
-async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
+async def unload_tool_group(
+    group: Annotated[str, Field(description="Category name to unload")],
+    ctx: Context | None = None,
+) -> str:
     """
     Unload all tools in a category. Default groups are protected from unloading.
 
@@ -395,8 +421,18 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
     )
 
 
-@mcp.tool()
-async def check_tools(tools: str) -> str:
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
+async def check_tools(
+    tools: Annotated[
+        str,
+        Field(
+            description=(
+                "Comma-separated tool names, e.g. "
+                '"rename_symbol,batch_set_comments,analyze_function_completeness"'
+            )
+        ),
+    ],
+) -> str:
     """
     Check if specific tools are callable right now. Returns status for each tool:
     "callable", "not_loaded" (exists but group not loaded), or "not_found" (doesn't exist).
@@ -453,8 +489,14 @@ async def check_tools(tools: str) -> str:
     )
 
 
-@mcp.tool()
-async def search_tools(query: str, limit: int = 15) -> str:
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=False)
+async def search_tools(
+    query: Annotated[
+        str,
+        Field(description='Space-separated keywords, e.g. "rename function" or "xref struct".'),
+    ],
+    limit: Annotated[int, Field(description="Maximum number of results to return (default 15).")] = 15,
+) -> str:
     """
     Search the full Ghidra tool catalog by keyword — including tools whose group
     is not currently loaded. Use this to discover the right tool without paying
@@ -509,13 +551,32 @@ async def search_tools(query: str, limit: int = 15) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_TOOL, structured_output=False)
 async def import_file(
-    file_path: str,
-    project_folder: str = "/",
-    language: str | None = None,
-    compiler_spec: str | None = None,
-    auto_analyze: bool = True,
+    file_path: Annotated[str, Field(description="Absolute path to the binary file on disk")],
+    project_folder: Annotated[
+        str, Field(description='Destination folder in the Ghidra project (default: "/")')
+    ] = "/",
+    language: Annotated[
+        str | None,
+        Field(
+            description=(
+                'Language ID for raw binaries (e.g. "ARM:LE:32:Cortex", '
+                '"x86:LE:64:default")'
+            )
+        ),
+    ] = None,
+    compiler_spec: Annotated[
+        str | None,
+        Field(
+            description=(
+                'Compiler spec ID (e.g. "default", "gcc"). Uses language default if omitted.'
+            )
+        ),
+    ] = None,
+    auto_analyze: Annotated[
+        bool, Field(description="Start auto-analysis after import (default: true)")
+    ] = True,
     ctx: Context | None = None,
 ) -> str:
     """
@@ -546,6 +607,9 @@ async def import_file(
         payload["compiler_spec"] = compiler_spec
 
     result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
+    # A refused import is a failed tool call, not a successful one that happens
+    # to contain the word "error" (see dispatch.raise_on_failure).
+    dispatch.raise_on_failure(result)
 
     # Parse result to check if analysis was started
     try:
@@ -584,18 +648,17 @@ async def import_file(
     return result
 
 
-def _auto_connect() -> bool:
-    """Try to auto-connect to a single running instance on startup.
-
-    Returns True only if dynamic tools were actually registered from a live
-    Ghidra. Callers use that to decide whether to keep retrying in the
-    background — see `_start_auto_connect_retry`.
-    """
+def _auto_connect(project: str | None = None) -> bool:
+    """Return True after connecting and registering tools for a unique instance."""
     # Try UDS first
     instances = discovery.discover_instances()
+    if project is not None:
+        instances = discovery.find_project_instances(project, instances)
+        if len(instances) != 1:
+            return False
     if len(instances) == 1:
         inst = instances[0]
-        if transport.uds_supported():
+        if inst.get("socket") and transport.uds_supported():
             candidate = state.build_connection_snapshot(
                 mode="uds",
                 active_socket=inst["socket"],
@@ -615,14 +678,7 @@ def _auto_connect() -> bool:
                         active_tcp=None,
                         connected_project=inst.get("project"),
                     )
-                if state._expose_mode == "facade":
-                    logger.info(
-                        f"Auto-cached {len(state._full_schema)} catalog actions from "
-                        f"{inst.get('project') or 'unknown'} "
-                        f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
-                    )
-                else:
-                    logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                facade._log_auto_connect(count, project=inst.get("project"))
                 return True
             except Exception as e:
                 logger.warning(f"UDS auto-connect schema fetch failed: {e}")
@@ -651,14 +707,7 @@ def _auto_connect() -> bool:
                         active_tcp=inst["url"],
                         connected_project=inst.get("project"),
                     )
-                if state._expose_mode == "facade":
-                    logger.info(
-                        f"Auto-cached {len(state._full_schema)} catalog actions from "
-                        f"{inst.get('project') or 'unknown'} "
-                        f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
-                    )
-                else:
-                    logger.info(f"Auto-registered {count} tools from {inst.get('project') or 'unknown'}")
+                facade._log_auto_connect(count, project=inst.get("project"))
                 return True
             except Exception as e:
                 logger.warning(f"TCP auto-connect schema fetch failed: {e}")
@@ -670,6 +719,10 @@ def _auto_connect() -> bool:
         # third instance entirely) right after telling the user to choose.
         # Stay unconnected until connect_instance() is called explicitly,
         # matching connect_instance's own multi-instance refusal logic.
+        return False
+
+    if project is not None:
+        # Never fall back to an unrelated listener after selecting a project.
         return False
 
     # Try TCP fallback
@@ -691,14 +744,7 @@ def _auto_connect() -> bool:
                 active_tcp=tcp_url,
                 connected_project=None,
             )
-        if state._expose_mode == "facade":
-            logger.info(
-                f"Auto-connected via TCP to {tcp_url}, "
-                f"cached {len(state._full_schema)} catalog actions "
-                f"(facade mode: 5 ghidra_* tools visible, dispatch by name)"
-            )
-        else:
-            logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+        facade._log_auto_connect(count, tcp_url=tcp_url)
         return True
     except Exception:
         if not instances:
@@ -712,7 +758,9 @@ def _auto_connect() -> bool:
 AUTO_CONNECT_RETRY_INTERVAL_SEC = 15.0
 
 
-def _start_auto_connect_retry(interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC) -> threading.Thread:
+def _start_auto_connect_retry(
+    interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC, *, project: str | None = None
+) -> threading.Thread:
     """Retry `_auto_connect()` in the background until Ghidra shows up.
 
     `_auto_connect()` runs exactly once during startup, so a bridge launched
@@ -734,7 +782,7 @@ def _start_auto_connect_retry(interval: float = AUTO_CONNECT_RETRY_INTERVAL_SEC)
                 # connect_instance call) — nothing left to retry.
                 return
             try:
-                connected = _auto_connect()
+                connected = _auto_connect(project=project) if project is not None else _auto_connect()
             except Exception as e:  # never let the retry thread die silently
                 logger.debug(f"Auto-connect retry attempt failed: {e}")
                 continue

@@ -3,12 +3,12 @@
 // Scans all functions, classifies undocumented ones (thunk/leaf/worker/api), counts xrefs/callees/callers, and detects register-only SSA. Produces a JSON manifest for automated analysis.
 //
 // Usage: Run from Script Manager on any program.
-// Output: JSON manifest at workflows/survey_manifest.json.
+// Output: JSON manifest at ~/ghidra-mcp-reports/survey_<program>.json (override the directory with GHIDRA_MCP_REPORTS_DIR).
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Survey undocumented functions for AI-driven RE loops
-// @menupath Diablo 2.Documentation.Survey Undocumented
+// @menupath GhidraMCP.Documentation.Survey Undocumented
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -173,26 +173,7 @@ public class Document_SurveyUndocumented extends GhidraScript {
         decomp.dispose();
 
         // Write manifest file
-        String projectRoot = System.getProperty("user.dir");
-        // Try to find the ghidra-mcp project workflows directory
-        String[] searchPaths = {
-            "C:/Users/benam/source/mcp/ghidra-mcp/workflows",
-            projectRoot + "/workflows"
-        };
-
-        File outputDir = null;
-        for (String path : searchPaths) {
-            File dir = new File(path);
-            if (dir.exists() && dir.isDirectory()) {
-                outputDir = dir;
-                break;
-            }
-        }
-
-        if (outputDir == null) {
-            outputDir = new File("C:/Users/benam/source/mcp/ghidra-mcp/workflows");
-            outputDir.mkdirs();
-        }
+        File outputDir = findReportsDir();
 
         // Use program name in filename for multi-binary support
         String safeProgName = programName.replaceAll("[^a-zA-Z0-9._-]", "_");
@@ -273,5 +254,18 @@ public class Document_SurveyUndocumented extends GhidraScript {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"")
                 .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    /**
+     * Report directory: $GHIDRA_MCP_REPORTS_DIR when set, otherwise
+     * ~/ghidra-mcp-reports. Created on demand.
+     */
+    private File findReportsDir() {
+        String override = System.getenv("GHIDRA_MCP_REPORTS_DIR");
+        File dir = (override != null && !override.isBlank())
+            ? new File(override)
+            : new File(System.getProperty("user.home"), "ghidra-mcp-reports");
+        dir.mkdirs();
+        return dir;
     }
 }

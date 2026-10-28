@@ -16,7 +16,6 @@
 package com.xebyte.core;
 
 import ghidra.framework.ModuleInitializer;
-import ghidra.framework.client.ClientUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,7 +45,6 @@ import java.util.Map;
 public class GhidraMCPAuthInitializer implements ModuleInitializer {
 
     private static volatile boolean registered = false;
-    private static GhidraMCPAuthenticator authenticator;
 
     @Override
     public void run() {
@@ -83,8 +81,7 @@ public class GhidraMCPAuthInitializer implements ModuleInitializer {
             user = System.getProperty("user.name");
         }
 
-        authenticator = new GhidraMCPAuthenticator(user, password.toCharArray());
-        ClientUtil.setClientAuthenticator(authenticator);
+        GhidraMCPAuthenticator.register(user, password.toCharArray());
         registered = true;
         System.out.println("[GhidraMCP] Auto-registered server authenticator for user: " + user);
     }
@@ -146,9 +143,5 @@ public class GhidraMCPAuthInitializer implements ModuleInitializer {
 
     public static boolean isRegistered() {
         return registered;
-    }
-
-    public static GhidraMCPAuthenticator getAuthenticator() {
-        return authenticator;
     }
 }

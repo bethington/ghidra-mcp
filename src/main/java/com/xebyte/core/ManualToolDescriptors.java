@@ -18,12 +18,21 @@ import java.util.Map;
  * <p>Path/method/category/description/params are sourced verbatim from
  * {@code tests/endpoints.json}'s hand-registered entries (see
  * {@code RegenerateEndpointsJson}'s "preserved (hand-registered)" merge rule --
- * that file is the existing source of truth for these routes' metadata). Params
- * carry only a name and a source inferred from the route's HTTP method (GET -&gt;
- * query, POST -&gt; body); the catalog does not track per-param type/required detail
- * for hand-registered routes, and every one of these handlers already parses its
- * own params permissively, so marking them optional-string is accurate enough for
- * tool discovery without overclaiming precision the source data doesn't have.
+ * that file is the existing source of truth for these routes' metadata). The
+ * param NAMES come from there and their source is inferred from the route's HTTP
+ * method (GET -&gt; query, POST -&gt; body); the catalog does not track per-param
+ * type/required detail for hand-registered routes, and every one of these handlers
+ * already parses its own params permissively, so marking them optional-string is
+ * accurate enough for tool discovery without overclaiming precision the source
+ * data doesn't have.
+ *
+ * <p>The param DESCRIPTIONS, by contrast, are written here against what the
+ * handlers actually do, because there is nowhere else for them to come from: an
+ * {@code @McpTool} method gets them from {@code @Param(description = ...)}, and a
+ * hand-registered route has no annotation at all. Several of these parameters are
+ * mode-dependent (the GUI plugin drives the already-open project and ignores the
+ * repository selector; the headless server holds a real server connection and
+ * reads it) or accepted and never read, and the descriptions say which.
  *
  * <p>{@code ManualToolDescriptorsParityTest} enforces that every path a server
  * registers manually has an entry here, so a future added route can't silently
@@ -33,21 +42,57 @@ public final class ManualToolDescriptors {
 
     private ManualToolDescriptors() {}
 
-    private static AnnotationScanner.ParamDescriptor p(String name, String source) {
-        return new AnnotationScanner.ParamDescriptor(name, "string", source, true, null, "", "", false);
+    /**
+     * Every hand-coded route the GUI plugin registers on <em>all</em> transports
+     * (see {@code GhidraMCPPlugin.registerHandCodedRoutes}).
+     *
+     * <p>Named once because two scanners have to advertise the same set: the plugin's
+     * for TCP and {@link ServerManager}'s for the Unix socket. ServerManager built its
+     * own list and had none of these, so a bridge on UDS could not see them even after
+     * the routes themselves were shared.
+     */
+    public static final List<String> SHARED_ROUTES = List.of(
+        "/check_connection",
+        "/mcp/health",
+        "/mcp/schema",
+        "/open_project"
+    );
+
+
+    private static AnnotationScanner.ParamDescriptor p(String name, String source, String description) {
+        return new AnnotationScanner.ParamDescriptor(name, "string", source, true, null, description, "", false);
     }
 
-    private static List<AnnotationScanner.ParamDescriptor> params(String method, String... names) {
+    /**
+     * Build a descriptor list from alternating name/description pairs.
+     *
+     * <p>Pairs, not bare names, on purpose: a hand-registered route's parameters
+     * reach {@code /mcp/schema} through here and nowhere else, so a parameter
+     * added without a description lands in every client's {@code inputSchema}
+     * with nothing to say. The odd-count guard makes forgetting one a build-time
+     * failure rather than a silent blank.
+     *
+     * @throws IllegalArgumentException if the varargs are not name/description pairs
+     */
+    private static List<AnnotationScanner.ParamDescriptor> params(String method, String... nameThenDescription) {
+        if (nameThenDescription.length % 2 != 0) {
+            throw new IllegalArgumentException("ManualToolDescriptors.params() takes alternating"
+                + " name/description pairs; got an odd argument count ("
+                + nameThenDescription.length + "). Every hand-registered parameter needs a description.");
+        }
         String source = "GET".equalsIgnoreCase(method) ? "query" : "body";
         List<AnnotationScanner.ParamDescriptor> out = new java.util.ArrayList<>();
-        for (String n : names) out.add(p(n, source));
+        for (int i = 0; i < nameThenDescription.length; i += 2) {
+            out.add(p(nameThenDescription[i], source, nameThenDescription[i + 1]));
+        }
         return out;
     }
 
     private static void add(Map<String, AnnotationScanner.ToolDescriptor> m,
-            String path, String method, String category, String description, String... paramNames) {
+            String path, String method, String category, String description,
+            ToolAccess access, String... paramPairs) {
         m.put(path, new AnnotationScanner.ToolDescriptor(
-            path, method, description, category, "", params(method, paramNames)));
+            path, method, description, category, "", access, false, params(method, paramPairs)));
     }
 
     /** Keyed by path. Built once; entries never mutate after class init. */
@@ -55,19 +100,12 @@ public final class ManualToolDescriptors {
 
     private static Map<String, AnnotationScanner.ToolDescriptor> buildAll() {
         Map<String, AnnotationScanner.ToolDescriptor> m = new LinkedHashMap<>();
-        add(m, "/batch_apply_documentation", "POST", "analysis", "Apply all documentation to a function in one call", "address", "name", "prototype", "calling_convention", "variable_types", "variable_renames", "plate_comment", "decompiler_comments", "disassembly_comments", "goto", "score", "program");
-        add(m, "/check_connection", "GET", "utility", "Health check endpoint");
-        add(m, "/configure_analyzer", "POST", "analysis", "Configure an analysis plugin", "name", "enabled", "program");
-        add(m, "/delete_project", "POST", "project", "Delete a Ghidra project", "projectPath");
-        add(m, "/exit_ghidra", "POST", "program", "Save and exit Ghidra");
-        add(m, "/get_current_address", "GET", "getter", "Get cursor address (GUI only)");
-        add(m, "/get_current_function", "GET", "getter", "Get function at cursor (GUI only)");
-        add(m, "/get_current_selection", "GET", "getter", "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted.");
-        add(m, "/get_version", "GET", "utility", "Get plugin version");
-        add(m, "/health", "GET", "utility", "Health check endpoint for headless server");
-        add(m, "/list_projects", "GET", "project", "List available Ghidra projects", "searchDir");
-        add(m, "/mcp/health", "GET", "utility", "HTTP server health: pool stats, uptime, memory, active request count");
-        add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata");
+        add(m, "/check_connection", "GET", "utility",
+            "Liveness probe: {status, server_kind (gui/headless), version, program when one is current}. Cheap and\n"
+            + " token-less, unlike the fuller /mcp/health; both servers answer it identically.",
+            ToolAccess.READ_ONLY);
+        add(m, "/mcp/health", "GET", "utility", "Server health: kind (gui/headless), build, current program, uptime, HTTP pool, memory, endpoint count", ToolAccess.READ_ONLY);
+        add(m, "/mcp/schema", "GET", "utility", "Machine-readable API schema with endpoint metadata", ToolAccess.READ_ONLY);
         // /move_file and /move_folder used to live here: manually routed in the
         // headless server, absent from the GUI/FrontEnd server entirely, and so
         // present in tests/endpoints.json but missing from the live /mcp/schema
@@ -75,29 +113,15 @@ public final class ManualToolDescriptors {
         // ProgramScriptService.{moveFile,moveFolder}, which registers them in
         // every mode. Do not re-add them here -- double registration throws
         // "cannot add context to list" on headless startup (see #180).
-        add(m, "/open_project", "POST", "headless", "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params.", "path", "headless", "program");
-        add(m, "/project/info", "GET", "project", "Get detailed project info including running tools and open programs");
-        add(m, "/server/admin/set_permissions", "POST", "server", "Set user permissions on a repository", "repo", "user", "accessLevel");
-        add(m, "/server/admin/terminate_all_checkouts", "POST", "server", "Terminate all checkouts in a folder recursively", "repo", "path");
-        add(m, "/server/admin/terminate_checkout", "POST", "server", "Terminate all checkouts on a single file", "repo", "path", "checkoutId", "checkout_id");
-        add(m, "/server/admin/users", "GET", "server", "List all users on the server");
-        add(m, "/server/authenticate", "POST", "server", "Register server credentials for programmatic authentication", "username", "password");
-        add(m, "/server/checkouts", "GET", "server", "List all checked-out files in a folder, including server-side checkouts", "path");
-        add(m, "/server/connect", "POST", "server", "Connect to a Ghidra server", "host", "port");
-        add(m, "/server/disconnect", "POST", "server", "Disconnect from the Ghidra server");
-        add(m, "/server/repositories", "GET", "server", "List repositories on the connected server");
-        add(m, "/server/repository/create", "POST", "server", "Create a new repository on the server", "name");
-        add(m, "/server/repository/file", "GET", "server", "Get file info from a server repository", "repo", "path");
-        add(m, "/server/repository/files", "GET", "server", "List files in a server repository folder", "repo", "path");
-        add(m, "/server/status", "GET", "headless", "Check headless server connection status");
-        add(m, "/server/version_control/add", "POST", "server", "Add a file to version control", "repo", "path", "comment", "keepCheckedOut");
-        add(m, "/server/version_control/checkin", "POST", "server", "Check in a version-controlled file", "repo", "path", "comment", "keepCheckedOut");
-        add(m, "/server/version_control/checkout", "POST", "server", "Check out a version-controlled file", "repo", "path");
-        add(m, "/server/version_control/undo_checkout", "POST", "server", "Undo a file checkout", "repo", "path");
-        add(m, "/server/version_history", "GET", "server", "Get version history for a file", "repo", "path");
-        add(m, "/tool/goto_address", "POST", "utility", "Navigate CodeBrowser listing and decompiler to a specific address", "address");
-        add(m, "/tool/launch_codebrowser", "POST", "utility", "Open a file in CodeBrowser, launching a new one if needed", "path");
-        add(m, "/tool/running_tools", "GET", "utility", "List all running Ghidra tool windows");
+        add(m, "/open_project", "POST", "headless",
+            "Open a Ghidra project: local .gpr/directory, or ghidra://host[:port]/repo "
+            + "(persistent shared project; does not auto-open repo files — max ~5 shared "
+            + "programs). GUI mode adds optional `headless` (default true) and `program`; "
+            + "the headless server ignores those. Local tree mirrors YOUR working copy.",
+            ToolAccess.WRITE,
+            "path", "Path to the project: its .gpr file or the project directory holding it.",
+            "headless", "GUI mode only. True (the default) loads the project into the FrontEnd tool without opening a CodeBrowser window; false launches one for `program`. The headless server ignores it.",
+            "program", "GUI mode only, and only when headless=false: the DomainFile path to open in the launched CodeBrowser.");
         return m;
     }
 
@@ -110,6 +134,10 @@ public final class ManualToolDescriptors {
      * @throws IllegalStateException if any path is not present in {@link #ALL}
      */
     public static void addAll(AnnotationScanner scanner, String... paths) {
+        addAll(scanner, java.util.Arrays.asList(paths));
+    }
+
+    public static void addAll(AnnotationScanner scanner, java.util.Collection<String> paths) {
         for (String path : paths) {
             AnnotationScanner.ToolDescriptor td = ALL.get(path);
             if (td == null) {
@@ -124,5 +152,15 @@ public final class ManualToolDescriptors {
     /** Every path this registry knows a descriptor for (for parity tests). */
     public static java.util.Set<String> knownPaths() {
         return java.util.Collections.unmodifiableSet(ALL.keySet());
+    }
+
+    /**
+     * Every descriptor, keyed by path (for parity tests). These categories are
+     * published in {@code /mcp/schema} exactly like the annotation-scanned ones,
+     * so they are the runtime tool group for these routes and
+     * {@code tests/endpoints.json} must agree with them.
+     */
+    public static Map<String, AnnotationScanner.ToolDescriptor> descriptors() {
+        return java.util.Collections.unmodifiableMap(ALL);
     }
 }

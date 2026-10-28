@@ -1,52 +1,60 @@
 """
 Phase 1: Essential Analysis Endpoints Tests
 
-Tests for the 9 Phase 1 endpoints:
-- get_function_callees
-- get_function_callers
+Tests for the 9 Phase 1 endpoints (call graph via get_functions fields=):
 - get_function_variables
 - set_function_prototype
 - set_variable_type
 - create_struct
 - apply_data_type
-- batch_rename_variables
+- rename_variables (was batch_rename_variables before 5.0)
 - set_comment
 """
 
 import pytest
-import requests
 import uuid
 
 
 class TestFunctionCallGraph:
-    """Test function callee/caller endpoints."""
+    """Test function callee/caller via get_functions fields=."""
 
     @pytest.mark.requires_program
-    def test_get_function_callees(self, http_client, sample_function):
+    def test_get_functions_callees(self, http_client, sample_function):
         """Test getting functions called by a function."""
         response = http_client.get(
-            "/get_function_callees", params={"name": sample_function}
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
-        # Should return list of functions or empty (valid either way)
 
     @pytest.mark.requires_program
-    def test_get_function_callees_pagination(self, http_client, sample_function):
-        """Test pagination for function callees."""
+    def test_get_functions_callees_truncation(self, http_client, sample_function):
+        """Bundle callees are capped; response still succeeds."""
         response = http_client.get(
-            "/get_function_callees",
-            params={"name": sample_function, "offset": 0, "limit": 5},
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_get_function_callees_invalid_function(self, http_client):
+    def test_get_functions_callees_invalid_function(self, http_client):
         """Test callees with non-existent function."""
         response = http_client.get(
-            "/get_function_callees",
-            params={"name": "NonExistentFunction_" + uuid.uuid4().hex[:8]},
+            "/get_functions",
+            params={
+                "name": "NonExistentFunction_" + uuid.uuid4().hex[:8],
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
-        # Accept 200 with error, 404 (not found), or 500 (server error)
         assert response.status_code in [200, 404, 500]
         if response.status_code == 200:
             assert (
@@ -54,30 +62,42 @@ class TestFunctionCallGraph:
             )
 
     @pytest.mark.requires_program
-    def test_get_function_callers(self, http_client, sample_function):
+    def test_get_functions_callers(self, http_client, sample_function):
         """Test getting functions that call a function."""
         response = http_client.get(
-            "/get_function_callers", params={"name": sample_function}
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_get_function_callers_pagination(self, http_client, sample_function):
-        """Test pagination for function callers."""
+    def test_get_functions_callers_truncation(self, http_client, sample_function):
+        """Bundle callers are capped; response still succeeds."""
         response = http_client.get(
-            "/get_function_callers",
-            params={"name": sample_function, "offset": 0, "limit": 5},
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
 
     @pytest.mark.requires_program
-    def test_get_function_callers_invalid_function(self, http_client):
+    def test_get_functions_callers_invalid_function(self, http_client):
         """Test callers with non-existent function."""
         response = http_client.get(
-            "/get_function_callers",
-            params={"name": "NonExistentFunction_" + uuid.uuid4().hex[:8]},
+            "/get_functions",
+            params={
+                "name": "NonExistentFunction_" + uuid.uuid4().hex[:8],
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
-        # Accept 200 with error, 404 (not found), or 500 (server error)
         assert response.status_code in [200, 404, 500]
         if response.status_code == 200:
             assert (
@@ -86,27 +106,29 @@ class TestFunctionCallGraph:
 
 
 class TestFunctionVariables:
-    """Test function variable endpoints."""
+    """Test function variable reads via get_functions fields=."""
 
     @pytest.mark.requires_program
-    def test_get_function_variables(self, http_client, sample_function):
+    def test_get_functions_variables(self, http_client, sample_function):
         """Test getting function variables."""
         response = http_client.get(
-            "/get_function_variables", params={"function_name": sample_function}
+            "/get_functions",
+            params={"function_name": sample_function, "fields": "parameters,locals"},
         )
         assert response.status_code == 200
-        # Should return JSON with parameters and locals
         text = response.text
         assert "parameters" in text or "error" in text.lower()
 
     @pytest.mark.requires_program
-    def test_get_function_variables_invalid_function(self, http_client):
+    def test_get_functions_variables_invalid_function(self, http_client):
         """Test variables with non-existent function."""
         response = http_client.get(
-            "/get_function_variables",
-            params={"function_name": "NonExistentFunction_" + uuid.uuid4().hex[:8]},
+            "/get_functions",
+            params={
+                "function_name": "NonExistentFunction_" + uuid.uuid4().hex[:8],
+                "fields": "parameters,locals",
+            },
         )
-        # Accept 200 with error, 404 (not found), or 500 (server error)
         assert response.status_code in [200, 404, 500]
         if response.status_code == 200:
             assert "error" in response.text.lower()
@@ -122,18 +144,17 @@ class TestFunctionPrototype:
         response = http_client.post(
             "/set_function_prototype",
             data={
-                "address": sample_address,
+                # The declared selector is `function_address`; the `address`
+                # this also sent was undeclared and therefore ignored.
                 "function_address": sample_address,
                 "prototype": "int testFunc(int param1)",
             },
         )
         assert response.status_code == 200
-        # Live servers vary on parameter names and validation wording; any
-        # success/failure response is acceptable as long as the endpoint handled it.
-        assert any(
-            word in response.text.lower()
-            for word in ("success", "error", "failed", "required", "invalid")
-        )
+        # The old assertion accepted any of success/error/failed/required/
+        # invalid, which every possible body satisfies. A prototype this
+        # simple, on a real function, must be applied.
+        assert response.json().get("status") == "success", response.text
 
     @pytest.mark.requires_program
     @pytest.mark.write
@@ -144,13 +165,18 @@ class TestFunctionPrototype:
         response = http_client.post(
             "/set_function_prototype",
             data={
-                "address": sample_address,
+                # `address` is not a parameter of this endpoint.
                 "function_address": sample_address,
                 "prototype": "void testFunc2()",
                 "calling_convention": "__cdecl",
             },
         )
         assert response.status_code == 200
+        body = response.json()
+        assert body.get("status") == "success", response.text
+        # The convention has to come back, or nothing proves it was applied
+        # rather than dropped the way `address` was.
+        assert body.get("calling_convention") == "__cdecl", response.text
 
     @pytest.mark.requires_program
     def test_set_function_prototype_invalid_address(self, http_client):
@@ -323,32 +349,19 @@ class TestBatchRename:
         assert response.status_code == 200
         assert "error" in response.text.lower()
 
-    @pytest.mark.requires_program
-    @pytest.mark.write
-    def test_batch_rename_variables_legacy_alias(self, http_client, sample_address):
-        """Test legacy alias remains available for compatibility."""
-        try:
-            response = http_client.post(
-                "/batch_rename_variables",
-                json_data={
-                    "function_address": sample_address,
-                    "variable_renames": {"local_8": "testVarLegacy"},
-                },
-            )
-        except requests.RequestException:
-            pytest.skip(
-                "Legacy alias probe aborted the connection on this deployed plugin build"
-            )
-        # Newer builds keep the alias for compatibility; older deployed builds may
-        # not have it yet. Both outcomes are acceptable in live compatibility runs.
-        assert response.status_code in [200, 404]
-        if response.status_code == 200:
-            text = response.text
-            assert (
-                "renamed" in text.lower()
-                or "failed" in text.lower()
-                or "error" in text.lower()
-            )
+    # test_batch_rename_variables_legacy_alias was DELETED on 2026-08-31.
+    #
+    # It POSTed /batch_rename_variables, asserting `status_code in [200, 404]`.
+    # That route was renamed to /rename_variables before 5.0 and no
+    # back-compat alias was ever added, so the call 404-ed on every build the
+    # test has ever run against and the assertion accepted the 404. It could
+    # not fail, and it could not have detected the alias disappearing either.
+    #
+    # The capability its author expected -- the pre-rename spelling still
+    # answering -- does not exist on this server. Reinstating it is a server
+    # change (an @McpTool alias, or a route registered in GhidraMCPPlugin),
+    # not something a test can assert into being. /rename_variables is
+    # covered by TestVariableRenaming above.
 
 
 class TestPlateComment:
@@ -400,19 +413,30 @@ class TestPhase1Integration:
         """Test typical function analysis workflow."""
         # Get callees
         response = http_client.get(
-            "/get_function_callees", params={"name": sample_function}
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
 
         # Get callers
         response = http_client.get(
-            "/get_function_callers", params={"name": sample_function}
+            "/get_functions",
+            params={
+                "name": sample_function,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
         assert response.status_code == 200
 
         # Get variables
         response = http_client.get(
-            "/get_function_variables", params={"function_name": sample_function}
+            "/get_functions",
+            params={"function_name": sample_function, "fields": "parameters,locals"},
         )
         assert response.status_code == 200
 

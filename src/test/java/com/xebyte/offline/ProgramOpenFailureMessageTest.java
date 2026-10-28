@@ -29,7 +29,7 @@ public class ProgramOpenFailureMessageTest {
         assertTrue("must preserve Ghidra's own diagnosis",
                 message.contains("Minor language change 4.6 -> 4.7"));
         assertTrue("must name the tool that can actually fix it",
-                message.contains("scripts/upgrade_project_language.py"));
+                message.contains("tools/upgrade_project_language.py"));
         assertTrue("must scope the suggested command to the right folder",
                 message.contains("--folder /Vanilla/1.01"));
         assertTrue("must explain why this endpoint cannot do it",
@@ -40,7 +40,7 @@ public class ProgramOpenFailureMessageTest {
     public void majorLanguageChangeIsAlsoRecognised() {
         String message = ProgramScriptService.describeOpenFailure(
                 new IOException("Major language change 4.6 -> 5.0"), "/Vanilla/1.02/Fog.dll");
-        assertTrue(message.contains("scripts/upgrade_project_language.py"));
+        assertTrue(message.contains("tools/upgrade_project_language.py"));
     }
 
     @Test
@@ -48,7 +48,7 @@ public class ProgramOpenFailureMessageTest {
         String message = ProgramScriptService.describeOpenFailure(
                 new IOException("this file was created with an older version of Ghidra"),
                 "/Vanilla/1.03/Storm.dll");
-        assertTrue(message.contains("scripts/upgrade_project_language.py"));
+        assertTrue(message.contains("tools/upgrade_project_language.py"));
     }
 
     @Test

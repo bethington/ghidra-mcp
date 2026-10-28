@@ -6,9 +6,9 @@
 // Output: Removes all comments from the selected function.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Clear all comments for the current function
-// @menupath Diablo 2.Documentation.Clear Function Comments
+// @menupath GhidraMCP.Documentation.Clear Function Comments
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;

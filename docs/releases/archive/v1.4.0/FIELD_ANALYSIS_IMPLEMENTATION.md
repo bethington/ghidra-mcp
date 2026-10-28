@@ -13,11 +13,13 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 **Endpoint**: `/analyze_struct_field_usage`
 
 **Parameters**:
+
 - `address`: Structure instance address (hex format)
 - `struct_name`: Optional structure type name (auto-detected if omitted)
 - `max_functions`: Maximum functions to analyze (default: 10)
 
 **Returns**: JSON with per-field analysis:
+
 ```json
 {
   "struct_address": "0x6fb835b8",
@@ -39,6 +41,7 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ```
 
 **Implementation Details**:
+
 - Finds all xrefs to structure address
 - Decompiles each referencing function
 - Analyzes decompiled code for field access patterns
@@ -58,11 +61,13 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 **Endpoint**: `/get_field_access_context`
 
 **Parameters**:
+
 - `struct_address`: Structure instance address (hex format)
 - `field_offset`: Offset of field within structure (e.g., 4 for second DWORD)
 - `num_examples`: Number of usage examples to return (default: 5)
 
 **Returns**: JSON with field access examples:
+
 ```json
 {
   "struct_address": "0x6fb835b8",
@@ -81,6 +86,7 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ```
 
 **Implementation Details**:
+
 - Calculates field address (struct_address + field_offset)
 - Gets xrefs to specific field address
 - Retrieves assembly instruction at each xref
@@ -94,10 +100,12 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 **Endpoint**: `/suggest_field_names`
 
 **Parameters**:
+
 - `struct_address`: Structure instance address (hex format)
 - `struct_size`: Optional structure size (auto-detected if 0)
 
 **Returns**: JSON with naming suggestions per field:
+
 ```json
 {
   "struct_address": "0x6fb835b8",
@@ -123,6 +131,7 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ```
 
 **Implementation Details**:
+
 - Retrieves structure definition at address
 - Generates Hungarian notation suggestions based on field types:
   - Pointers: `p*`, `lp*`
@@ -138,11 +147,13 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ### Java Plugin (GhidraMCPPlugin.java)
 
 **Added Endpoints** (lines 828-860):
+
 - `/analyze_struct_field_usage` - Comprehensive field analysis
 - `/get_field_access_context` - Field-specific context
 - `/suggest_field_names` - Type-based name suggestions
 
 **Added Implementation Methods** (lines 5879-6252):
+
 - `analyzeStructFieldUsage()` - Main analysis logic
 - `FieldUsageInfo` - Helper class for tracking field usage
 - `analyzeFieldUsageInCode()` - Pattern matching in decompiled code
@@ -152,6 +163,7 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 - `capitalizeFirst()` - String utility
 
 **Version Update**:
+
 - Updated from v1.3.0 to v1.4.0
 - Updated endpoint count from 63+ to 66+
 - Added field analysis features to description
@@ -159,11 +171,13 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ### Python Bridge (bridge_mcp_ghidra.py)
 
 **Added MCP Tools** (lines 2492-2679):
+
 - `analyze_struct_field_usage()` - MCP wrapper for field analysis
 - `get_field_access_context()` - MCP wrapper for field context
 - `suggest_field_names()` - MCP wrapper for name suggestions
 
 **Features**:
+
 - Input validation using `validate_hex_address()`
 - JSON formatting for readability
 - Comprehensive docstrings with examples
@@ -172,6 +186,7 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 ### Enhanced Prompt (ENHANCED_ANALYSIS_PROMPT.md)
 
 **Updated Step 4**: Added automated field analysis workflow
+
 - Section 4.1: Automated field analysis tools (RECOMMENDED)
 - Section 4.2: Manual field analysis (ALTERNATIVE)
 - Section 4.5: Refined to show both automated and manual approaches
@@ -180,7 +195,8 @@ Implemented three new MCP tools to enable automated field-level analysis of stru
 
 ## Usage Example
 
-### Before (Manual Process - 20+ steps):
+### Before (Manual Process - 20+ steps)
+
 ```python
 # 1. Get xrefs to structure
 xrefs = get_xrefs_to("0x6fb835b8", limit=10)
@@ -197,7 +213,8 @@ for xref in xrefs:
 # 7. Create new structure with better names
 ```
 
-### After (Automated - 3 steps):
+### After (Automated - 3 steps)
+
 ```python
 # 1. Analyze all fields automatically
 result = analyze_struct_field_usage("0x6fb835b8", max_functions=10)
@@ -223,21 +240,24 @@ create_struct("RefinedStructName", [
 
 ## Testing Requirements
 
-### Unit Tests Required:
+### Unit Tests Required
+
 - Test `analyze_struct_field_usage` with valid structure
 - Test `get_field_access_context` with valid field offset
 - Test `suggest_field_names` with various field types
 - Test error handling for invalid addresses
 - Test input validation for parameters
 
-### Integration Tests Required:
+### Integration Tests Required
+
 - Test with actual Ghidra program loaded
 - Test with various structure types (nested, arrays, pointers)
 - Test with structures having no xrefs
 - Test with structures having many xrefs (>100)
 - Test field pattern detection accuracy
 
-### Manual Testing Checklist:
+### Manual Testing Checklist
+
 - [ ] Create structure with generic field names
 - [ ] Run analyze_struct_field_usage
 - [ ] Verify suggested names match decompiled variable names

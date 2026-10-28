@@ -138,6 +138,43 @@ public class AnnotationScannerOfflineTest extends TestCase {
     }
 
     /**
+     * Internal {@code @McpTool}s register as HTTP routes and stay in descriptors
+     * (for catalog regen) but must never appear in {@code /mcp/schema} — that is
+     * how the bridge learns tools, and listing refresh invites agent staleness work.
+     */
+    public void testInternalToolsAreRoutesButOmittedFromSchema() {
+        boolean foundRefreshEndpoint = false;
+        for (EndpointDef ep : scanner.getEndpoints()) {
+            if ("/decompile_tree_refresh".equals(ep.path())) {
+                foundRefreshEndpoint = true;
+                break;
+            }
+        }
+        assertTrue("refresh must remain an HTTP route", foundRefreshEndpoint);
+
+        boolean foundRefreshDescriptor = false;
+        for (AnnotationScanner.ToolDescriptor d : scanner.getDescriptors()) {
+            if ("/decompile_tree_refresh".equals(d.path())) {
+                foundRefreshDescriptor = true;
+                assertTrue("refresh must be marked internal", d.internal());
+                break;
+            }
+        }
+        assertTrue("refresh must still be in descriptors for catalog regen",
+                foundRefreshDescriptor);
+
+        String schema = scanner.generateSchema();
+        assertFalse("internal refresh must not appear in /mcp/schema",
+                schema.contains("/decompile_tree_refresh"));
+        JsonObject root = new Gson().fromJson(schema, JsonObject.class);
+        int schemaCount = root.get("count").getAsInt();
+        long visibleDescriptors = scanner.getDescriptors().stream()
+                .filter(d -> !d.internal()).count();
+        assertEquals("schema count must exclude internal descriptors",
+                visibleDescriptors, (long) schemaCount);
+    }
+
+    /**
      * Every tool descriptor in the schema must have the fields the Python bridge
      * depends on: path, method, params. Missing any of these breaks dynamic tool
      * registration in {@code bridge_mcp_ghidra.py}.
@@ -235,6 +272,108 @@ public class AnnotationScannerOfflineTest extends TestCase {
     }
 
     /**
+     * Regression test: a boxed param declared with an EMPTY {@code defaultValue}
+     * must resolve to {@code null} ("unset"), not to a concrete value.
+     *
+     * <p>This is the counterpart to the H13 fix above, which overcorrected. H13
+     * changed the boxed branches to {@code hasDef ? Boolean.valueOf(def) : null},
+     * but {@code hasDef} is true for {@code defaultValue = ""} (it only tests
+     * against the {@code NO_DEFAULT} sentinel), and {@code Boolean.valueOf("")}
+     * is {@code false}. Every nullable tri-state filter in the codebase is
+     * declared exactly that way — e.g. {@code has_custom_name}, {@code is_thunk},
+     * {@code is_external} on {@code /search_functions_enhanced}. The effect was
+     * that OMITTING such a filter silently applied it as {@code == false}:
+     * {@code search_functions_enhanced} with a name_pattern and no other args
+     * returned zero results for every user-named function, reporting a
+     * well-formed empty list rather than an error.
+     *
+     * <p>{@code Integer} was unaffected only by accident — {@code Integer.valueOf("")}
+     * throws {@code NumberFormatException}, which that branch already catches and
+     * turns into {@code null}. {@code Boolean.valueOf} never throws, so the Boolean
+     * branch failed silently. Both are asserted here so the behaviour is pinned
+     * explicitly rather than resting on a parse failure.
+     */
+    public void testBoxedParamWithEmptyDefaultResolvesToNull() throws Exception {
+        BoxedDefaultFixture fixture = new BoxedDefaultFixture();
+        AnnotationScanner fixtureScanner = new AnnotationScanner(fixture);
+
+        EndpointDef getEndpoint = null;
+        EndpointDef postEndpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_empty_default_query".equals(ep.path())) getEndpoint = ep;
+            if ("/test_empty_default_body".equals(ep.path()))  postEndpoint = ep;
+        }
+        assertNotNull("GET empty-default fixture endpoint not found", getEndpoint);
+        assertNotNull("POST empty-default fixture endpoint not found", postEndpoint);
+
+        Map<String, String> emptyQuery = Collections.emptyMap();
+        Map<String, Object> emptyBody  = Collections.emptyMap();
+
+        fixture.lastOptFilter = Boolean.TRUE;   // poison, so a no-op write is visible
+        fixture.lastOptCount  = Integer.valueOf(-1);
+        getEndpoint.handler().handle(emptyQuery, emptyBody);
+        assertNull("QUERY: boxed Boolean with defaultValue=\"\" and absent value must be null (unset), "
+            + "not false — otherwise an omitted tri-state filter is applied as '== false'",
+            fixture.lastOptFilter);
+        assertNull("QUERY: boxed Integer with defaultValue=\"\" and absent value must be null",
+            fixture.lastOptCount);
+
+        fixture.lastBodyOptFilter = Boolean.TRUE;
+        fixture.lastBodyOptCount  = Integer.valueOf(-1);
+        postEndpoint.handler().handle(emptyQuery, emptyBody);
+        assertNull("BODY: boxed Boolean with defaultValue=\"\" and absent value must be null (unset), not false",
+            fixture.lastBodyOptFilter);
+        assertNull("BODY: boxed Integer with defaultValue=\"\" and absent value must be null",
+            fixture.lastBodyOptCount);
+    }
+
+    /**
+     * An EXPLICIT value must still win over the empty default, in both directions —
+     * the fix must not make these params unsettable.
+     */
+    public void testBoxedParamWithEmptyDefaultStillHonorsExplicitValue() throws Exception {
+        BoxedDefaultFixture fixture = new BoxedDefaultFixture();
+        AnnotationScanner fixtureScanner = new AnnotationScanner(fixture);
+
+        EndpointDef getEndpoint = null;
+        EndpointDef postEndpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_empty_default_query".equals(ep.path())) getEndpoint = ep;
+            if ("/test_empty_default_body".equals(ep.path())) postEndpoint = ep;
+        }
+        assertNotNull("GET empty-default fixture endpoint not found", getEndpoint);
+        assertNotNull("POST empty-default fixture endpoint not found", postEndpoint);
+
+        Map<String, String> query = new HashMap<>();
+        query.put("opt_filter", "true");
+        query.put("opt_count", "7");
+        getEndpoint.handler().handle(query, Collections.emptyMap());
+        assertEquals("Explicit true must survive the empty default",
+            Boolean.TRUE, fixture.lastOptFilter);
+        assertEquals("Explicit 7 must survive the empty default",
+            Integer.valueOf(7), fixture.lastOptCount);
+
+        query.put("opt_filter", "false");
+        getEndpoint.handler().handle(query, Collections.emptyMap());
+        assertEquals("Explicit false must be distinguishable from unset",
+            Boolean.FALSE, fixture.lastOptFilter);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("opt_filter", Boolean.TRUE);
+        body.put("opt_count", Integer.valueOf(9));
+        postEndpoint.handler().handle(Collections.emptyMap(), body);
+        assertEquals("BODY: explicit true must survive the empty default",
+            Boolean.TRUE, fixture.lastBodyOptFilter);
+        assertEquals("BODY: explicit 9 must survive the empty default",
+            Integer.valueOf(9), fixture.lastBodyOptCount);
+
+        body.put("opt_filter", Boolean.FALSE);
+        postEndpoint.handler().handle(Collections.emptyMap(), body);
+        assertEquals("BODY: explicit false must be distinguishable from unset",
+            Boolean.FALSE, fixture.lastBodyOptFilter);
+    }
+
+    /**
      * Tiny fixture service scanned by {@link #testBoxedParamHonorsDefaultValue}.
      * The two {@code @McpTool} methods capture their resolved arguments so the test
      * can assert the values without needing to parse the Response JSON.
@@ -256,6 +395,32 @@ public class AnnotationScannerOfflineTest extends TestCase {
                 @Param(value = "strict", defaultValue = "true") Boolean strict) {
             lastLength = length;
             lastStrict = strict;
+            return Response.ok("ok");
+        }
+
+        // Captured by the empty-default handlers
+        volatile Boolean lastOptFilter;
+        volatile Integer lastOptCount;
+        volatile Boolean lastBodyOptFilter;
+        volatile Integer lastBodyOptCount;
+
+        @McpTool(path = "/test_empty_default_query", method = "GET",
+                 description = "Fixture: boxed params with an EMPTY defaultValue via QUERY source")
+        public Response queryEmptyDefault(
+                @Param(value = "opt_filter", defaultValue = "") Boolean optFilter,
+                @Param(value = "opt_count", defaultValue = "") Integer optCount) {
+            lastOptFilter = optFilter;
+            lastOptCount = optCount;
+            return Response.ok("ok");
+        }
+
+        @McpTool(path = "/test_empty_default_body", method = "POST",
+                 description = "Fixture: boxed params with an EMPTY defaultValue via BODY source")
+        public Response bodyEmptyDefault(
+                @Param(value = "opt_filter", source = ParamSource.BODY, defaultValue = "") Boolean optFilter,
+                @Param(value = "opt_count", source = ParamSource.BODY, defaultValue = "") Integer optCount) {
+            lastBodyOptFilter = optFilter;
+            lastBodyOptCount = optCount;
             return Response.ok("ok");
         }
 
@@ -329,6 +494,26 @@ public class AnnotationScannerOfflineTest extends TestCase {
         verify(program2, never()).endTransaction(anyInt(), eq(false));
     }
 
+    /**
+     * A tool whose effect is not a program transaction refuses dry_run before doing anything:
+     * the rollback cannot undo it. Found live: checkin_program(dry_run=true) checked in for real.
+     */
+    public void testDryRunIsRefusedByAToolThatCannotBeRolledBack() throws Exception {
+        DryRunWriteFixture fixture = new DryRunWriteFixture();
+        ProgramProvider provider = mock(ProgramProvider.class);
+        AnnotationScanner fixtureScanner = new AnnotationScanner(provider, new Object[] { fixture });
+        EndpointDef endpoint = null;
+        for (EndpointDef ep : fixtureScanner.getEndpoints()) {
+            if ("/test_file_write".equals(ep.path())) endpoint = ep;
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("dry_run", Boolean.TRUE);
+        Response r = endpoint.handler().handle(new HashMap<>(), body);
+        assertTrue(r.toJson(), r instanceof Response.Err);
+        assertTrue(r.toJson(), ((Response.Err) r).message().contains("dry_run is not supported"));
+        assertFalse("nothing may run", fixture.fileWritten);
+    }
+
     /** Tiny fixture service scanned by {@link #testDryRunHonoredFromJsonBody}. */
     static class DryRunWriteFixture {
         volatile boolean invoked;
@@ -340,5 +525,159 @@ public class AnnotationScannerOfflineTest extends TestCase {
             invoked = true;
             return Response.ok("wrote");
         }
+
+        volatile boolean fileWritten;
+
+        @McpTool(dryRun = false, path = "/test_file_write", method = "POST",
+                 description = "Fixture: a write whose effect is outside the program database")
+        public Response writeFile(
+                @Param(value = "program", defaultValue = "") String program) {
+            fileWritten = true;
+            return Response.ok("wrote a file");
+        }
+    }
+
+    /**
+     * Regression test for the 2026-09-21 incident: even after {@code delete_function}
+     * detaches a function's tags before removing it (fixing the
+     * {@code ConcurrentModificationException} thrown from inside Ghidra's own
+     * {@code FunctionManagerDB.doRemoveFunction}), a DRY-RUN delete threw its OWN
+     * {@code ConcurrentModificationException} every time, on every function, tagged or
+     * not. Root cause: {@code AnnotationScanner.createHandler}'s dry-run wrapper opened
+     * its transaction directly via {@code program.startTransaction(...)} on the calling
+     * (HTTP) thread, while the wrapped service method's own
+     * {@code threadingStrategy.executeWrite} dispatched the real work to a DIFFERENT
+     * thread (the Swing EDT in GUI mode, via a separate
+     * {@code SwingUtilities.invokeAndWait}) -- nesting a transaction opened by one thread
+     * inside one opened by another. Fix: route the whole dry-run wrapper, including the
+     * transaction it opens, through {@code threadingStrategy.executeWrite}, so it lands on
+     * the same thread the wrapped write's own nested {@code executeWrite} call detects
+     * (via {@code SwingUtilities.isEventDispatchThread()}) and reuses in place, with no
+     * second dispatch.
+     *
+     * <p>This test cannot drive Ghidra's real cross-thread transaction bookkeeping, but it
+     * encodes the exact invariant the fix establishes: {@code program.startTransaction} may
+     * only be called from inside {@code threadingStrategy.executeWrite}'s own callable. A
+     * mocked {@code Program.startTransaction} throws if that invariant is violated, turning
+     * a regression back into a hard test failure instead of a live-only symptom. It also
+     * exercises a TAGGED function through the dry-run path, proving {@code delete_function}'s
+     * tag-detach fix composes correctly with the dry-run wrapper (the bug report noted the
+     * dry-run CME reproduced "even on functions where the fix above would succeed").
+     */
+    public void testDryRunDeleteFunctionOpensItsTransactionOnlyInsideTheThreadingStrategy() throws Exception {
+        boolean[] insideExecuteWrite = {false};
+        com.xebyte.core.ThreadingStrategy strategy = new com.xebyte.core.ThreadingStrategy() {
+            @Override
+            public <T> T executeRead(java.util.concurrent.Callable<T> action) throws Exception {
+                return action.call();
+            }
+
+            @Override
+            public <T> T executeWrite(Program program, String txName,
+                    java.util.concurrent.Callable<T> action) throws Exception {
+                insideExecuteWrite[0] = true;
+                try {
+                    return action.call();
+                } finally {
+                    insideExecuteWrite[0] = false;
+                }
+            }
+
+        };
+
+        Program program = mock(Program.class);
+        when(program.startTransaction(org.mockito.ArgumentMatchers.anyString())).thenAnswer(inv -> {
+            if (!insideExecuteWrite[0]) {
+                throw new IllegalStateException(
+                    "startTransaction called outside threadingStrategy.executeWrite -- this is the "
+                    + "mismatched-thread nesting that threw ConcurrentModificationException on every "
+                    + "dry run before the fix.");
+            }
+            return 42;
+        });
+
+        ghidra.program.model.listing.FunctionManager functionManager =
+            mock(ghidra.program.model.listing.FunctionManager.class);
+        ghidra.program.model.listing.Function func = mock(ghidra.program.model.listing.Function.class);
+        ghidra.program.model.address.Address addr = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.AddressFactory addressFactory =
+            mock(ghidra.program.model.address.AddressFactory.class);
+        ghidra.program.model.address.AddressSpace space =
+            mock(ghidra.program.model.address.AddressSpace.class);
+        ghidra.program.model.address.AddressSetView body =
+            mock(ghidra.program.model.address.AddressSetView.class);
+
+        when(space.isOverlaySpace()).thenReturn(false);
+        when(space.getType()).thenReturn(ghidra.program.model.address.AddressSpace.TYPE_RAM);
+        when(addr.toString(false)).thenReturn("401000");
+        when(addr.getAddressSpace()).thenReturn(space);
+        when(addressFactory.getAddress("0x401000")).thenReturn(addr);
+        when(addressFactory.getAddressSpaces())
+            .thenReturn(new ghidra.program.model.address.AddressSpace[0]);
+        when(program.getAddressFactory()).thenReturn(addressFactory);
+        when(program.getFunctionManager()).thenReturn(functionManager);
+        when(functionManager.getFunctionAt(addr)).thenReturn(func);
+        when(body.getNumAddresses()).thenReturn(1L);
+        when(func.getName()).thenReturn("FUN_401000");
+        when(func.getBody()).thenReturn(body);
+
+        Set<ghidra.program.model.listing.FunctionTag> liveTags = new HashSet<>();
+        ghidra.program.model.listing.FunctionTag tag = mock(ghidra.program.model.listing.FunctionTag.class);
+        when(tag.getName()).thenReturn("HOT");
+        liveTags.add(tag);
+        when(func.getTags()).thenAnswer(inv -> liveTags);
+        org.mockito.Mockito.doAnswer(inv -> {
+            String name = inv.getArgument(0);
+            liveTags.removeIf(t -> t.getName().equals(name));
+            return null;
+        }).when(func).removeTag(org.mockito.ArgumentMatchers.anyString());
+        // Stands in for FunctionManagerDB.doRemoveFunction: iterates the function's own
+        // live tag set while removing from it. Throws a real ConcurrentModificationException
+        // if any tag is still attached -- proving delete_function's own fix survives being
+        // wrapped by the dry-run path.
+        org.mockito.Mockito.doAnswer(inv -> {
+            for (ghidra.program.model.listing.FunctionTag t : func.getTags()) {
+                liveTags.remove(t);
+            }
+            return null;
+        }).when(functionManager).removeFunction(addr);
+
+        ProgramProvider provider = mock(ProgramProvider.class);
+        when(provider.getCurrentProgram()).thenReturn(program);
+        when(provider.getProgram("Test.dll")).thenReturn(program);
+
+        com.xebyte.core.FunctionService functionService =
+            new com.xebyte.core.FunctionService(provider, strategy);
+        AnnotationScanner dryRunScanner = new AnnotationScanner(provider, strategy, functionService);
+
+        EndpointDef endpoint = null;
+        for (EndpointDef ep : dryRunScanner.getEndpoints()) {
+            if ("/delete_function".equals(ep.path())) endpoint = ep;
+        }
+        assertNotNull("delete_function not found", endpoint);
+
+        Map<String, String> query = new HashMap<>();
+        query.put("program", "Test.dll");
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("address", "0x401000");
+        requestBody.put("dry_run", Boolean.TRUE);
+
+        Response response = endpoint.handler().handle(query, requestBody);
+
+        JsonObject root = new Gson().fromJson(response.toJson(), JsonObject.class);
+        assertTrue("dry run must report success, got: " + response.toJson(),
+            root.get("success").getAsBoolean());
+        assertTrue("dry run response must flag itself as a dry run", root.get("dry_run").getAsBoolean());
+        assertEquals("dry run response must report what would be deleted",
+            "FUN_401000", root.get("deleted_function").getAsString());
+
+        // The wrapper can only undo Ghidra transaction state, not arbitrary Java side
+        // effects, so the fixture write is still invoked either way -- what proves this
+        // was a genuine dry run (the function is left in place) is the rollback commit.
+        verify(functionManager).removeFunction(addr);
+        verify(program).endTransaction(anyInt(), eq(false));
+        assertTrue("tags must have been fully detached before removeFunction ran",
+            liveTags.isEmpty());
     }
 }
+

@@ -23,7 +23,7 @@ request.
 
 ## File location
 
-```
+```text
 <your-ghidra-project>/                 ← whatever Project.getProjectDir() returns
 └── .ghidra-mcp/
     └── conventions.json
@@ -153,12 +153,11 @@ Ghidra (or hit the Tool Option toggle to force a refresh), and:
 
 ## Per-call `strict_mode` override
 
-Five endpoints accept an optional `strict_mode` body parameter:
+Four endpoints accept an optional `strict_mode` body parameter:
 
 - `/rename_function`
 - `/apply_data_type`
 - `/set_global`
-- `/rename_symbol`
 - `/rename_symbol`
 
 Values:

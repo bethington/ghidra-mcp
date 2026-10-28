@@ -3,12 +3,13 @@
 // Audits all functions against a minimum documentation standard. Checks custom name, plate comment, EOL comments, Hungarian variables, resolved types, struct pointers, and function prototypes.
 //
 // Usage: Run from Script Manager on any documented program.
-// Output: JSON report at workflows/audit_<program>.json with per-function scores.
+// Output: JSON report at ~/ghidra-mcp-reports/audit_<program>.json
+//         (override the directory with the GHIDRA_MCP_REPORTS_DIR environment variable) with per-function scores.
 //
 // @author Ben Ethington
-// @category Diablo 2.Documentation
+// @category GhidraMCP.Documentation
 // @description Audit documentation coverage with quality scoring
-// @menupath Diablo 2.Documentation.Audit Coverage
+// @menupath GhidraMCP.Documentation.Audit Coverage
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -311,7 +312,7 @@ public class Document_AuditCoverage extends GhidraScript {
 
         // Write report
         String safeProgName = programName.replaceAll("[^a-zA-Z0-9._-]", "_");
-        File outputDir = findWorkflowsDir();
+        File outputDir = findReportsDir();
         File outputFile = new File(outputDir, "audit_" + safeProgName + ".json");
 
         try (FileWriter fw = new FileWriter(outputFile)) {
@@ -441,16 +442,15 @@ public class Document_AuditCoverage extends GhidraScript {
         return instrCount <= 2 && hasJump;
     }
 
-    private File findWorkflowsDir() {
-        String[] candidates = {
-            "C:/Users/benam/source/mcp/ghidra-mcp/workflows",
-            System.getProperty("user.dir") + "/workflows"
-        };
-        for (String path : candidates) {
-            File dir = new File(path);
-            if (dir.exists() && dir.isDirectory()) return dir;
-        }
-        File dir = new File(System.getProperty("user.dir"), "workflows");
+    /**
+     * Report directory: $GHIDRA_MCP_REPORTS_DIR when set, otherwise
+     * ~/ghidra-mcp-reports. Created on demand.
+     */
+    private File findReportsDir() {
+        String override = System.getenv("GHIDRA_MCP_REPORTS_DIR");
+        File dir = (override != null && !override.isBlank())
+            ? new File(override)
+            : new File(System.getProperty("user.home"), "ghidra-mcp-reports");
         dir.mkdirs();
         return dir;
     }

@@ -5,8 +5,8 @@
 //
 // PREFER THE HEADLESS TOOL for anything corpus-sized:
 //
-//     python scripts/upgrade_project_language.py            # dry run
-//     python scripts/upgrade_project_language.py --apply
+//     python tools/upgrade_project_language.py            # dry run
+//     python tools/upgrade_project_language.py --apply
 //
 // It reports per-file outcomes, is resumable folder by folder, and does not tie
 // up the GUI. This script exists for the case the headless tool cannot cover: a
@@ -25,9 +25,9 @@
 // guessing at them.
 //
 // @author Ben Ethington
-// @category Diablo 2.Project
+// @category GhidraMCP.Project
 // @description Upgrade all programs to the current Ghidra language/DB version
-// @menupath Diablo 2.Project.Upgrade All
+// @menupath GhidraMCP.Project.Upgrade All
 
 import ghidra.app.script.GhidraScript;
 import ghidra.framework.Application;

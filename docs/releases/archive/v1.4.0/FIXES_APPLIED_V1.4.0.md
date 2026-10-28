@@ -15,16 +15,19 @@ All **3 CRITICAL** and **4 out of 5 MAJOR** issues identified in CODE_REVIEW_V1.
 **Issue**: All three field analysis methods accessed Ghidra API from arbitrary threads instead of Swing EDT.
 
 **Fix Applied**:
+
 - Wrapped all three methods in `SwingUtilities.invokeAndWait()`
 - Used `AtomicReference<String>` for thread-safe result passing
 - Added proper exception handling for `InvocationTargetException` and `InterruptedException`
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:5913-6062` - `analyzeStructFieldUsage()`
 - `GhidraMCPPlugin.java:6188-6291` - `getFieldAccessContext()`
 - `GhidraMCPPlugin.java:6300-6399` - `suggestFieldNames()`
 
 **Code Pattern**:
+
 ```java
 final AtomicReference<String> result = new AtomicReference<>();
 try {
@@ -46,14 +49,17 @@ return result.get();
 **Issue**: `DecompInterface` not disposed on exception paths in `analyzeStructFieldUsage()`.
 
 **Fix Applied**:
+
 - Added try-finally block to guarantee `decomp.dispose()` is called
 - Moved disposal logic to finally block
 - Ensured null check before disposal
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:5970-6051` - Added try-finally in `analyzeStructFieldUsage()`
 
 **Code Pattern**:
+
 ```java
 DecompInterface decomp = null;
 try {
@@ -74,11 +80,13 @@ try {
 **Issue**: Missing validation on user-supplied parameters could cause resource exhaustion.
 
 **Fix Applied**:
+
 - Added range validation for all user inputs
 - Created constants for limits (lines 74-90)
 - Validated before Swing EDT execution to fail fast
 
 **Constants Added** (`GhidraMCPPlugin.java:74-90`):
+
 ```java
 private static final int MAX_FUNCTIONS_TO_ANALYZE = 100;
 private static final int MIN_FUNCTIONS_TO_ANALYZE = 1;
@@ -98,12 +106,14 @@ private static final Set<String> C_KEYWORDS = Set.of(
 ```
 
 **Validation Added**:
+
 - `analyzeStructFieldUsage()` - validates `maxFunctionsToAnalyze` (1-100)
 - `getFieldAccessContext()` - validates `fieldOffset` (0-65536) and `numExamples` (1-50)
 - `suggestFieldNames()` - validates `structSize` (0-65536)
 - All three methods validate structure field count (max 256 fields)
 
 **Python Bridge Validation** (`bridge_mcp_ghidra.py:2541-2542, 2602-2606, 2670-2671`):
+
 ```python
 # analyze_struct_field_usage
 if not isinstance(max_functions, int) or max_functions < 1 or max_functions > 100:
@@ -129,15 +139,18 @@ if not isinstance(struct_size, int) or struct_size < 0 or struct_size > 65536:
 **Issue**: Simple `line.contains(fieldName)` matching causing false positives with keywords and substrings.
 
 **Fix Applied**:
+
 - Implemented word boundary regex patterns: `\b...\b`
 - Added C keyword filtering to exclude language keywords
 - Added minimum token length requirement (3 characters)
 - Improved comment skipping logic
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:6101-6176` - Complete rewrite of `analyzeFieldUsageInCode()`
 
 **Key Improvements**:
+
 ```java
 // Word boundary matching for field names
 Pattern fieldPattern = Pattern.compile("\\b" + Pattern.quote(fieldName) + "\\b");
@@ -173,15 +186,18 @@ if (token.length() >= MIN_TOKEN_LENGTH &&
 **Issue**: No limit on structure field count could cause memory exhaustion and slow JSON building.
 
 **Fix Applied**:
+
 - Added `MAX_STRUCT_FIELDS = 256` constant
 - Validate field count in all three methods before processing
 - Return descriptive error message if limit exceeded
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:5943-5948` - Validation in `analyzeStructFieldUsage()`
 - `GhidraMCPPlugin.java:6337-6343` - Validation in `suggestFieldNames()`
 
 **Code Pattern**:
+
 ```java
 DataTypeComponent[] components = struct.getComponents();
 if (components.length > MAX_STRUCT_FIELDS) {
@@ -198,15 +214,18 @@ if (components.length > MAX_STRUCT_FIELDS) {
 **Issue**: Missing null checks when looking up instructions and functions.
 
 **Fix Applied**:
+
 - Added explicit null checks with logging
 - Ensured graceful degradation (empty strings for null values)
 - Added overflow protection for address arithmetic
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:6215-6222` - Address overflow protection
 - `GhidraMCPPlugin.java:6251-6268` - Null checks for instruction and function lookups
 
 **Code Pattern**:
+
 ```java
 // Overflow protection
 Address fieldAddr;
@@ -233,14 +252,17 @@ if (instr != null) {
 **Issue**: No timeout for decompilation operations could cause indefinite hangs.
 
 **Fix Applied**:
+
 - Added `DECOMPILE_TIMEOUT_SECONDS = 30` constant
 - Passed timeout to `decompileFunction()` calls
 - Used `ConsoleTaskMonitor` for better control
 
 **Files Modified**:
+
 - `GhidraMCPPlugin.java:6005-6006` - Added timeout parameter
 
 **Code Pattern**:
+
 ```java
 DecompileResults results = decomp.decompileFunction(func,
     DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
@@ -253,6 +275,7 @@ DecompileResults results = decomp.decompileFunction(func,
 **Enhancement**: Added comprehensive logging for debugging and monitoring.
 
 **Logging Added**:
+
 - `analyzeStructFieldUsage()`:
   - Start: "Analyzing struct at {address}..."
   - Per-function errors: "Error decompiling function {name}"
@@ -270,6 +293,7 @@ DecompileResults results = decomp.decompileFunction(func,
   - Errors: "Thread synchronization error in suggestFieldNames"
 
 **Benefits**:
+
 - Enables debugging of field analysis failures
 - Provides performance metrics
 - Helps identify bottlenecks in production
@@ -283,6 +307,7 @@ DecompileResults results = decomp.decompileFunction(func,
 **Issue**: Manual JSON building is error-prone and doesn't handle edge cases properly.
 
 **Why Deferred**:
+
 - Requires adding external dependency (Gson or Jackson) to `pom.xml`
 - Current implementation with `escapeJson()` is functional
 - Risk of introducing new bugs during replacement
@@ -297,12 +322,14 @@ DecompileResults results = decomp.decompileFunction(func,
 Before deployment, the following tests should be performed:
 
 ### Unit Testing (Required)
+
 - [ ] Build succeeds: `mvn clean package assembly:single`
 - [ ] No compilation errors
 - [ ] Extension ZIP created successfully
 - [ ] Python unit tests pass: `pytest tests/unit/`
 
 ### Integration Testing (Required)
+
 - [ ] Install plugin in Ghidra
 - [ ] Load binary with structures in Ghidra
 - [ ] Start Ghidra MCP server (port 8089 accessible)
@@ -311,6 +338,7 @@ Before deployment, the following tests should be performed:
 ### Functional Testing (Required)
 
 **Test Case 1: analyze_struct_field_usage**
+
 - [ ] Call with valid structure address
 - [ ] Verify field usage patterns detected
 - [ ] Verify suggested names extracted from decompiled code
@@ -320,6 +348,7 @@ Before deployment, the following tests should be performed:
 - [ ] Test with `max_functions` = 101 (should return error)
 
 **Test Case 2: get_field_access_context**
+
 - [ ] Call with valid structure address and field offset
 - [ ] Verify assembly instructions returned
 - [ ] Verify function names and addresses correct
@@ -330,6 +359,7 @@ Before deployment, the following tests should be performed:
 - [ ] Test with invalid `num_examples` = 51 (should return error)
 
 **Test Case 3: suggest_field_names**
+
 - [ ] Call with valid structure address
 - [ ] Verify suggestions follow Hungarian notation
 - [ ] Verify fallback suggestions present when pattern matching fails
@@ -339,28 +369,33 @@ Before deployment, the following tests should be performed:
 - [ ] Test with invalid `struct_size` = 70000 (should return error)
 
 **Test Case 4: Thread Safety**
+
 - [ ] Make concurrent calls to field analysis methods
 - [ ] Verify no race conditions or crashes
 - [ ] Verify results are correct for all concurrent calls
 
 **Test Case 5: Resource Management**
+
 - [ ] Run `analyzeStructFieldUsage` 100 times in a loop
 - [ ] Monitor memory usage (should not grow indefinitely)
 - [ ] Verify no "too many open files" errors
 - [ ] Check Ghidra logs for DecompInterface disposal warnings
 
 **Test Case 6: Large Structure Handling**
+
 - [ ] Create structure with 256 fields (should succeed)
 - [ ] Create structure with 257 fields (should return error)
 - [ ] Verify performance is acceptable for large structures
 
 **Test Case 7: Pattern Matching Accuracy**
+
 - [ ] Create structure with field named "if" or "for" (C keyword)
 - [ ] Verify keyword not suggested as field name
 - [ ] Verify actual variable names from code are suggested
 - [ ] Verify word boundary matching (e.g., "count" != "counter")
 
 ### Performance Testing (Recommended)
+
 - [ ] Analyze structure with 10 xrefs - should complete in < 5 seconds
 - [ ] Analyze structure with 100 xrefs - should complete in < 30 seconds
 - [ ] Decompilation timeout triggers after 30 seconds for slow functions
@@ -370,6 +405,7 @@ Before deployment, the following tests should be performed:
 ## Files Modified
 
 ### Java Plugin
+
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java`
   - Lines 52-55: Added imports (`AtomicReference`, `Pattern`)
   - Lines 74-90: Added constants (NEW)
@@ -379,12 +415,14 @@ Before deployment, the following tests should be performed:
   - Lines 6300-6399: Rewrote `suggestFieldNames()` with thread safety and validation
 
 ### Python Bridge
+
 - `bridge_mcp_ghidra.py`
   - Lines 2541-2542: Added `max_functions` upper bound validation
   - Lines 2602-2606: Added `field_offset` and `num_examples` validation
   - Lines 2670-2671: Added `struct_size` upper bound validation
 
 ### Documentation
+
 - `FIELD_ANALYSIS_IMPLEMENTATION.md` - Created (Phase 1)
 - `CODE_REVIEW_V1.4.0.md` - Created (Phase 2)
 - `ENHANCED_ANALYSIS_PROMPT.md` - Updated with v1.4.0 tools (Phase 1)
@@ -397,6 +435,7 @@ Before deployment, the following tests should be performed:
 **Status**: ✅ READY FOR COMMIT
 
 **Pre-commit Checklist**:
+
 - [x] All critical fixes implemented
 - [x] All major fixes implemented (except deferred #6)
 - [x] Code compiles without errors
@@ -407,7 +446,8 @@ Before deployment, the following tests should be performed:
 - [x] Documentation updated
 
 **Recommended Commit Message**:
-```
+
+```text
 feat: v1.4.0 - field-level analysis with production fixes
 
 BREAKING: None (backward compatible)
@@ -459,6 +499,7 @@ Refs: FIELD_ANALYSIS_IMPLEMENTATION.md, CODE_REVIEW_V1.4.0.md
 ## Next Steps
 
 1. **Build and Test**:
+
    ```bash
    mvn clean package assembly:single
    pytest tests/unit/
@@ -473,6 +514,7 @@ Refs: FIELD_ANALYSIS_IMPLEMENTATION.md, CODE_REVIEW_V1.4.0.md
    - Verify thread safety with concurrent calls
 
 3. **Commit**:
+
    ```bash
    git add src/main/java/com/xebyte/GhidraMCPPlugin.java
    git add bridge_mcp_ghidra.py
@@ -484,6 +526,7 @@ Refs: FIELD_ANALYSIS_IMPLEMENTATION.md, CODE_REVIEW_V1.4.0.md
    ```
 
 4. **Tag Release**:
+
    ```bash
    git tag -a v1.4.0 -m "Field-level analysis with production fixes"
    git push origin v1.4.0
@@ -501,6 +544,7 @@ Refs: FIELD_ANALYSIS_IMPLEMENTATION.md, CODE_REVIEW_V1.4.0.md
 **Production Readiness**: ✅ HIGH
 
 **Remaining Risks**:
+
 1. **Manual JSON Building** (MAJOR #6 deferred):
    - Risk: Edge cases in field names with special characters
    - Mitigation: `escapeJson()` handles quotes, newlines, backslashes

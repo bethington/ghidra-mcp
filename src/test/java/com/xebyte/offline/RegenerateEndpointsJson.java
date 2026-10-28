@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.ManualToolDescriptors;
 import com.xebyte.core.ProgramProvider;
 import junit.framework.TestCase;
 
@@ -33,15 +34,22 @@ import java.util.TreeMap;
  * <p>Merge rules:
  * <ul>
  *   <li>For every {@code @McpTool}-scanned endpoint: write/overwrite the entry
- *       with scanner data (path, method). Description and category are
+ *       with scanner data (path, method, category). The description is
  *       preserved from the existing catalog if non-empty; otherwise taken from
- *       the scanner. Params are an ordered-set union: scanner names in
+ *       the scanner. The category is NOT preserved — it names the tool group the
+ *       bridge lazy-loads by, and only the annotation scan can say what that is.
+ *       Params are an ordered-set union: scanner names in
  *       declaration order, then catalog-only names in their existing order,
  *       each emitted once (case-sensitive comparison). Catalog-only names may
  *       be hand-registered route extras (e.g. {@code /open_project}'s
  *       {@code headless}/{@code program}) or stale annotation names — they
  *       linger until removed by hand, and the run summary lists them per path
- *       for manual review. Silent loss is the failure mode this prevents.</li>
+ *       for manual review. Silent loss is the failure mode this prevents. The
+ *       {@code servers} field (which of the two HTTP servers registers the route) is
+ *       preserved verbatim -- this regenerator scans the union of both servers'
+ *       services and structurally cannot re-derive it; see
+ *       {@code tools/audit_server_scope.py}, and re-run it after adding an
+ *       endpoint so the new entry gets stamped.</li>
  *   <li>For every existing catalog entry that is NOT annotation-scanned
  *       (e.g. hand-registered routes like {@code /check_connection} or
  *       {@code /server/checkouts}): kept verbatim.</li>
@@ -74,21 +82,32 @@ public class RegenerateEndpointsJson extends TestCase {
         next.addProperty("path", tool.path());
         next.addProperty("method", tool.method());
 
-        String category;
-        if (existing != null && existing.has("category")
-                && !existing.get("category").getAsString().isEmpty()) {
-            category = existing.get("category").getAsString();
-        } else {
-            category = tool.category() != null ? tool.category() : "";
-        }
-        next.addProperty("category", category);
+        // Category comes from the scanner, ALWAYS — never preserved from the catalog.
+        // The category is not editorial metadata like the description: it is the tool
+        // GROUP the bridge lazy-loads by, and the bridge reads it from /mcp/schema,
+        // which the annotation scan produces. Preserving the catalog's value here is
+        // what let 63 of 219 entries drift into a dead pre-tool-group vocabulary
+        // (getter/rename/decompile/search/script) that no `load_tool_group` call can
+        // ever name. To change a tool's group, change its @McpTool/@McpToolGroup
+        // annotation; the catalog follows.
+        next.addProperty("category", tool.category() != null ? tool.category() : "");
 
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (AnnotationScanner.ParamDescriptor p : tool.params()) {
             names.add(p.name());
+            // Aliases are accepted argument names, so they belong in the catalog.
+            // Without them the additive merge below was the ONLY thing keeping
+            // e.g. /decompile_function's `address` listed -- which meant the merge
+            // could never drop a genuinely removed parameter either.
+            names.addAll(p.aliases());
         }
         List<String> retained = new ArrayList<>();
-        if (existing != null && existing.has("params")) {
+        // Only fall back to the catalog when the scanner knows of no params at
+        // all: a hand-registered route with no descriptor to speak for it.
+        // Retaining unconditionally makes the list grow-only, so a parameter
+        // deleted from an @McpTool would be advertised forever (measured: the
+        // `program` argument removed from /get_ui_cursor kept coming back).
+        if (names.isEmpty() && existing != null && existing.has("params")) {
             for (JsonElement el : existing.getAsJsonArray("params")) {
                 String name = el.getAsString();
                 if (names.add(name)) {
@@ -102,6 +121,19 @@ public class RegenerateEndpointsJson extends TestCase {
         }
         next.add("params", params);
 
+        // `servers` records which of the two HTTP servers actually registers this
+        // route (see tools/audit_server_scope.py). It is carried through verbatim
+        // rather than recomputed: the scanner this regenerator runs has no idea
+        // which server would have constructed the service it just reflected over
+        // -- it scans the union of both. Dropping it here would silently unstamp
+        // 253 entries on every regeneration, so the field is preserved and
+        // `tests/unit/test_audit_server_scope.py` fails if it goes stale. A newly
+        // added endpoint arrives here with no `servers` at all; re-run
+        // `python -m tools.audit_server_scope --write` after regenerating.
+        if (existing != null && existing.has("servers")) {
+            next.add("servers", existing.get("servers"));
+        }
+
         String description;
         if (existing != null && existing.has("description")
                 && !existing.get("description").getAsString().isEmpty()) {
@@ -110,6 +142,11 @@ public class RegenerateEndpointsJson extends TestCase {
             description = tool.description() != null ? tool.description() : "";
         }
         next.addProperty("description", description);
+
+        // Catalog keeps internal endpoints (bridge still calls them); schema omits them.
+        if (tool.internal()) {
+            next.addProperty("internal", true);
+        }
 
         return new MergeResult(next, retained);
     }
@@ -133,6 +170,13 @@ public class RegenerateEndpointsJson extends TestCase {
         // 2. Scan services for annotation-backed endpoints.
         ProgramProvider provider = ServiceFactory.stubProvider();
         AnnotationScanner scanner = new AnnotationScanner(provider, ServiceFactory.buildAllServices());
+        // Hand-registered routes are a SECOND authoritative source: /open_project,
+        // for instance, is an @McpTool taking only `path` AND a GUI route taking
+        // `path, headless, program`. Without these descriptors the regenerator sees
+        // half the parameters and the catalog's own entries were the only record of
+        // the rest -- which is why the param merge had to be grow-only, and why a
+        // deleted parameter could never be removed.
+        ManualToolDescriptors.addAll(scanner, ManualToolDescriptors.knownPaths());
 
         // 3. Merge. Keyed by path so hand-registered entries survive untouched.
         Map<String, JsonObject> merged = new TreeMap<>(existingByPath);

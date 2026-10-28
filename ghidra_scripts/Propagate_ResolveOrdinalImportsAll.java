@@ -6,9 +6,9 @@
 // Output: Resolves ordinal imports across all processed binaries.
 //
 // @author Ben Ethington
-// @category Diablo 2.Propagation
+// @category GhidraMCP.Propagation
 // @description Resolve ordinal imports for all binaries in project
-// @menupath Diablo 2.Propagation.Resolve Ordinal Imports All
+// @menupath GhidraMCP.Propagation.Resolve Ordinal Imports All
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.symbol.*;

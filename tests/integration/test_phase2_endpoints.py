@@ -27,25 +27,31 @@ class TestBatchComments:
     @pytest.mark.write
     def test_batch_set_comments_plate(self, http_client, sample_address):
         """Test setting plate comment via batch endpoint."""
+        # CommentService declares `address`, not `function_address`, so the
+        # selector was dropped and the endpoint fell back to its default.
         response = http_client.post("/batch_set_comments", data={
-            "function_address": sample_address,
+            "address": sample_address,
             "plate_comment": "Test plate comment from Phase 2 tests"
         })
         assert response.status_code == 200
-        # Should return JSON with success status
-        text = response.text
-        assert "success" in text.lower() or "error" in text.lower()
+        body = response.json()
+        assert body.get("success") is True, response.text
+        assert body.get("plate_comment_set") is True, response.text
 
     @pytest.mark.requires_program
     def test_batch_set_comments_invalid_address(self, http_client):
         """Test batch comments with invalid address."""
         response = http_client.post("/batch_set_comments", data={
-            "function_address": "invalid",
+            "address": "invalid",
             "plate_comment": "Test"
         })
-        # Accept 200 (with error or no-op success), 400, or 500
-        assert response.status_code in [200, 400, 500]
-        # May return success with 0 comments set (no-op) or error
+        assert response.status_code == 200
+        # With `function_address` the bad value never reached the endpoint:
+        # `address` defaulted to empty, the plate write was skipped, and the
+        # response was {"success": true, "plate_comment_set": false} -- which
+        # "accept 200, 400 or 500" happily accepted. Named correctly, the bad
+        # address has to be refused.
+        assert "error" in response.json(), response.text
 
 
 class TestBatchLabels:
@@ -81,7 +87,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_basic(self, http_client):
         """Test basic enhanced search and verify isThunk/isExternal fields."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "name_pattern": "FUN_",
             "limit": 10
         })
@@ -98,7 +104,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_with_filters(self, http_client):
         """Test search with multiple filters."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "name_pattern": "FUN_",
             "has_custom_name": "false",
             "min_xrefs": 1,
@@ -110,7 +116,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_pagination(self, http_client):
         """Test search pagination."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "offset": 0,
             "limit": 5
         })
@@ -119,7 +125,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_filter_is_thunk_true(self, http_client):
         """is_thunk=true should return only thunks."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "is_thunk": "true",
             "limit": 50
         })
@@ -131,7 +137,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_filter_is_thunk_false(self, http_client):
         """is_thunk=false should exclude thunks."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "is_thunk": "false",
             "limit": 50
         })
@@ -143,7 +149,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_filter_is_external_true(self, http_client):
         """is_external=true should return only externals (or nothing if fixture has none)."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "is_external": "true",
             "limit": 50
         })
@@ -155,7 +161,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_filter_is_external_false(self, http_client):
         """is_external=false should exclude externals."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "is_external": "false",
             "limit": 50
         })
@@ -167,7 +173,7 @@ class TestSearchFunctionsEnhanced:
     @pytest.mark.requires_program
     def test_search_functions_enhanced_filter_combined(self, http_client):
         """Combined is_thunk=false + is_external=false + min_xrefs filter composes correctly."""
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "is_thunk": "false",
             "is_external": "false",
             "min_xrefs": 1,
@@ -227,20 +233,23 @@ class TestBulkXrefs:
     """Test bulk xref lookup endpoint."""
 
     @pytest.mark.requires_program
-    def test_get_bulk_xrefs(self, http_client, sample_address):
-        """Test getting xrefs for multiple addresses."""
-        response = http_client.post("/get_bulk_xrefs", data={
-            "addresses": json.dumps([sample_address])
-        })
+    def test_get_xrefs_to_many_addresses(self, http_client, sample_address):
+        """The many-at-once form: one tool, keyed by the address asked for."""
+        response = http_client.get("/get_xrefs_to", params={"addresses": sample_address})
         assert response.status_code == 200
+        body = response.json()
+        assert "references_by_address" in body
+        assert sample_address in body["references_by_address"]
 
     @pytest.mark.requires_program
-    def test_get_bulk_xrefs_empty(self, http_client):
-        """Test bulk xrefs with empty list."""
-        response = http_client.post("/get_bulk_xrefs", data={
-            "addresses": "[]"
-        })
+    def test_get_xrefs_to_many_tolerates_a_bad_address(self, http_client, sample_address):
+        """One unresolvable entry yields an empty list, not a failed batch."""
+        response = http_client.get(
+            "/get_xrefs_to", params={"addresses": f"{sample_address},zzzznotanaddress"}
+        )
         assert response.status_code == 200
+        by_addr = response.json()["references_by_address"]
+        assert by_addr["zzzznotanaddress"] == []
 
 
 class TestGlobalVariables:
@@ -290,28 +299,38 @@ class TestForceDecompile:
     @pytest.mark.requires_program
     def test_force_decompile_by_address(self, http_client, sample_address):
         """Test force decompiling by address."""
-        # GUI plugin uses function_address param, headless uses address
+        # There is one declared selector, `address`, in both GUI and headless
+        # builds -- FunctionService declares it once, with no alias. Sent as
+        # `function_address` it was dropped, the endpoint answered
+        # {"error": "Function address is required"} with status 200, and
+        # `len(text) > 0` was satisfied by that error. The "alternate param
+        # name for headless" retry never ran, because the failure was never a
+        # 400. This test has never decompiled anything.
         response = http_client.get("/force_decompile", params={
-            "function_address": sample_address
+            "address": sample_address
         })
-        if response.status_code == 400:
-            # Try alternate param name for headless
-            response = http_client.get("/force_decompile", params={
-                "address": sample_address
-            })
         assert response.status_code == 200
-        # Should return decompiled code
-        text = response.text
-        assert len(text) > 0
+        body = response.json()
+        assert not body.get("error"), response.text
+        assert body["address"].lstrip("0x").lower() == sample_address.lstrip(
+            "0x"
+        ).lower(), response.text
+        assert body["decompiled"].strip(), response.text
+        # The dialect travels with the code on every response, so a transcript
+        # of pseudocode can be audited after the fact.
+        assert body.get("language_id"), response.text
 
     @pytest.mark.requires_program
     def test_force_decompile_invalid_address(self, http_client):
         """Test force decompile with invalid address."""
         response = http_client.get("/force_decompile", params={
-            "function_address": "0xDEADBEEF"
+            "address": "0xDEADBEEF"
         })
-        # Accept 200 with error, 400, 404, or 500
-        assert response.status_code in [200, 400, 404, 500]
+        assert response.status_code == 200
+        # The old call could not tell a bad address from a missing one: both
+        # produced a 200 with an error body, and the four-way status
+        # assertion accepted 200 unconditionally.
+        assert "error" in response.json(), response.text
 
 
 class TestEntryPoints:
@@ -381,7 +400,7 @@ class TestPhase2Integration:
     def test_search_and_analyze_workflow(self, http_client):
         """Test searching then analyzing a function."""
         # Search for functions
-        response = http_client.get("/search_functions_enhanced", params={
+        response = http_client.get("/find_functions", params={
             "has_custom_name": "true",
             "min_xrefs": 1,
             "limit": 1

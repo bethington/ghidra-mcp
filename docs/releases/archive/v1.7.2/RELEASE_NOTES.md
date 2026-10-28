@@ -24,11 +24,13 @@ end = start.add(length - 1);  // Inclusive end address
 ```
 
 **Impact**:
+
 - Attempted to disassemble one extra byte beyond the requested range
 - Could cause `AddressOutOfBoundsException` when disassembling near segment boundaries
 - Resulted in incorrect `bytes_disassembled` counts in responses
 
 **Example**:
+
 ```python
 # Request: Disassemble 21 bytes starting at 0x6fb4ca14
 disassemble_bytes("0x6fb4ca14", length=21)
@@ -39,6 +41,7 @@ disassemble_bytes("0x6fb4ca14", length=21)
 
 **Verification**:
 Tested with problematic address `0x6fb4ca14` that exposed the bug:
+
 ```bash
 curl -X POST http://127.0.0.1:8089/disassemble_bytes \
   -H "Content-Type: application/json" \
@@ -59,6 +62,7 @@ curl -X POST http://127.0.0.1:8089/disassemble_bytes \
 ### Java Plugin (GhidraMCPPlugin.java)
 
 **Line 9648** - Fixed end address calculation:
+
 ```java
 // Use length to calculate end address
 try {
@@ -72,6 +76,7 @@ try {
 ### Python Bridge (bridge_mcp_ghidra.py)
 
 **Line 49** - Increased timeout for `disassemble_bytes`:
+
 ```python
 'disassemble_bytes': 120,  # Increased from 60s to 120s (2 minutes)
 ```
@@ -81,6 +86,7 @@ Reason: Disassembly operations on large ranges can take significant time, especi
 ### Version Updates
 
 Updated version strings in all locations:
+
 - `pom.xml`: `<version>1.7.2</version>`
 - `src/main/resources/extension.properties`: `version=1.7.2`
 - `GhidraMCPPlugin.java:64`: `shortDescription = "GhidraMCP v1.7.2"`
@@ -94,14 +100,17 @@ Updated version strings in all locations:
 This address was chosen because it exposed the off-by-one bug in v1.7.1.
 
 **Test 1: Direct curl**
+
 ```bash
 curl -s -X POST http://127.0.0.1:8089/disassemble_bytes \
   -H "Content-Type: application/json" \
   -d '{"start_address": "0x6fb4ca14", "length": 21}'
 ```
+
 ✅ **Result**: SUCCESS - Correctly disassembled 21 bytes
 
 **Test 2: Python requests.post()**
+
 ```python
 import requests
 response = requests.post(
@@ -111,12 +120,15 @@ response = requests.post(
 )
 print(response.json())
 ```
+
 ✅ **Result**: SUCCESS - Correctly disassembled 21 bytes
 
 **Test 3: MCP Bridge (via FastMCP)**
+
 ```python
 mcp__ghidra__disassemble_bytes("0x6fb4ca14", length=21)
 ```
+
 ⚠️ **Result**: Intermittent connection pool issue (see Known Issues section)
 Note: The endpoint itself works correctly; the issue is with MCP bridge's connection pooling.
 
@@ -125,13 +137,15 @@ Note: The endpoint itself works correctly; the issue is with MCP bridge's connec
 ### MCP Bridge Connection Pool Issue
 
 When calling `disassemble_bytes` through the MCP bridge, you may encounter:
-```
+
+```text
 Error: Request failed - ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
 ```
 
 **Root Cause**: The MCP bridge's persistent HTTP session may reuse a keep-alive connection that Ghidra closes during long operations.
 
 **Workarounds**:
+
 1. Use direct HTTP API (curl or requests.post())
 2. Retry the operation (automatic retry logic in place)
 3. Use smaller byte ranges
@@ -162,11 +176,13 @@ python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ### Verification
 
 Check the plugin version:
+
 ```bash
 curl -s http://127.0.0.1:8089/get_version
 ```
 
 Expected output:
+
 ```json
 {
   "plugin_version": "1.7.2",
@@ -195,6 +211,7 @@ Upgrade to v1.7.2 directly (skip v1.7.1 due to off-by-one bug).
 ## 📝 Documentation
 
 Updated documentation files:
+
 - `KNOWN_ISSUES.md` - New file documenting MCP bridge connection pool issue
 - `V1.7.2_RELEASE_NOTES.md` - This file
 - Test script: `test_disassemble.py` - Direct Python test for disassemble_bytes
@@ -205,13 +222,14 @@ Thanks to the testing process that identified the off-by-one error at address `0
 
 ## 📞 Support
 
-- **Issues**: https://github.com/xebyte/ghidra-mcp/issues
-- **Discussions**: https://github.com/xebyte/ghidra-mcp/discussions
+- **Issues**: <https://github.com/xebyte/ghidra-mcp/issues>
+- **Discussions**: <https://github.com/xebyte/ghidra-mcp/discussions>
 - **Documentation**: See `docs/` directory
 
 ## 🔮 Next Release
 
 **v1.7.3** (Planned)
+
 - Fix: MCP bridge connection pool issue for long operations
 - Enhancement: Connection header management for slow endpoints
 - Test: Comprehensive integration tests for disassemble_bytes

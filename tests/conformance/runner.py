@@ -32,7 +32,7 @@ _VOLATILE = [
     (re.compile(r'"elapsed_ms"\s*:\s*\d+'), '"elapsed_ms":<MS>'),
     (re.compile(r'"duration_ms"\s*:\s*\d+'), '"duration_ms":<MS>'),
     (re.compile(r'"timestamp"\s*:\s*"[^"]*"'), '"timestamp":"<TS>"'),
-    # get_version's build_timestamp/build_number/full_version all embed the
+    # /mcp/health's build_timestamp/build_number/full_version all embed the
     # Maven build timestamp (yyyyMMdd-HHmmss), which changes on every rebuild
     # by design (pom.xml's maven.build.timestamp) -- not a behavioral change.
     (re.compile(r'\b\d{8}-\d{6}\b'), '<BUILDSTAMP>'),
@@ -51,6 +51,26 @@ _VOLATILE = [
     # Absolute host paths differ per machine; the trailing filename is what matters.
     (re.compile(r'[A-Za-z]:[\\/](?:[^"\\/:*?<>|\r\n]+[\\/])*'), '<PATH>/'),
 ]
+
+
+def is_error_payload(text: str) -> bool:
+    """True when a response body is nothing but a server-side refusal.
+
+    The MCP protocol flag `isError` is NOT set for these: the tool call
+    succeeded, the tool said no. So `assert: is_error: false` passes on them,
+    `nonempty: true` passes on them, and `--record` used to write them out as
+    the golden -- which turns the suite into an assertion that the endpoint
+    stays broken. Measured on the first recording pass: 20 of 124 committed
+    goldens were bodies like
+    `{"error": "At least one of 'mnemonic' or 'operand_pattern' must be
+    non-empty"}` -- the case's own arguments were wrong, and every one of those
+    cases reported PASS.
+    """
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(parsed, dict) and set(parsed) == {"error"}
 
 
 def normalize(text: str, extra: list[tuple[str, str]] | None = None) -> str:
@@ -81,6 +101,9 @@ class Case:
     timeout: float = 60.0
     skip: str | None = None          # non-None => skipped, value is the reason
     tier: str = "read"               # read | write | destructive
+    # Opt in to recording an `{"error": ...}` body as this case's golden. Only
+    # true for cases whose POINT is the refusal (a bad-input negative test).
+    expect_error_payload: bool = False
     normalize_extra: list[tuple[str, str]] = field(default_factory=list)
     name: str | None = None          # disambiguates multiple cases per tool
     extract: dict[str, str] = field(default_factory=dict)  # capture_name -> dot.path into response JSON
@@ -97,7 +120,7 @@ class CaseOutcome:
     status: str                       # pass | fail | skip | error
     detail: str = ""
     elapsed_ms: int = 0
-    snapshot_status: str = "n/a"      # match | new | drift | n/a
+    snapshot_status: str = "n/a"      # match | new | drift | refused | n/a
     response_preview: str = ""
 
 
@@ -230,6 +253,33 @@ class ConformanceRunner:
             return "n/a", ""
         path = self._snapshot_path(case)
         current = normalize(result.text, case.normalize_extra)
+        # An MCP-LEVEL error is never a golden, full stop -- not even for a
+        # case that opted into recording a refusal, because `isError` means the
+        # call did not reach the tool at all. The body is a transport string
+        # like "Unknown tool: mcp_schema", not a response.
+        #
+        # Measured 2026-09-18: #440 made the bridge lazy by default, so
+        # `mcp_schema` stopped being registered; `--update-snapshots` then
+        # overwrote the committed 7,119-line mcp_schema.snap with the single
+        # line `Unknown tool: mcp_schema` and exited having reported `new=1`.
+        # The guard below could not see it -- that one tests for a JSON
+        # `{"error": ...}` BODY, and a transport error is not JSON.
+        if (self.record or self.update) and result.is_error:
+            return "refused", (
+                "refusing to record an MCP-level error as a golden -- the call "
+                "never reached the tool, so there is no response to record. "
+                f"Body: {current[:200]}"
+            )
+        # A refusal is never a golden unless the case says its point IS the
+        # refusal. Recording one silently converts a wrong CASE into a
+        # permanent claim about the SERVER.
+        if (self.record or self.update) and not case.expect_error_payload \
+                and is_error_payload(current):
+            return "refused", (
+                "refusing to record an error payload as a golden -- fix the "
+                f"case's arguments, or set expect_error_payload: true if the "
+                f"refusal is the point. Body: {current[:200]}"
+            )
         if not path.exists():
             if self.record or self.update:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -274,7 +324,7 @@ class ConformanceRunner:
                     fails.append(f"extract {capture_name!r}: {exc}")
 
         snap_status, snap_detail = self._handle_snapshot(case, result)
-        if snap_detail and snap_status == "drift":
+        if snap_detail and snap_status in ("drift", "refused"):
             fails.append(snap_detail)
 
         outcome = CaseOutcome(

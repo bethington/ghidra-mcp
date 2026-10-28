@@ -49,10 +49,10 @@ class TestGetToolDispatch(unittest.TestCase):
             "properties": {"address": {"type": "string"}},
             "required": ["address"],
         }
-        fn = _build_tool_function("/decompile_function", "GET", schema)
+        fn = _build_tool_function("/get_functions", "GET", schema)
         result = fn(address="0x401000")
 
-        mock_get.assert_called_once_with("/decompile_function", params={"address": "0x401000"})
+        mock_get.assert_called_once_with("/get_functions", params={"address": "0x401000"})
         self.assertEqual(result, '{"result": "ok"}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
@@ -68,11 +68,12 @@ class TestGetToolDispatch(unittest.TestCase):
             },
             "required": [],
         }
-        fn = _build_tool_function("/list_functions", "GET", schema)
+        fn = _build_tool_function("/find_functions", "GET", schema)
         result = fn(offset=None, limit=None)
 
         # None values should be filtered out
-        mock_get.assert_called_once_with("/list_functions", params=None)
+        mock_get.assert_called_once_with("/find_functions", params=None)
+        self.assertEqual(result, '{"data": []}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_no_params(self, mock_get):
@@ -81,10 +82,11 @@ class TestGetToolDispatch(unittest.TestCase):
         mock_get.return_value = '{"version": "4.2.0"}'
 
         schema = {"properties": {}, "required": []}
-        fn = _build_tool_function("/get_version", "GET", schema)
+        fn = _build_tool_function("/mcp/health", "GET", schema)
         result = fn()
 
-        mock_get.assert_called_once_with("/get_version", params=None)
+        mock_get.assert_called_once_with("/mcp/health", params=None)
+        self.assertEqual(result, '{"version": "4.2.0"}')
 
 
 class TestPostToolDispatch(unittest.TestCase):
@@ -109,6 +111,7 @@ class TestPostToolDispatch(unittest.TestCase):
         mock_post.assert_called_once_with(
             "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
+        self.assertEqual(result, '{"success": true}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_filters_none_values(self, mock_post):
@@ -390,7 +393,7 @@ class TestProgramRequired(unittest.TestCase):
 
         self.bridge.state._require_selectors = True
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         result = fn(address="0x401000")
 
         mock_get.assert_not_called()
@@ -406,11 +409,11 @@ class TestProgramRequired(unittest.TestCase):
         mock_get.return_value = "{}"
         self.bridge.state._require_selectors = True
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000", program="game.exe")
 
         mock_get.assert_called_once_with(
-            "/decompile_function",
+            "/get_functions",
             params={"address": "0x401000", "program": "game.exe"},
         )
 
@@ -421,10 +424,10 @@ class TestProgramRequired(unittest.TestCase):
         mock_get.return_value = "{}"
         self.bridge.state._require_selectors = False
 
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000")
 
-        mock_get.assert_called_once_with("/decompile_function", params={"address": "0x401000"})
+        mock_get.assert_called_once_with("/get_functions", params={"address": "0x401000"})
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_no_refusal_for_tools_without_program_param(self, mock_get):
@@ -448,7 +451,7 @@ class TestProgramRequired(unittest.TestCase):
 
         # An empty string is filtered upstream of the strict check, so the
         # check should treat it as a missing program=.
-        fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
+        fn = _build_tool_function("/get_functions", "GET", self._OPTIONAL_PROGRAM_TOOL)
         result = fn(address="0x401000", program="")
 
         mock_get.assert_not_called()
@@ -566,6 +569,124 @@ class TestProgramRequired(unittest.TestCase):
         with patch.dict("os.environ", env, clear=True):
             self.bridge.state._init_require_selectors()
         self.assertFalse(self.bridge.state._require_selectors)
+
+
+class TestParamDescriptionsReachSchema(unittest.TestCase):
+    """@Param descriptions from /mcp/schema must survive into inputSchema.
+
+    FastMCP derives inputSchema from the generated signature via pydantic, so a
+    bare annotation silently drops the text the server already publishes and the
+    model sees an undocumented parameter.
+    """
+
+    @staticmethod
+    def _described(fn, pname):
+        """The pydantic Field description on a generated parameter, if any."""
+        annotation = fn.__signature__.parameters[pname].annotation
+        for meta in getattr(annotation, "__metadata__", ()):
+            if getattr(meta, "description", None):
+                return meta.description
+        return None
+
+    def test_description_is_attached_to_parameter(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Function address in hex"},
+                "limit": {"type": "integer", "description": "Max results", "default": 100},
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/list_functions", "GET", schema)
+        self.assertEqual(self._described(fn, "address"), "Function address in hex")
+        self.assertEqual(self._described(fn, "limit"), "Max results")
+
+    def test_undescribed_parameter_is_left_bare(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {"type": "object", "properties": {"address": {"type": "string"}}, "required": ["address"]}
+        fn = _build_tool_function("/x", "GET", schema)
+        self.assertIsNone(self._described(fn, "address"))
+
+    def test_synthetic_dry_run_is_described(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+        fn = _build_tool_function("/rename_function", "POST", schema)
+        self.assertIn("dry_run", fn.__signature__.parameters)
+        self.assertIsNotNone(self._described(fn, "dry_run"))
+
+    def test_description_does_not_disturb_dispatch(self):
+        """The annotation is metadata only — calls must behave exactly as before."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "old_name": {"type": "string", "description": "Current name"},
+                "new_name": {"type": "string", "description": "Replacement name"},
+            },
+            "required": ["old_name", "new_name"],
+        }
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_post:
+            mock_post.return_value = "ok"
+            fn = _build_tool_function("/rename_function", "POST", schema)
+            result = fn(old_name="FUN_00401000", new_name="ParseHeader")
+        self.assertEqual(result, "ok")
+        endpoint, kwargs = mock_post.call_args[0][0], mock_post.call_args[1]
+        self.assertEqual(endpoint, "/rename_function")
+        self.assertEqual(kwargs["data"], {"old_name": "FUN_00401000", "new_name": "ParseHeader"})
+
+    def test_optional_param_keeps_none_default_and_description(self):
+        """Optional params become `T | None`; the description must ride along."""
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "type": "object",
+            "properties": {"program": {"type": "string", "description": "Program name"}},
+            "required": [],
+        }
+        fn = _build_tool_function("/list_functions", "GET", schema)
+        param = fn.__signature__.parameters["program"]
+        self.assertIsNone(param.default)
+        self.assertEqual(self._described(fn, "program"), "Program name")
+
+    def test_description_reaches_registered_tool_json_schema(self):
+        """End-to-end: a signature-level description must survive into the
+        inputSchema FastMCP actually publishes to a client, not just the
+        intermediate `Annotated[...]` metadata `_described()` inspects above.
+        """
+        import bridge_mcp_ghidra as bridge
+
+        schema = [
+            {
+                "name": "zz_test_description_e2e",
+                "description": "test tool",
+                "endpoint": "/zz_test_description_e2e",
+                "http_method": "GET",
+                "category": "zz_test_description_e2e_group",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {"type": "string", "description": "Function address in hex"},
+                        "untouched": {"type": "string"},
+                    },
+                    "required": ["address"],
+                },
+            }
+        ]
+        try:
+            bridge.register_tools_from_schema(schema, groups={"zz_test_description_e2e_group"})
+            tool = bridge.mcp._tool_manager._tools["zz_test_description_e2e"]
+            self.assertEqual(
+                tool.parameters["properties"]["address"]["description"],
+                "Function address in hex",
+            )
+            self.assertNotIn("description", tool.parameters["properties"]["untouched"])
+        finally:
+            bridge.register_tools_from_schema([])
 
 
 if __name__ == "__main__":

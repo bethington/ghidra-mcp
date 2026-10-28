@@ -166,7 +166,7 @@ def generate_endpoint_report():
         print("endpoints.json not found")
         return
 
-    with open(endpoints_file) as f:
+    with open(endpoints_file, encoding="utf-8") as f:
         data = json.load(f)
 
     endpoints = data.get("endpoints", [])

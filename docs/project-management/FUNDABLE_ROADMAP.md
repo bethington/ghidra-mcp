@@ -3,6 +3,12 @@
 **Status**: Draft for community discussion  
 **Purpose**: Collect large, community-reviewable Ghidra MCP efforts that need meaningful design, implementation, testing, and maintenance time.
 
+> **Status note, 2026-10-07.** `fun-doc`, which the Function Documentation at
+> Scale milestone builds on, now lives in the `d2-game-exe` repository. The
+> Headless Parity milestone's first step shipped as the `servers` field in
+> `tests/endpoints.json` (`tools/audit_server_scope.py`), and the Gradle
+> migration listed below as a candidate is done for local work.
+
 ## Why This Exists
 
 Ghidra MCP has more good ideas than maintainer hours. Some features are quick fixes, but others are real engineering projects: they cut across the Python bridge, Java plugin, headless server, debugger integration, CI, docs, and release testing.
@@ -21,12 +27,12 @@ Funding does not buy private control of the project. It helps move public, revie
 - Help refine acceptance criteria before implementation starts.
 - For organization-backed work, reach out about sponsored development or invoice-based support.
 
-Sponsor link: https://github.com/sponsors/bethington
+Sponsor link: <https://github.com/sponsors/bethington>
 
 ## Current RFC Milestones
 
 | Milestone | RFC | Primary Value | First Phase | Status |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Native MCP Runtime | `NATIVE_MCP_RUNTIME_RFC.md` | Java speaks MCP directly in headless and GUI modes, reducing bridge/process complexity | Headless native MCP over stdio | Draft RFC |
 | Function Documentation at Scale | `FUNCTION_DOCUMENTATION_SCALE_RFC.md` | Reliable AI documentation across many functions with queueing, scoring, reports, and dashboard review | Reliable function-level jobs | Draft RFC |
 | Dynamic Knowledge Validation | `DYNAMIC_KNOWLEDGE_VALIDATION_RFC.md` | Use live debugger evidence to validate and expand the Ghidra knowledge corpus | Runtime Prototype Validation | Draft RFC |
@@ -54,7 +60,7 @@ Best for sponsors who care about:
 
 Goal: make AI-assisted documentation reliable across large binaries.
 
-The first phase focuses on resumable function-level jobs, priority scoring, failure policies, controlled parallelism, and Markdown/JSON reports. Later phases expand the existing `fun-doc` dashboard into review, diff, accept/reject, retry, provider policy, and cross-version documentation bundles.
+The first phase focuses on resumable function-level jobs, priority scoring, failure policies, controlled parallelism, and Markdown/JSON reports. Later phases expand a review dashboard into review, diff, accept/reject, retry, provider policy, and cross-version documentation bundles.
 
 Best for sponsors who care about:
 
@@ -125,10 +131,10 @@ Best for sponsors who care about:
 These may become RFCs later, but need more clarification or may be absorbed into the milestones above:
 
 | Candidate | Source | Likely Direction |
-|---|---|---|
+| --- | --- | --- |
 | Offline/disposable CI test fixtures | GitHub issue `#112`, `docs/TESTING.md` | Could become a CI Reliability RFC or fold into Headless Parity |
 | Cross-client discovery/connectivity hardening | GitHub issue `#170` | Could become a Client Compatibility RFC or fold into Recovery/Native MCP |
-| Gradle migration completion | `GRADLE_MIGRATION_CHECKLIST.md` | Could become Build and Release Modernization milestone |
+| Gradle migration completion | `GRADLE_MIGRATION_CHECKLIST.md` | Done for local work: Gradle is the default local backend and Maven stays as CI's peer (see the checklist's Status) |
 
 Older backlog items such as composable batch queries and P-code dataflow analysis appear to have been mostly addressed by existing endpoints like `analyze_function_complete`, `analyze_for_documentation`, and `analyze_dataflow`.
 
@@ -161,4 +167,3 @@ Sponsor link: https://github.com/sponsors/bethington
 - Keep small bugs and straightforward enhancements in normal issues.
 - Add an RFC before implementation when a milestone affects architecture, user workflows, or long-term maintenance.
 - Update statuses when an RFC moves from draft to accepted, in progress, shipped, or deferred.
-

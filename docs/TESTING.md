@@ -10,6 +10,34 @@ This project has two different testing surfaces:
 The live tests are intentionally opt-in because they can add or reset
 `Benchmark.dll` and `BenchmarkDebug.exe` in the current Ghidra project.
 
+## Test Tiers
+
+Four tiers, cheapest first. Gradle is the default backend for local Java runs;
+CI runs the same Java tests under Maven. In Git Bash, pass the Ghidra path with
+forward slashes (`-PGHIDRA_INSTALL_DIR=F:/...`): a backslash path is mangled
+before Gradle sees it and fails as ~100 missing-package compile errors.
+
+| Tier | Needs | Command |
+| --- | --- | --- |
+| Unit (Python) | nothing | `pytest tests/unit/ --no-cov` |
+| Offline (Java) | a Ghidra install for the classpath | `./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=<ghidra-install>` |
+| Offline (Python, fake server) | nothing | `pytest tests/offline/ --no-cov` and `pytest tests/integration/test_readonly_endpoints.py -p tests.offline.replay_plugin --no-cov` |
+| Real-Ghidra (Java) | a Ghidra install, no running server | `./gradlew test --tests 'com.xebyte.core.*GhidraTest' -PGHIDRA_INSTALL_DIR=<ghidra-install>` |
+| Integration | Ghidra running on port 8089 with a program open | `pytest tests/integration/` (`-m readonly` for the read-only subset) |
+
+- The offline Python tier runs the real bridge against `tests/offline/fake_ghidra.py`,
+  a strict fake that routes from `tests/endpoints.json` and replays recorded
+  responses. It proves the bridge speaks the protocol, not what Ghidra does
+  today; read `tests/offline/README.md` before adding to it.
+- The real-Ghidra tier builds actual programs with Ghidra's `ProgramBuilder`.
+  Without `GHIDRA_INSTALL_DIR` its tests skip and the run still reports
+  success, so check the skipped count, not the exit status.
+- CI selects Java tests with `-Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`.
+  A test class in any other package is compiled but never run;
+  `tests/unit/test_ci_java_test_globs.py` fails when one appears.
+- The JaCoCo coverage gate exists only in `pom.xml`:
+  `mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'`.
+
 ## Quick Commands
 
 Run the normal local checks:
@@ -22,13 +50,13 @@ pytest tests/unit/ -v --no-cov
 Deploy without importing the benchmark binary:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
 ```
 
 Deploy and run the release-grade live regression:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
 ```
 
 Opt in locally so every deploy runs the release regression:
@@ -38,7 +66,23 @@ GHIDRA_MCP_DEPLOY_TESTS=release
 ```
 
 `GHIDRA_MCP_DEPLOY_TESTS` belongs in a local `.env`; it is not intended as the
-repository default.
+repository default. Its value is validated against the same tier list `--test`
+uses (`tools/setup/ghidra.py`'s `DEPLOY_TEST_MODES`) and an unknown tier is
+**refused, not ignored** — `GHIDRA_MCP_DEPLOY_TESTS=relase` used to resolve to
+`['relase']`, match no dispatch branch, and let deploy exit 0 having run only
+the smoke test (#484). Set it to `off` to run no tiers.
+
+The Gradle backend (`TOOLS_SETUP_BACKEND=gradle`) also **refuses** a tier
+request rather than accepting it: `build.gradle`'s `deploy` task is
+`stopGhidra` + `deployExtension` + `installUserExtension` +
+`patchGhidraUserConfig` and runs no post-deploy tier at all. Use the **default
+(Maven) backend** for tiered deploys — leave `TOOLS_SETUP_BACKEND` unset. That
+is a backend *selector*, not a requirement for the `mvn` binary:
+`deploy_to_ghidra` never invokes Maven, it deploys the freshest
+`GhidraMCP-<version>.zip` from `build/distributions/` or `target/`, whichever
+backend produced it. So `./gradlew buildExtension` followed by
+`python -m tools.setup deploy --test release` is the working combination on a
+machine with no Maven installed.
 
 ## What Runs by Default
 
@@ -64,7 +108,7 @@ unless the user opts in with `--test ...` or `GHIDRA_MCP_DEPLOY_TESTS`.
 Pass one or more `--test` values to `python -m tools.setup deploy`.
 
 | Tier | Project Mutation | Purpose |
-|------|------------------|---------|
+| ------ | ------------------ | --------- |
 | `selected-contract` | No benchmark import | Checks selected release-critical tools against live schema and `tests/endpoints.json`. |
 | `endpoint-catalog` | No benchmark import | Confirms all catalog endpoints are present in the live schema. |
 | `benchmark-read` | Imports/resets benchmark | Runs broader read-only endpoint checks against `/testing/benchmark/Benchmark.dll`. |
@@ -92,20 +136,47 @@ file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 ## Benchmark Fixture
 
-The benchmark binary is built from `fun-doc/benchmark` and imported into the
-active Ghidra project at:
+The fixture lives at `tests/fixtures/benchmark/` and is **generated, not
+compiled** — `make_fixture.py` emits both PE32 images directly, with no
+toolchain of any kind. Both binaries are committed, so a checkout is enough.
+See `tests/fixtures/benchmark/README.md` for what is in them and why they are
+built this way.
+
+```text
+tests/fixtures/benchmark/Benchmark.dll         committed; image base 0x10000000
+tests/fixtures/benchmark/BenchmarkDebug.exe    committed; image base 0x00400000
+tests/fixtures/benchmark/build_manifest.json   provenance + sha256 digests
+tests/fixtures/benchmark/regression/*.yaml     the value assertions the release tier runs
+```
+
+They are imported into the active Ghidra project at:
 
 ```text
 /testing/benchmark/Benchmark.dll
 /testing/benchmark/BenchmarkDebug.exe
 ```
 
-The filesystem build artifacts stay at:
+`tests/unit/test_benchmark_fixture.py` regenerates both images and compares them
+byte-for-byte with what is committed, checks the regression baselines still
+agree with the binaries about every function address, and on Windows executes
+the debuggee and compares its exit code against a CRC computed in Python. That
+last check also proves `Benchmark.dll` loads and resolves an export by name. All
+of it runs offline in the unit tier, with no Ghidra.
 
-```text
-fun-doc/benchmark/build/Benchmark.dll
-fun-doc/benchmark/build/BenchmarkDebug.exe
-```
+> **Between 2026-08-10 and 2026-08-31 this fixture did not exist here.**
+> `fun-doc/` moved to `d2-game-exe` and took it along, and every tier that
+> resets it — `release`, `benchmark-read`, `benchmark-write`, `multi-program`,
+> `debugger-live`, `negative-contract` — raised before running a single
+> assertion. `release` is the release-regression workflow's default tier and
+> the gate the release checklist names.
+
+<!-- -->
+
+> **`debugger-live` is restored only in part.** The debuggee binary is back and
+> genuinely runnable, but the tier still needs a Ghidra GUI, a working dbgeng
+> backend and `ghidratrace` in the launcher's Python. Where those are missing it
+> raises `DebuggerLiveTestSkipped`, which `release` catches and names in its
+> pass line. Nothing here has verified that tier end to end.
 
 Before benchmark tiers run, the deploy harness deletes any existing benchmark
 project file at the legacy and current benchmark paths, recreates the
@@ -126,13 +197,21 @@ Python executable Ghidra should use for debugger launches.
 
 ### Pull Requests and Merges
 
-`.github/workflows/tests.yml` runs on pull requests and pushes to `main` and
-`develop`. It runs the merge-gating checks that work on GitHub-hosted runners:
+`.github/workflows/tests.yml` runs on pull requests and pushes targeting `main`,
+`dev` and `develop`. It runs the merge-gating checks that work on GitHub-hosted
+runners:
 
-- Maven build and offline Java tests.
-- Python unit tests across supported Python versions.
+- Maven build and offline Java tests, under the JaCoCo coverage gate, then the
+  real-Ghidra Java tier against a downloaded Ghidra. **CI builds with Maven, not
+  Gradle** — Gradle is the default for local work, but it declares no JaCoCo
+  plugin, so the coverage gate is the one check that a Gradle-only contributor
+  cannot reproduce locally.
+- Python unit tests across Python 3.10 to 3.13 on Linux, plus a Windows run.
+- The offline HTTP tier: `tests/offline/` and the read-only integration file
+  replayed against the fake server.
 - Pester setup tests on Windows.
 - Documentation linting.
+- Code quality (flake8, black), advisory and non-blocking.
 
 These checks should be configured as required status checks in branch protection.
 
@@ -143,8 +222,12 @@ opt-in. Add the PR label:
 live-ghidra-regression
 ```
 
-When that label is present, `.github/workflows/release-regression.yml` runs on a
-self-hosted Windows runner and executes the live deploy regression.
+When that label is present, `.github/workflows/release-regression.yml` targets a
+self-hosted Windows runner and executes the live deploy regression. No
+self-hosted runner is registered for this repository, deliberately: on a public
+repo, labelling a fork PR would run a stranger's code on the maintainer's
+machine. Until one is, a labelled run waits for a runner and the live suite is
+run locally with `deploy --test release`.
 
 This avoids making every external PR wait forever for a private self-hosted
 runner while still giving maintainers a real gate for risky MCP/Ghidra changes.
@@ -162,8 +245,16 @@ For manual release workflows:
 3. Set `ghidra_path` for the self-hosted runner.
 4. Start the workflow.
 
-The release job waits for the live regression job and only publishes if it
-passes or if the live regression option was not selected.
+When the live regression did not run in the workflow (it was not requested,
+or the release came from a tag push, where the job is always skipped), the
+release instead verifies recorded local evidence:
+`python -m tools.release_evidence verify --version X.Y.Z`. A passing local
+`python -m tools.setup deploy --test release` writes
+`docs/releases/live-regression-evidence.json` with a fingerprint of the source
+it ran against; commit that file. Changing any fingerprinted path afterwards
+(`src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`,
+`tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml`, `build.gradle`)
+invalidates it, and the release refuses to publish until the tier is re-run.
 
 ## Runner Requirements
 
@@ -218,10 +309,11 @@ and post-release steps, see
 Minimum local verification:
 
 ```text
-python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.2_PUBLIC"
+python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
 python -m tools.setup build
 pytest tests/unit/ -v --no-cov
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.2_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
+git add docs/releases/live-regression-evidence.json
 ```
 
 For GitHub releases, enable `run_live_regression` in the release workflow when a

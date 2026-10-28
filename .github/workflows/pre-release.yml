@@ -17,11 +17,11 @@ on:
       ghidra_path:
         description: 'Ghidra path for live regression self-hosted runner'
         required: false
-        default: 'F:\ghidra_12.1.2_PUBLIC'
+        default: 'F:\ghidra_12.1.4_PUBLIC'
 
 env:
-  GHIDRA_VERSION: 12.1.2
-  GHIDRA_DATE: 20260605
+  GHIDRA_VERSION: 12.1.4
+  GHIDRA_DATE: 20260921
 
 # OSSF Scorecard Token-Permissions: default to read-only. The
 # create-prerelease job elevates to contents:write for the GitHub
@@ -52,7 +52,7 @@ jobs:
         fetch-depth: 0
 
     - name: Set up JDK 21
-      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c  # v6.0.0
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
       with:
         java-version: '21'
         distribution: 'temurin'
@@ -67,6 +67,26 @@ jobs:
           exit 1
         fi
         echo "Version format valid: $VERSION"
+
+    - name: Verify recorded live-regression evidence
+      # Same gate as release.yml, same reason: the live Ghidra release
+      # regression needs a Windows self-hosted runner and ZERO are registered
+      # -- deliberately, because on a public repo labelling a fork PR would run
+      # a stranger's code on the maintainer's machine. Without this step,
+      # `needs...result == 'skipped'` above reads "nobody ran it" as permission
+      # to publish.
+      #
+      # Verified against the BASE version (7.0.0 for 7.0.0-rc.1): the evidence
+      # records the pom's version, which does not carry the pre-release suffix,
+      # and rc.1 vs rc.2 is not what this check is for. The source fingerprint
+      # is -- it fails the moment anything the regression exercises changes, so
+      # rc.2 needs its own run only if rc.2 actually differs.
+      #
+      # No fallback, no `|| true`. A gate that cannot read its input must fail.
+      if: needs.release-regression.result != 'success'
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        python3 -m tools.release_evidence verify --version "${VERSION%%-*}"
 
     - name: Download Ghidra
       run: |
@@ -104,10 +124,10 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/PDB/lib/PDB.jar"                    -DgroupId=ghidra -DartifactId=PDB                -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/FunctionID/lib/FunctionID.jar"      -DgroupId=ghidra -DartifactId=FunctionID         -Dversion=${GV} -Dpackaging=jar
 
-        echo "Installed 15 Ghidra JARs to Maven local repository"
+        echo "Installed 18 Ghidra JARs to Maven local repository"
 
     - name: Install uv (Python build + test gate)
-      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
       with:
         enable-cache: true
 
@@ -119,7 +139,7 @@ jobs:
         echo "Running offline Java tests..."
         mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
         echo "Running Python unit tests..."
-        uv run --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
+        uv run --locked --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
         echo "✅ Offline test gate passed"
 
     - name: Build with Maven
@@ -182,7 +202,13 @@ jobs:
       run: |
         VERSION="${{ github.event.inputs.version }}"
         BRANCH="${{ github.event.inputs.branch }}"
-        MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "unknown")
+        # Same source as release.yml, and no fallback: a count that cannot be
+        # read must stop the release, not publish "unknown" (or a plausible
+        # wrong number -- v6.0.0 shipped "Headless Endpoints: 1" that way).
+        MCP_TOOLS=$(python3 -m tools.audit_server_scope --release-counts | cut -d' ' -f1)
+        # The wheel carries pyproject's version (7.0.0), not the pre-release
+        # label (7.0.0-rc.1), so name the file that was actually built.
+        WHEEL=$(basename dist/ghidra_mcp_bridge-*.whl)
 
         cat > release_notes.md << GENEOF
         # GhidraMCP ${VERSION} Pre-Release
@@ -207,7 +233,7 @@ jobs:
         Same as stable releases:
         1. In Ghidra: **File > Install Extensions > Add** and select the ZIP
         2. Restart Ghidra, enable plugin
-        3. \`uv tool install ./ghidra_mcp_bridge-${VERSION}-py3-none-any.whl\` (or \`pip install\` the wheel)
+        3. \`uv tool install ./${WHEEL}\` (or \`pip install\` the wheel)
         4. \`bridge-mcp-ghidra\` (or \`python -m bridge_mcp_ghidra\`)
 
         ---

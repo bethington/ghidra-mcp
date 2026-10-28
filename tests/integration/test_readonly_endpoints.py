@@ -56,27 +56,28 @@ def require_server(server_available):
 class TestServerHealth:
     """Test server connectivity and health endpoints."""
 
-    def test_check_connection(self, http_client):
+    def test_server_health(self, http_client):
         """Server should respond to health check."""
-        response = http_client.get("/check_connection")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
         assert "ok" in response.text.lower() or "connected" in response.text.lower()
 
     def test_get_version(self, http_client):
         """Server should return version info."""
-        response = http_client.get("/get_version")
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        text = response.text
-        # Should contain version info
-        assert "version" in text.lower() or "ghidra" in text.lower()
+        data = response.json()
+        assert data.get("status") == "ok"
+        if "version" in data:
+            assert data["version"]
 
 
 class TestProgramInfo:
     """Test read-only program information endpoints."""
 
-    def test_get_current_program_info(self, http_client):
-        """Get current program info."""
-        response = http_client.get("/get_current_program_info")
+    def test_get_ui_cursor(self, http_client):
+        """Get UI cursor / active program info."""
+        response = http_client.get("/get_ui_cursor", params={"type": "program"})
         assert response.status_code == 200
         # May return error if no program open, that's OK
         assert len(response.text) > 0
@@ -91,10 +92,13 @@ class TestProgramInfo:
         response = http_client.get("/list_open_programs")
         assert response.status_code == 200
 
-    def test_list_segments(self, http_client):
-        """List memory segments."""
-        response = http_client.get("/list_segments")
+    def test_list_program_items_segments(self, http_client):
+        """List memory segments via list_program_items."""
+        response = http_client.get("/list_program_items", params={"kind": "segments"})
         assert response.status_code == 200
+        data = response.json()
+        assert data.get("kind") == "segments"
+        assert "items" in data
 
     def test_get_entry_points(self, http_client):
         """Get program entry points."""
@@ -184,50 +188,80 @@ class TestFunctionListing:
 
     def test_list_functions_default(self, http_client):
         """List functions with default parameters."""
-        response = http_client.get("/list_functions")
+        response = http_client.get("/find_functions")
         assert response.status_code == 200
         # Should return some text (may be empty list or error if no program)
         assert len(response.text) > 0
 
     def test_list_functions_with_limit(self, http_client):
         """List functions with limit parameter."""
-        response = http_client.get("/list_functions", params={"limit": 10})
+        response = http_client.get("/find_functions", params={"limit": 10})
         assert response.status_code == 200
 
     def test_list_functions_with_offset(self, http_client):
         """List functions with pagination."""
-        response = http_client.get("/list_functions", params={"offset": 0, "limit": 5})
+        response = http_client.get("/find_functions", params={"offset": 0, "limit": 5})
         assert response.status_code == 200
+        functions = response.json()["functions"]
+        assert len(functions) <= 5
 
-    def test_search_functions_by_name(self, http_client):
-        """Search functions by name pattern."""
-        response = http_client.get("/search_functions_by_name", params={"name": "main"})
-        assert response.status_code == 200
-
-    def test_search_functions_enhanced(self, http_client):
-        """Enhanced function search."""
+    def test_find_functions_filters_by_name_pattern(self, http_client):
+        """`name_pattern` narrows the listing; find_functions replaced the four
+        separate listing tools this used to be spread across."""
         response = http_client.get(
-            "/search_functions_enhanced", params={"pattern": "FUN_", "limit": 10}
+            "/find_functions", params={"pattern": "FUN_", "limit": 10}
         )
         assert response.status_code == 200
+        payload = response.json()
+        assert "functions" in payload
+        assert len(payload["functions"]) <= 5
+
+    def test_search_functions_by_name(self, http_client):
+        """Search functions by name pattern.
+
+        /search_functions folded into /find_functions; the selector is still
+        `name_pattern`.
+        """
+        response = http_client.get("/find_functions", params={"name_pattern": "a"})
+        assert response.status_code == 200
+        assert "functions" in response.json()
+
+    def test_search_functions_enhanced(self, http_client):
+        """Enhanced function search.
+
+        /search_functions_enhanced folded into /find_functions, which returns
+        one shape -- `functions` -- for every filter combination.
+        """
+        response = http_client.get(
+            "/find_functions", params={"name_pattern": "FUN_", "limit": 10}
+        )
+        assert response.status_code == 200
+        results = response.json()["functions"]
+        assert len(results) <= 10
+        assert all("FUN_" in r["name"] for r in results)
 
 
 class TestDataTypes:
     """Test data type listing endpoints (read-only)."""
 
-    def test_list_data_types(self, http_client):
-        """List data types."""
-        response = http_client.get("/list_data_types")
+    def test_find_data_types(self, http_client):
+        """Find data types with no filter."""
+        response = http_client.get("/find_data_types")
         assert response.status_code == 200
 
-    def test_list_data_types_with_limit(self, http_client):
-        """List data types with limit."""
-        response = http_client.get("/list_data_types", params={"limit": 20})
+    def test_find_data_types_with_limit(self, http_client):
+        """Find data types with limit."""
+        response = http_client.get("/find_data_types", params={"limit": 20})
         assert response.status_code == 200
 
-    def test_search_data_types(self, http_client):
-        """Search for data types."""
-        response = http_client.get("/search_data_types", params={"pattern": "int"})
+    def test_find_data_types_by_pattern(self, http_client):
+        """Search for data types by name."""
+        response = http_client.get("/find_data_types", params={"pattern": "int"})
+        assert response.status_code == 200
+
+    def test_find_data_types_categories(self, http_client):
+        """List the category paths."""
+        response = http_client.get("/find_data_types", params={"categories": "true"})
         assert response.status_code == 200
 
     def test_get_valid_data_types(self, http_client):
@@ -262,10 +296,13 @@ class TestStringsAndData:
         response = http_client.get("/list_strings", params={"limit": 20})
         assert response.status_code == 200
 
-    def test_list_data_items(self, http_client):
+    def test_list_program_items_data_items(self, http_client):
         """List data items."""
-        response = http_client.get("/list_data_items")
+        response = http_client.get("/list_program_items", params={"kind": "data_items"})
         assert response.status_code == 200
+        data = response.json()
+        assert data.get("kind") == "data_items"
+        assert "items" in data
 
     def test_list_data_items_by_xrefs(self, http_client):
         """List data items sorted by xref count."""
@@ -278,33 +315,35 @@ class TestStringsAndData:
 class TestImportsExports:
     """Test import/export listing endpoints (read-only)."""
 
-    def test_list_imports(self, http_client):
+    def test_list_program_items_imports(self, http_client):
         """List imported symbols."""
-        response = http_client.get("/list_imports")
+        response = http_client.get("/list_program_items", params={"kind": "imports"})
         assert response.status_code == 200
 
-    def test_list_exports(self, http_client):
+    def test_list_program_items_exports(self, http_client):
         """List exported symbols."""
-        response = http_client.get("/list_exports")
+        response = http_client.get("/list_program_items", params={"kind": "exports"})
         assert response.status_code == 200
 
-    def test_list_external_locations(self, http_client):
+    def test_list_program_items_external_locations(self, http_client):
         """List external locations."""
-        response = http_client.get("/list_external_locations")
+        response = http_client.get(
+            "/list_program_items", params={"kind": "external_locations"}
+        )
         assert response.status_code == 200
 
 
 class TestNamespaces:
     """Test namespace and class listing endpoints (read-only)."""
 
-    def test_list_namespaces(self, http_client):
+    def test_list_program_items_namespaces(self, http_client):
         """List namespaces."""
-        response = http_client.get("/list_namespaces")
+        response = http_client.get("/list_program_items", params={"kind": "namespaces"})
         assert response.status_code == 200
 
-    def test_list_classes(self, http_client):
+    def test_list_program_items_classes(self, http_client):
         """List classes."""
-        response = http_client.get("/list_classes")
+        response = http_client.get("/list_program_items", params={"kind": "classes"})
         assert response.status_code == 200
 
     def test_list_globals(self, http_client):
@@ -348,21 +387,32 @@ class TestScripts:
         response = http_client.get("/list_scripts")
         assert response.status_code == 200
 
-    def test_list_ghidra_scripts(self, http_client):
-        """List Ghidra scripts."""
-        response = http_client.get("/list_ghidra_scripts")
-        # May be 404 if scripts endpoint not available
-        assert response.status_code in [200, 404]
+    def test_list_scripts_with_filter(self, http_client):
+        """`filter` is the endpoint's only declared parameter.
+
+        Replaces test_list_ghidra_scripts, which called /list_ghidra_scripts --
+        not an endpoint. It accepted [200, 404] and so was a permanent 404
+        no-op; /list_scripts is the real route and test_list_scripts already
+        covers the unfiltered call, so this covers the parameter instead.
+        """
+        response = http_client.get("/list_scripts", params={"filter": "Backfill"})
+        assert response.status_code == 200
 
 
 class TestCallGraph:
     """Test call graph endpoints (read-only) - requires valid function address."""
 
     def test_get_full_call_graph(self, http_client):
-        """Get full call graph (may fail if no functions)."""
-        response = http_client.get("/get_full_call_graph", params={"max_depth": 2})
-        # May return error if no program, that's OK
+        """Get full call graph, bounded by the declared `limit`.
+
+        This used to send `max_depth`, which the endpoint does not declare --
+        silently dropped, so no bound was ever exercised. Declared parameters
+        are format, limit and program.
+        """
+        response = http_client.get("/get_full_call_graph", params={"limit": 5})
         assert response.status_code == 200
+        edges = response.json()["edges"]
+        assert len(edges) <= 5
 
 
 class TestDocumentation:
@@ -380,7 +430,7 @@ class TestFunctionAnalysis:
     @pytest.fixture
     def first_function_address(self, http_client):
         """Get address of first function in program."""
-        response = http_client.get("/list_functions", params={"limit": 1})
+        response = http_client.get("/find_functions", params={"limit": 1})
         if response.status_code != 200:
             pytest.skip("Cannot list functions")
         text = response.text
@@ -396,27 +446,37 @@ class TestFunctionAnalysis:
             pytest.skip("No functions found in program")
         return f"0x{match.group(1)}"
 
-    def test_get_function_by_address(self, http_client, first_function_address):
-        """Get function details by address."""
+    def test_get_functions_signature(self, http_client, first_function_address):
+        """Get function identity via get_functions fields= (replaces get_function_by_address)."""
         response = http_client.get(
-            "/get_function_by_address", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "address": first_function_address,
+                "fields": "signature,entry_point,body_start,body_end",
+            },
         )
         assert response.status_code == 200
 
-    def test_decompile_function(self, http_client, first_function_address):
-        """Decompile a function (read-only)."""
+    def test_get_functions_decompiled_code(self, http_client, first_function_address):
+        """Decompile via get_functions fields= (replaces decompile_function)."""
         response = http_client.get(
-            "/decompile_function", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "decompiled_code"},
         )
         assert response.status_code == 200
+        # An error is also HTTP 200, so assert on the body rather than the
+        # status: this must produce code, not a structured refusal.
+        try:
+            data = response.json()
+        except ValueError:
+            pytest.skip("server predates the 7.0.0 JSON response contract")
+        assert not data.get("error"), data
+        assert data.get("decompiled_code"), data
 
-    def test_get_decompiled_code(self, http_client, first_function_address):
-        """Get decompiled code for a function (alias endpoint)."""
-        response = http_client.get(
-            "/get_decompiled_code", params={"function_address": first_function_address}
-        )
-        # This endpoint may not exist - use decompile_function instead
-        assert response.status_code in [200, 404]
+    # test_get_decompiled_code removed: /get_decompiled_code is not an
+    # endpoint. It accepted [200, 404] and so passed on the permanent 404,
+    # asserting nothing. The real route is get_functions(fields=decompiled_code),
+    # covered by test_get_functions_decompiled_code directly above.
 
     def test_disassemble_function(self, http_client, first_function_address):
         """Disassemble a function."""
@@ -425,49 +485,59 @@ class TestFunctionAnalysis:
         )
         assert response.status_code == 200
 
-    def test_get_disassembly(self, http_client, first_function_address):
-        """Get disassembly for a function (alias endpoint)."""
-        response = http_client.get(
-            "/get_disassembly", params={"function_address": first_function_address}
-        )
-        # This endpoint may not exist - use disassemble_function instead
-        assert response.status_code in [200, 404]
+    # test_get_disassembly removed: /get_disassembly is not an endpoint, and
+    # the test accepted [200, 404]. /disassemble_function is the real route,
+    # covered by test_disassemble_function directly above.
 
-    def test_get_function_variables(self, http_client, first_function_address):
-        """Get function variables."""
+    def test_get_functions_variables(self, http_client, first_function_address):
+        """Get function variables via get_functions fields=."""
         response = http_client.get(
-            "/get_function_variables", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "parameters,locals"},
         )
         assert response.status_code in [200, 404]
 
-    def test_get_function_labels(self, http_client, first_function_address):
-        """Get function labels."""
+    def test_get_functions_labels(self, http_client, first_function_address):
+        """Get function labels via get_functions fields=."""
         response = http_client.get(
-            "/get_function_labels", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "labels",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_callers(self, http_client, first_function_address):
-        """Get function callers (xrefs to)."""
+    def test_get_functions_callers(self, http_client, first_function_address):
+        """Get function callers via get_functions fields=."""
         response = http_client.get(
-            "/get_function_callers", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callers",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_callees(self, http_client, first_function_address):
-        """Get function callees (xrefs from)."""
+    def test_get_functions_callees(self, http_client, first_function_address):
+        """Get function callees via get_functions fields=."""
         response = http_client.get(
-            "/get_function_callees", params={"address": first_function_address}
+            "/get_functions",
+            params={
+                "function": first_function_address,
+                "fields": "callees",
+                "include_call_context": "false",
+            },
         )
-        # May not exist in all versions
         assert response.status_code in [200, 404]
 
-    def test_get_function_xrefs(self, http_client, first_function_address):
-        """Get function cross-references."""
+    def test_get_functions_xrefs(self, http_client, first_function_address):
+        """Get function cross-references via get_functions fields=."""
         response = http_client.get(
-            "/get_function_xrefs", params={"address": first_function_address}
+            "/get_functions",
+            params={"address": first_function_address, "fields": "xrefs"},
         )
         assert response.status_code in [200, 404]
 
@@ -475,7 +545,7 @@ class TestFunctionAnalysis:
         """Get function call graph."""
         response = http_client.get(
             "/get_function_call_graph",
-            params={"address": first_function_address, "depth": 2},
+            params={"function": first_function_address, "depth": 2},
         )
         # May not exist in all versions
         assert response.status_code in [200, 404]
@@ -495,11 +565,18 @@ class TestFunctionAnalysis:
         assert response.status_code == 200
 
     def test_analyze_function_completeness(self, http_client, first_function_address):
-        """Analyze function completeness score."""
+        """Analyze function completeness score.
+
+        The declared selector is `function_address`, with no alias for
+        `address`. Sent as `address` it was dropped, so this scored whatever
+        function happened to be current.
+        """
         response = http_client.get(
-            "/analyze_function_completeness", params={"address": first_function_address}
+            "/analyze_function_completeness",
+            params={"function_address": first_function_address},
         )
         assert response.status_code == 200
+        assert "completeness_score" in response.json()
 
     def test_get_function_pcode_basic(self, http_client, first_function_address):
         """Issue #192: dump P-code for a function (basic-block iter only).
@@ -566,7 +643,7 @@ class TestXRefEndpoints:
     @pytest.fixture
     def sample_address(self, http_client):
         """Get a sample address from the program."""
-        response = http_client.get("/list_functions", params={"limit": 1})
+        response = http_client.get("/find_functions", params={"limit": 1})
         if response.status_code != 200:
             pytest.skip("Cannot get sample address")
         import re
@@ -600,7 +677,9 @@ class TestMemoryInspection:
     @pytest.fixture
     def sample_address(self, http_client):
         """Get a sample address from segments."""
-        response = http_client.get("/list_segments")
+        response = http_client.get(
+            "/list_program_items", params={"kind": "segments"}
+        )
         if response.status_code != 200:
             pytest.skip("Cannot get segments")
         import re
@@ -620,14 +699,20 @@ class TestMemoryInspection:
         # May be 404 if not available
         assert response.status_code in [200, 404]
 
-    def test_disassemble_bytes(self, http_client, sample_address):
-        """Disassemble bytes at address."""
-        response = http_client.get(
-            "/disassemble_bytes",
-            params={"address": sample_address, "length": 16},
-        )
-        # May be 404 if not available
-        assert response.status_code in [200, 404]
+    # test_disassemble_bytes removed from the READ-ONLY suite.
+    #
+    # It GET-ed /disassemble_bytes with `address`, and accepted [200, 404].
+    # /disassemble_bytes is declared `method = "POST"` with `start_address` in
+    # the JSON body, so a live server answered 404 every time and the test
+    # could not tell that from a pass.
+    #
+    # Calling it correctly is NOT a read: FunctionService.disassembleBytes
+    # creates instructions over undefined bytes, inside a transaction. That
+    # belongs in the write tier (tests/integration/test_safe_write_endpoints.py
+    # or a mutating file), not here -- rewriting it in place would have turned
+    # a no-op into a listing mutation in the suite whose contract is that it
+    # never writes. Read-only memory inspection is covered by
+    # test_inspect_memory_content above.
 
 
 class TestSearchInstructions:
@@ -743,10 +828,10 @@ class TestSearchInstructions:
 class TestBulkHashing:
     """Test bulk hash endpoints (read-only)."""
 
-    def test_get_bulk_function_hashes(self, http_client):
+    def test_get_function_hash_bulk(self, http_client):
         """Get bulk function hashes."""
         response = http_client.get(
-            "/get_bulk_function_hashes", params={"offset": 0, "limit": 10}
+            "/get_function_hash", params={"offset": 0, "limit": 10}
         )
         assert response.status_code == 200
 
@@ -754,11 +839,10 @@ class TestBulkHashing:
 class TestCurrentSelection:
     """Test current selection/state endpoints (read-only)."""
 
-    def test_get_current_selection(self, http_client):
+    def test_get_ui_cursor_selection(self, http_client):
         """Get current cursor/selection in Ghidra."""
-        response = http_client.get("/get_current_selection")
-        # May be 404 if selection endpoint not available
-        assert response.status_code in [200, 404]
+        response = http_client.get("/get_ui_cursor", params={"type": "selection"})
+        assert response.status_code == 200
 
 
 class TestBytePatternSearch:
@@ -777,19 +861,16 @@ class TestResponseFormats:
     """Verify response format consistency."""
 
     def test_version_is_json_parseable(self, http_client):
-        """Version response should be JSON."""
-        response = http_client.get("/get_version")
+        """Health response should be JSON."""
+        response = http_client.get("/mcp/health")
         assert response.status_code == 200
-        try:
-            data = json.loads(response.text)
-            assert isinstance(data, dict)
-        except json.JSONDecodeError:
-            # Plain text is also acceptable
-            assert len(response.text) > 0
+        data = json.loads(response.text)
+        assert isinstance(data, dict)
+        assert data.get("status") == "ok"
 
     def test_list_functions_parseable(self, http_client):
         """Function list should be parseable."""
-        response = http_client.get("/list_functions", params={"limit": 5})
+        response = http_client.get("/find_functions", params={"limit": 5})
         assert response.status_code == 200
         # Should be non-empty
         assert len(response.text) > 0
@@ -915,3 +996,111 @@ class TestShadowedGlobalsConsistency:
                    if s["address"].lower().lstrip("0") not in untyped]
         assert not missing, (
             f"shadowed globals not selected by type_filter=undefined: {missing[:5]}")
+
+
+class TestPartitionProgram:
+    """`/partition_program` (#584) — structural function compartments.
+
+    Auto-skips when the endpoint isn't registered (deployed JAR older than
+    the source). Assertions are response-shape / invariants, not binary-specific.
+    """
+
+    def test_response_shape_and_totals(self, http_client):
+        r = http_client.get("/partition_program", params={"band_size": 20, "min_size": 1})
+        if r.status_code == 404:
+            pytest.skip("/partition_program not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        if "error" in body:
+            # No eligible functions (e.g. unanalyzed import) — still a valid reply.
+            assert isinstance(body["error"], str) and body["error"]
+            return
+
+        for key in (
+            "partitions",
+            "partition_count",
+            "partitions_reported",
+            "eligible_functions",
+            "assigned_functions",
+            "strategies",
+            "signal_coverage",
+            "elapsed_ms",
+        ):
+            assert key in body, f"missing top-level field: {key}"
+
+        assert isinstance(body["partitions"], list)
+        assert isinstance(body["strategies"], dict)
+        assert body["partitions_reported"] == len(body["partitions"])
+        assert body["partition_count"] >= body["partitions_reported"]
+        assert body["eligible_functions"] >= body["assigned_functions"]
+        assert body["assigned_functions"] >= 0
+
+        for row in body["partitions"]:
+            for key in ("slug", "method", "functions", "confidence"):
+                assert key in row, f"partition missing field: {key}"
+            assert isinstance(row["slug"], str) and row["slug"]
+            assert isinstance(row["method"], str) and row["method"]
+            assert isinstance(row["functions"], int) and row["functions"] >= 1
+            assert isinstance(row["confidence"], (int, float))
+
+
+class TestFindTypeUsers:
+    """`/find_type_users` (#584) — functions referencing a data type / field.
+
+    Auto-skips when the endpoint isn't registered.
+    """
+
+    def test_unknown_type_returns_error(self, http_client):
+        r = http_client.get(
+            "/find_type_users",
+            params={"type_name": "DefinitelyNotARealType_ZzZz_9f3a"},
+        )
+        if r.status_code == 404:
+            pytest.skip("/find_type_users not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        assert "error" in body
+        assert "not found" in body["error"].lower() or "DefinitelyNotARealType" in body["error"]
+
+    def test_known_type_returns_functions_and_timed_out(self, http_client):
+        r = http_client.get(
+            "/find_type_users",
+            params={"type_name": "int", "timeout_seconds": 10},
+        )
+        if r.status_code == 404:
+            pytest.skip("/find_type_users not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        if "error" in body:
+            # Builtin may be unresolved under some DTMs; try a type the program lists.
+            listed = http_client.get("/find_data_types", params={"limit": 5})
+            assert listed.status_code == 200
+            types = listed.json()
+            names = []
+            if isinstance(types, dict):
+                for key in ("data_types", "types", "results", "items"):
+                    if isinstance(types.get(key), list):
+                        for item in types[key]:
+                            if isinstance(item, dict) and item.get("name"):
+                                names.append(item["name"])
+                            elif isinstance(item, str):
+                                names.append(item)
+                        break
+            if not names:
+                pytest.skip(f"no resolvable type for find_type_users: {body}")
+            r = http_client.get(
+                "/find_type_users",
+                params={"type_name": names[0], "timeout_seconds": 10},
+            )
+            assert r.status_code == 200
+            body = r.json()
+            if "error" in body:
+                pytest.skip(f"find_type_users unavailable: {body}")
+
+        assert "functions" in body
+        assert isinstance(body["functions"], list)
+        assert "timed_out" in body
+        assert isinstance(body["timed_out"], bool)
+        assert "count" in body
+        assert body["count"] == len(body["functions"])
+

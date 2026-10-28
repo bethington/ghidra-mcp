@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": "7.0.0",
+  "tier": "release",
+  "tiers_run": [
+    "release"
+  ],
+  "result": "passed",
+  "source_fingerprint": "8698653e20cdd63af9dfd0d1caab944e5fae7270be349b193a2e15be6b88d208",
+  "fingerprinted_paths": [
+    "src/main/java",
+    "python/bridge_mcp_ghidra",
+    "tools/setup",
+    "tests/fixtures/benchmark",
+    "tests/endpoints.json",
+    "pom.xml",
+    "build.gradle"
+  ],
+  "ghidra_version": "12.1.4",
+  "recorded_utc": "2026-10-21T18:44:27Z"
+}

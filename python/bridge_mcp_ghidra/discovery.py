@@ -3,6 +3,7 @@
 import concurrent.futures
 import http.client
 import json
+import os
 
 from . import state
 from . import transport
@@ -111,9 +112,9 @@ def _probe_tcp_port(port: int, timeout: float, cancel_handle) -> tuple[str, dict
                 with cancel_handle.hold_send_window(conn) as can_send:
                     if not can_send:
                         return None
-                    conn.request("GET", "/mcp/instance_info")
+                    conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             else:
-                conn.request("GET", "/mcp/instance_info")
+                conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             resp = conn.getresponse()
             if resp.status != 200:
                 return None
@@ -207,7 +208,7 @@ def _scan_tcp_for_project(
     None if no match found.
 
     Project matching mirrors connect_instance's UDS match order so the same
-    `connect_instance("D2Common")` call selects the same instance regardless
+    `connect_instance("MyProject")` call selects the same instance regardless
     of which transport found it.
     """
     if not project:
@@ -257,3 +258,54 @@ def discover_active_tcp_instance() -> dict | None:
         logger.debug(f"Could not query open programs for active TCP instance {state._active_tcp}: {e}")
 
     return info
+
+
+def find_project_instances(project: str, instances: list[dict]) -> list[dict]:
+    """Find a unique project across transports, preferring UDS for one process."""
+    matches = [dict(i) for i in instances if i.get("project") == project]
+    configured_url = os.getenv("GHIDRA_MCP_URL")
+    tcp_instances = []
+    if configured_url:
+        if not validation.validate_server_url(configured_url):
+            logger.warning("Refusing to auto-connect to invalid URL: %s", configured_url)
+            return []
+        try:
+            text, status = transport.tcp_request(configured_url, "GET", "/mcp/instance_info", timeout=5)
+            info = _unwrap_response_data(text) if status == 200 else {}
+            if isinstance(info, dict):
+                tcp_instances = [(configured_url, info)]
+        except Exception as e:
+            logger.debug("Project discovery at %s failed: %s", configured_url, e)
+    else:
+        tcp_instances = list(_iter_tcp_instances())
+    for url, info in tcp_instances:
+        if info.get("project") != project:
+            continue
+        # A process may advertise the same project on UDS and TCP. Distinct
+        # project paths must remain distinct even if their process IDs match.
+        previous = next(
+            (
+                i
+                for i in matches
+                if (i.get("url") == url or (info.get("pid") is not None and i.get("pid") == info["pid"]))
+                and (
+                    not i.get("project_path")
+                    or not info.get("project_path")
+                    or i["project_path"] == info["project_path"]
+                )
+            ),
+            None,
+        )
+        if previous is None:
+            matches.append(dict(info, url=url))
+        else:
+            previous["url"] = url
+    if len(matches) != 1:
+        logger.warning(
+            "Startup project %r matched %d instances; staying disconnected. "
+            "Use list_instances() and connect_instance() to select an instance.",
+            project,
+            len(matches),
+        )
+        return []
+    return matches

@@ -81,9 +81,9 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
         builder.withTransaction(() -> target.setNoReturn(false));
 
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
-        Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
+        Response response = service.clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x100d"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Ok);
         assertNotNull("post-call fallthrough was not disassembled",
@@ -96,10 +96,10 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
     @Test
     public void leavesCallReturnOverrideWhenTargetIsStillNoReturn() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
 
-        Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
+        Response response = service.clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x100d"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Ok);
         Instruction call = program.getListing().getInstructionAt(builder.addr("0x1000"));
@@ -119,7 +119,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
             target.setCallFixup("x86_return_thunk");
         });
 
-        Response response = service().clearFlowAndRepair("0x1000", "0x100d", "");
+        Response response = service().clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x100d"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Ok);
         Instruction call = program.getListing().getInstructionAt(builder.addr("0x1000"));
@@ -138,9 +138,9 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
         });
 
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         FunctionService service = new FunctionService(provider, new DirectThreadingStrategy());
-        Response response = service.clearFlowAndRepair("0x1000", "0x100d", "");
+        Response response = service.clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x100d"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Err);
         Instruction call = program.getListing().getInstructionAt(builder.addr("0x1000"));
@@ -156,7 +156,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
         Function firstTarget = program.getFunctionManager().getFunctionAt(builder.addr("0x2000"));
         builder.withTransaction(() -> firstTarget.setNoReturn(false));
 
-        Response response = service().clearFlowAndRepair("0x1000", "0x1011", "");
+        Response response = service().clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x1011"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Err);
         assertTrue(response.toJson(), response.toJson().contains("1005"));
@@ -176,7 +176,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
             secondTarget.setNoReturn(false);
         });
 
-        Response response = service().clearFlowAndRepair("0x1000", "0x1011", "");
+        Response response = service().clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x1011"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Ok);
         assertEquals(FlowOverride.NONE,
@@ -195,7 +195,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
 
         assertEquals(FlowOverride.NONE,
             program.getListing().getInstructionAt(builder.addr("0x1005")).getFlowOverride());
-        Response response = service().clearFlowAndRepair("0x1000", "0x1011", "");
+        Response response = service().clearFlowAndRepair(program.getAddressFactory().getAddress("0x1000"), program.getAddressFactory().getAddress("0x1011"), program);
 
         assertTrue(response.toJson(), response instanceof Response.Err);
         assertTrue(response.toJson(), response.toJson().contains("1005"));
@@ -244,7 +244,7 @@ public class FunctionServiceClearFlowAndRepairGhidraTest {
 
     private FunctionService service() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
-        provider.setCurrentProgram(program);
+        provider.trackOpenProgram(program);
         return new FunctionService(provider, new DirectThreadingStrategy());
     }
 }

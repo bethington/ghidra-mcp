@@ -6,9 +6,9 @@
 // Output: Fixes function parameter counts based on RET analysis.
 //
 // @author Ben Ethington
-// @category Diablo 2.Repair
+// @category GhidraMCP.Repair
 // @description Fix stack parameter counts using RET analysis
-// @menupath Diablo 2.Repair.Stack Arguments Searcher
+// @menupath GhidraMCP.Repair.Stack Arguments Searcher
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.services.DataTypeManagerService;
@@ -67,7 +67,6 @@ public class Repair_StackArgumentsSearcher extends GhidraScript {
                 monitor.checkCanceled();
                 Function func = funcIter.next();
 
-                if (func.getEntryPoint().toString().equals("00681a48")) break;
 
                 if (func.hasCustomVariableStorage()) {
                     func.setCallingConvention("unknown");

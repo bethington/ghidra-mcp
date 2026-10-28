@@ -8,8 +8,11 @@ Subprocess-calling functions are stubbed via monkeypatch.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -262,6 +265,86 @@ def test_deploy_parser_accepts_release_test_tier():
     args = parser.parse_args(["deploy", "--ghidra-path", "C:/ghidra", "--test", "release"])
 
     assert args.test == ["release"]
+
+
+def test_cmd_deploy_refuses_an_unknown_env_tier_before_touching_ghidra(
+    tmp_path, monkeypatch, capsys
+):
+    """#484: the .env route reached run_deploy_tests unvalidated.
+
+    Resolution happens first in cmd_deploy so the refusal costs a second,
+    rather than arriving after a build, a Ghidra restart and a deploy -- or,
+    before this, not arriving at all.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(
+        cli,
+        "deploy_to_ghidra",
+        lambda *a, **k: pytest.fail("deploy must not start with an unknown tier"),
+    )
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=relase\n", encoding="utf-8"
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    result = cli.cmd_deploy(_args(ghidra_path=ghidra_path))
+
+    assert result == 2
+    assert "relase" in capsys.readouterr().err
+
+
+def test_cmd_deploy_gradle_backend_refuses_tiers_it_cannot_run(
+    tmp_path, monkeypatch, capsys
+):
+    """build.gradle's `deploy` task has no post-deploy tier and no way to add one.
+
+    It accepted `--test release` and dropped it, exiting 0 -- the same silence
+    #484 was, through a different door, on a documented supported backend.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(
+        cli,
+        "run_gradle",
+        lambda *a, **k: pytest.fail("gradle deploy must not run when a tier was asked for"),
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    result = cli.cmd_deploy(_args(ghidra_path=ghidra_path, test=["release"]))
+
+    assert result == 2
+    err = capsys.readouterr().err
+    assert "release" in err
+    assert "Maven" in err
+
+
+def test_cmd_deploy_gradle_backend_still_deploys_without_tiers(tmp_path, monkeypatch):
+    """The refusal must be scoped to a tier request, not to the backend."""
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    recorded: dict = {}
+    monkeypatch.setattr(
+        cli,
+        "run_gradle",
+        lambda root, tasks, **kw: recorded.update({"tasks": tasks}) or 0,
+    )
+
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
+    ghidra_path.mkdir()
+    assert cli.cmd_deploy(_args(ghidra_path=ghidra_path)) == 0
+    assert recorded["tasks"] == ["deploy"]
 
 
 def test_cmd_deploy_raises_when_no_ghidra_path(tmp_path, monkeypatch):
@@ -697,25 +780,229 @@ def test_should_install_debugger_toggle_off():
 
 
 # ===========================================================================
+# tools.setup.maven — resolution, raising and non-raising
+# ===========================================================================
+
+
+def test_locate_maven_command_returns_none_when_absent(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [Path("/nope/mvn")])
+    assert maven.locate_maven_command() is None
+
+
+def test_locate_maven_command_returns_first_existing_candidate(tmp_path, monkeypatch):
+    from tools.setup import maven
+
+    missing = tmp_path / "missing" / "mvn"
+    present = tmp_path / "mvn"
+    present.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [missing, present])
+    assert maven.locate_maven_command() == present
+
+
+def test_find_maven_command_still_raises_with_the_documented_message(monkeypatch):
+    """The hard failure has to survive: build/ensure-prereqs depend on it."""
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "candidate_maven_commands", lambda: [Path("/nope/mvn")])
+    with pytest.raises(FileNotFoundError) as excinfo:
+        maven.find_maven_command()
+
+    assert "Unable to locate Maven" in str(excinfo.value)
+    assert str(excinfo.value) == maven.MAVEN_NOT_FOUND_MESSAGE
+
+
+def test_detect_maven_java_major_reads_the_version_banner(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0,
+            stdout="Apache Maven 3.9.6\nJava version: 17.0.11, vendor: Eclipse\n",
+            stderr="",
+        ),
+    )
+    assert maven.detect_maven_java_major(Path("mvn")) == 17
+
+
+def test_detect_maven_java_major_is_none_when_maven_cannot_start(monkeypatch):
+    """A candidate that exists but will not execute must not raise out of preflight."""
+    from tools.setup import maven
+
+    def boom(*a, **kw):
+        raise OSError("not executable")
+
+    monkeypatch.setattr(maven.subprocess, "run", boom)
+    assert maven.detect_maven_java_major(Path("mvn")) is None
+
+
+def test_detect_maven_java_major_is_none_without_a_java_version_line(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0, stdout="Apache Maven 3.9.6\n", stderr=""
+        ),
+    )
+    assert maven.detect_maven_java_major(Path("mvn")) is None
+
+
+def test_ensure_maven_java_supported_rejects_old_java(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "detect_maven_java_major", lambda command: 17)
+    assert maven.ensure_maven_java_supported(Path("mvn")) is False
+
+
+def test_ensure_maven_java_supported_accepts_unreadable_version(monkeypatch):
+    """Unknown is not "too old" -- refusing here would block a working build."""
+    from tools.setup import maven
+
+    monkeypatch.setattr(maven, "detect_maven_java_major", lambda command: None)
+    assert maven.ensure_maven_java_supported(Path("mvn")) is True
+
+
+def test_ensure_maven_java_supported_accepts_current_java(monkeypatch):
+    from tools.setup import maven
+
+    monkeypatch.setattr(
+        maven, "detect_maven_java_major", lambda command: maven.REQUIRED_JAVA_MAJOR
+    )
+    assert maven.ensure_maven_java_supported(Path("mvn")) is True
+
+
+# ===========================================================================
 # cmd_preflight — Maven backend
 # ===========================================================================
 
 
-def test_cmd_preflight_maven_missing_maven_returns_1(tmp_path, monkeypatch):
-    from tools.setup import cli
+def _stub_preflight_environment(cli, monkeypatch, tmp_path, *, java: bool = True):
+    """Wire the non-Maven halves of preflight so a test can vary Maven alone."""
+    from tools.setup.versioning import VersionInfo
 
     monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(
+            which=lambda name: "/usr/bin/java" if java and name == "java" else None
+        ),
+    )
 
-    def raise_not_found():
-        raise FileNotFoundError("Maven not found on PATH")
 
-    monkeypatch.setattr(cli, "find_maven_command", raise_not_found)
+def test_cmd_preflight_maven_absent_reports_and_still_exits_0(
+    tmp_path, monkeypatch, capsys
+):
+    """Maven's absence is a REPORT LINE, never an abort.
 
-    result = cli.cmd_preflight(_args())
-    assert result == 1
+    ``preflight`` never invokes Maven, and Gradle -- the backend the docs lead
+    with -- needs it for nothing, so the command CONTRIBUTING.md hands a
+    Python-only contributor to "check what you have" must still check
+    everything. It used to resolve Maven before anything else and exit 1 after
+    a single line, checking nothing.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Maven: not found" in out
+    # The report continued past Maven rather than stopping at it.
+    assert "uv: available" in out
+    assert "Java: available on PATH" in out
+    assert "Project version: 7.0.0" in out
+    assert "No Ghidra path configured" in out
+
+
+def test_cmd_preflight_maven_absent_names_what_actually_needs_maven(
+    tmp_path, monkeypatch, capsys
+):
+    """A "not found" that names nothing sends the reader to install Maven anyway."""
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Gradle backend does not need it" in out
+    assert "ensure-prereqs" in out
+    assert "gradlew buildExtension" in out
+
+
+def test_cmd_preflight_maven_absence_does_not_reach_stderr(
+    tmp_path, monkeypatch, capsys
+):
+    """Not a failure, so it must not be written where failures are written.
+
+    CI steps and wrapper scripts that gate on stderr would otherwise still
+    treat a Maven-free machine as broken even though the exit code says 0.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: None)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+    assert "Maven" not in capsys.readouterr().err
+
+
+def test_cmd_preflight_maven_on_old_java_warns_but_passes(
+    tmp_path, monkeypatch, capsys
+):
+    """A Maven that cannot build is the same class of problem as no Maven.
+
+    `tools.setup build` still refuses it via ``run_maven`` ->
+    ``ensure_maven_java_supported``; preflight only reports.
+    """
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: 17)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "Maven: /usr/bin/mvn" in out or "Maven: \\usr\\bin\\mvn" in out
+    assert "Java 17" in out
+    assert "JAVA_HOME" in out
+    assert "Project version: 7.0.0" in out
+
+
+def test_cmd_preflight_maven_on_supported_java_prints_no_warning(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import cli
+
+    _stub_preflight_environment(cli, monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: 21)
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    assert "JAVA_HOME" not in out
 
 
 def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
@@ -725,11 +1012,11 @@ def test_cmd_preflight_maven_missing_java_returns_1(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
-    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    monkeypatch.setattr(cli, "shutil", SimpleNamespace(which=lambda name: None))
 
     result = cli.cmd_preflight(_args())
     assert result == 1
@@ -743,15 +1030,20 @@ def test_cmd_preflight_maven_passes_without_ghidra_path(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
         cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
     )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
     monkeypatch.setattr(
-        cli.shutil, "which", lambda name: "/usr/bin/java" if name == "java" else None
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
     )
 
     result = cli.cmd_preflight(_args(ghidra_path=None))
@@ -900,6 +1192,56 @@ def test_main_build_maven(monkeypatch):
     assert cli.main(["build"]) == 0
 
 
+def test_main_build_without_maven_refuses_cleanly(tmp_path, monkeypatch, capsys):
+    """The commands that DO need Maven still fail — as a refusal, not a crash.
+
+    `preflight` now names `build` as one of the commands that needs Maven, so
+    `build` has to answer in the same voice. It used to let
+    ``find_maven_command()``'s exception escape as a traceback.
+    """
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    assert cli.main(["build"]) == 1
+
+    err = capsys.readouterr().err
+    assert "Unable to locate Maven" in err
+    assert "tools.setup build" in err
+    assert "gradlew buildExtension" in err
+    assert "Traceback" not in err
+
+
+def test_main_install_ghidra_deps_without_maven_refuses_cleanly(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import cli
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(
+        "tools.setup.maven.candidate_maven_commands",
+        lambda: [tmp_path / "no-such-maven" / "mvn"],
+    )
+
+    assert (
+        cli.main(["install-ghidra-deps", "--ghidra-path", str(tmp_path / "ghidra")]) == 1
+    )
+    assert "tools.setup install-ghidra-deps" in capsys.readouterr().err
+
+
+def test_maven_not_found_error_is_a_file_not_found_error():
+    """Existing `except FileNotFoundError` handlers must keep catching it."""
+    from tools.setup import maven
+
+    assert issubclass(maven.MavenNotFoundError, FileNotFoundError)
+
+
 def test_main_clean_gradle(monkeypatch):
     from tools.setup import cli
 
@@ -918,3 +1260,241 @@ def test_main_run_tests_maven(monkeypatch):
     monkeypatch.setattr(cli, "run_maven", lambda root, goals, dry_run=False: 0)
 
     assert cli.main(["run-tests"]) == 0
+
+
+# ===========================================================================
+# tools.setup.spawn — MCP client launcher resolution (issue #441)
+#
+# An MCP client launched from a systemd user service or a GUI session inherits
+# that launcher's PATH, which routinely lacks ~/.local/bin, so the documented
+# "command": "uv" dies with `spawn uv ENOENT` before any bridge code runs.
+# Every test below drives a monkeypatched PATH, so the result never depends on
+# what happens to be installed on the machine running the suite.
+# ===========================================================================
+
+
+def _make_launcher(directory: Path, name: str) -> Path:
+    """Create a file shutil.which will accept as an executable on this OS."""
+    if os.name == "nt":
+        target = directory / f"{name}.EXE"
+        target.write_text("")
+    else:
+        target = directory / name
+        target.write_text("#!/bin/sh\n")
+        target.chmod(0o755)
+    return target
+
+
+@pytest.fixture
+def isolated_path(tmp_path, monkeypatch):
+    """A PATH containing exactly one directory we control."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+    return bin_dir
+
+
+def test_resolve_spawn_command_found_returns_absolute_path(isolated_path):
+    from tools.setup import spawn
+
+    launcher = _make_launcher(isolated_path, "uv")
+
+    resolution = spawn.resolve_spawn_command("uv")
+
+    assert resolution.found is True
+    assert Path(resolution.path) == launcher
+    assert Path(resolution.path).is_absolute()
+    assert resolution.searched == (str(isolated_path),)
+
+
+def test_resolve_spawn_command_not_found_records_searched_path(isolated_path):
+    from tools.setup import spawn
+
+    resolution = spawn.resolve_spawn_command("uv")
+
+    assert resolution.found is False
+    assert resolution.path is None
+    assert resolution.searched == (str(isolated_path),)
+
+
+def test_search_path_entries_drops_blanks_and_duplicates(monkeypatch):
+    from tools.setup import spawn
+
+    sep = os.pathsep
+    monkeypatch.setenv("PATH", sep.join(["/a", "", "/b", "/a", " /c "]))
+
+    assert spawn.search_path_entries() == ("/a", "/b", "/c")
+
+
+def test_report_prints_every_searched_path_entry_when_not_found(
+    tmp_path, monkeypatch, capsys
+):
+    """The whole point of issue #441: say which PATH was actually walked."""
+    from tools.setup import spawn
+
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    third = tmp_path / "three"
+    for directory in (first, second, third):
+        directory.mkdir()
+    monkeypatch.setenv("PATH", os.pathsep.join(str(d) for d in (first, second, third)))
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", ".COM;.EXE")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "NOT FOUND on this PATH" in out
+    assert "PATH searched (3 entries):" in out
+    # every entry, one per line, in order
+    printed = [line.strip() for line in out.splitlines()]
+    for directory in (first, second, third):
+        assert str(directory) in printed
+    assert "https://docs.astral.sh/uv/getting-started/installation/" in out
+
+
+def test_report_names_the_empty_path_rather_than_printing_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    from tools.setup import spawn
+
+    monkeypatch.setenv("PATH", "")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "PATH searched (0 entries):" in out
+    assert "PATH is empty" in out
+
+
+def test_report_admits_it_cannot_speak_for_the_client_environment(
+    tmp_path, isolated_path, capsys
+):
+    """A pass here is evidence, not proof — the report must never imply proof."""
+    from tools.setup import spawn
+
+    _make_launcher(isolated_path, "uv")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    assert "does NOT prove" in out
+    assert "systemd user service" in out
+    assert "issue #441" in out
+
+
+def test_report_emits_a_pasteable_config_with_an_absolute_command(
+    tmp_path, isolated_path, capsys
+):
+    from tools.setup import spawn
+
+    launcher = _make_launcher(isolated_path, "uv")
+
+    spawn.report_spawn_commands(tmp_path, names=("uv",))
+
+    out = capsys.readouterr().out
+    snippet = out[out.index("{") :]
+    parsed = json.loads(snippet[: snippet.rindex("}") + 1])
+    command = parsed["mcpServers"]["ghidra-mcp"]["command"]
+    assert Path(command) == launcher
+    assert Path(command).is_absolute()
+    assert str(tmp_path) in parsed["mcpServers"]["ghidra-mcp"]["args"]
+
+
+def test_config_snippet_falls_back_to_a_marked_placeholder(tmp_path, isolated_path):
+    from tools.setup import spawn
+
+    resolutions = spawn.resolve_spawn_commands()
+    assert all(not r.found for r in resolutions)
+
+    parsed = json.loads(spawn.client_config_snippet(resolutions, tmp_path))
+    assert parsed["mcpServers"]["ghidra-mcp"]["command"] == "/absolute/path/to/uv"
+
+
+def test_missing_console_script_is_reported_but_not_alarming(
+    tmp_path, isolated_path, capsys
+):
+    """`uv run` never installs the console script; its absence is not a fault."""
+    from tools.setup import spawn
+
+    _make_launcher(isolated_path, "uv")
+
+    resolutions = spawn.report_spawn_commands(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "bridge-mcp-ghidra -> not on PATH" in out
+    assert "optional" in out
+    # The optional launcher must not drag the whole PATH listing into every run.
+    assert out.count("PATH searched") == 0
+    assert [r.name for r in resolutions] == ["uv", "bridge-mcp-ghidra"]
+
+
+def test_cmd_preflight_maven_reports_spawn_commands(tmp_path, monkeypatch, capsys):
+    """The check is wired into preflight, not merely importable."""
+    from tools.setup import cli
+    from tools.setup.versioning import VersionInfo
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
+    )
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+
+    out = capsys.readouterr().out
+    assert "MCP client spawn commands:" in out
+    assert "does NOT prove" in out
+
+
+def test_cmd_preflight_does_not_fail_when_launchers_are_missing(
+    tmp_path, monkeypatch, capsys
+):
+    """Advisory only — a missing launcher must not red-line preflight by itself."""
+    from tools.setup import cli
+    from tools.setup.versioning import VersionInfo
+
+    monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
+    monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
+    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
+    monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
+    monkeypatch.setattr(
+        cli, "read_pom_versions", lambda root: VersionInfo("7.0.0", "12.1")
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+    # Patch the module reference on ``cli`` rather than mutating the shared
+    # ``shutil`` module: tools.setup.spawn calls shutil.which too, and a
+    # module-level patch would silently answer for it as well.
+    monkeypatch.setattr(
+        cli,
+        "shutil",
+        SimpleNamespace(which=lambda name: "/usr/bin/java" if name == "java" else None),
+    )
+    monkeypatch.setenv("PATH", "")
+
+    assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
+    assert "NOT FOUND on this PATH" in capsys.readouterr().out

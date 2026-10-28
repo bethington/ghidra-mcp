@@ -4,7 +4,10 @@ import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.Response;
 import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
+
+import static org.mockito.Mockito.mock;
 
 /**
  * Validation + guard coverage for ProgramScriptService (~2.3K LOC, previously only the
@@ -13,6 +16,8 @@ import junit.framework.TestCase;
  * before any program access, so they run offline.
  */
 public class ProgramScriptServiceValidationTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private ProgramScriptService scripts;
 
@@ -28,14 +33,8 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("Program name or path is required"));
     }
 
-    public void testSwitchProgramRequiresName() {
-        Response r = scripts.switchProgram("");
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("Program name is required"));
-    }
-
     public void testOpenProgramFromProjectRequiresPath() {
-        Response r = scripts.openProgramFromProject("");
+        Response r = scripts.openProgramFromProject("", false);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Program path is required"));
     }
@@ -46,20 +45,46 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("file_path is required"));
     }
 
-    public void testListProjectFilesRequiresGuiMode() {
-        // Stub provider exposes no PluginTool, so the GUI-only guard must fire.
+    public void testListProjectFilesRequiresProject() {
+        // Stub provider exposes no Project, so the project guard must fire.
         Response r = scripts.listProjectFiles("/");
         assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("requires GUI mode"));
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
+    }
+
+    public void testCreateFolderRequiresProject() {
+        Response r = scripts.createFolder("/test");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
+    }
+
+    public void testDeleteFileRequiresProject() {
+        Response r = scripts.deleteFile("/test.exe");
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
     }
 
     public void testRunScriptInlineGatedByDefault() {
         // Security gate: arbitrary-code execution is off unless GHIDRA_MCP_ALLOW_SCRIPTS is set.
         // Assert the gate only in the (default) disabled state so the test is env-independent.
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
-            Response r = scripts.runScriptInline("System.out.println(1);", "", "");
+            Response r = scripts.runScriptInline("System.out.println(1);", "", programStub);
             assertTrue(r instanceof Response.Err);
             assertTrue(((Response.Err) r).message().contains("Script execution disabled"));
         }
+    }
+
+    public void testSetMemoryBlockNeedsSomethingToChange() {
+        Response r = scripts.setMemoryBlock("ram", null, null, null, null, null, programStub);
+        assertTrue(r instanceof Response.Err);
+        assertTrue(((Response.Err) r).message().contains("nothing to change"));
+    }
+
+    public void testSetMemoryBlockNeedsExactlyOneOfBlockAndAddress() {
+        Response neither = scripts.setMemoryBlock("", null, null, false, null, null, programStub);
+        Response both = scripts.setMemoryBlock("ram", org.mockito.Mockito.mock(ghidra.program.model.address.Address.class),
+                null, false, null, null, programStub);
+        assertTrue(((Response.Err) neither).message().contains("exactly one of block or address"));
+        assertTrue(((Response.Err) both).message().contains("exactly one of block or address"));
     }
 }

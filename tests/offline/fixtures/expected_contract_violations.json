@@ -1,0 +1,31 @@
+{
+  "_README": [
+    "Contract breaches the read-only integration suite commits when replayed",
+    "against the fake. This is a RATCHET, asserted exactly: a NEW entry fails",
+    "CI, and so does a STALE one, so a fix has to be recorded here as well.",
+    "",
+    "An entry is a call the suite makes that the endpoint catalog",
+    "(tests/endpoints.json) does not support. Against a live Ghidra each one",
+    "still returns HTTP 200 -- the plugin ignores parameters it does not",
+    "declare -- so the test passes while asserting nothing about the thing its",
+    "name claims. That is why they were invisible until an offline run had a",
+    "catalog to check against.",
+    "",
+    "THE LIST IS EMPTY, AND THAT IS THE POINT.",
+    "",
+    "W12 / issue #112 discovered ten of these on 2026-08-30 and recorded them",
+    "here rather than changing what a test asserts. All ten were fixed on",
+    "2026-08-30 (see CHANGELOG 'read-only suite contract breaches'): parameter",
+    "names corrected, one GET turned out to be a POST mutator and left the",
+    "read-only tier, three tests called endpoints that do not exist, and one",
+    "-- /get_function_labels sent `address` -- was never a breach at all: it",
+    "is a declared @Param alias the schema simply does not advertise.",
+    "",
+    "Keep it empty. Adding a line here is a decision to ship a test that",
+    "cannot fail, and it is now the SECOND line of defence in any case:",
+    "tests/unit/test_integration_call_contract.py checks every integration",
+    "file statically, needs no fixtures, and runs in the unit tier that CI",
+    "always executes."
+  ],
+  "violations": []
+}

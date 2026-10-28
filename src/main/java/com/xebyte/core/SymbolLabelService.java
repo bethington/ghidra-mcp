@@ -7,14 +7,10 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import ghidra.util.Msg;
 
-import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for symbol and label operations: create, rename, delete, batch operations.
@@ -34,33 +30,23 @@ public class SymbolLabelService {
     // Label Methods
     // -----------------------------------------------------------------------
 
-    public Response getFunctionLabels(String functionName, int offset, int limit) {
-        return getFunctionLabels(functionName, offset, limit, null);
-    }
-
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Accepts a function name OR address.", category = "symbol")
+    /** Kept for tests; agents use {@code /get_functions?fields=labels}. */
     public Response getFunctionLabels(
-            @Param(value = "name", paramType = "address", aliases = {"function", "address", "function_address"},
-                   description = "Function name or address (0x<hex> / <space>:<hex>).") String functionName,
-            @Param(value = "offset", defaultValue = "0") int offset,
-            @Param(value = "limit", defaultValue = "20") int limit,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionName == null || functionName.isEmpty()) {
-            return Response.err("name is required (function name or address)");
-        }
+            @Param(value = "function", paramType = Param.FUNCTION_REF,
+                   description = "Function name or address (0x<hex> / <space>:<hex>).") Function func,
+            @Param(value = "offset", defaultValue = "0",
+                   description = "Number of labels to skip before this page starts; 0 begins at the "
+                               + "first.") int offset,
+            @Param(value = "limit", defaultValue = "20",
+                   description = "Maximum labels returned in this page (default 20). Pass 0 or a negative "
+                               + "value for no limit; `total` in the response always reports the full "
+                               + "count for the function.") int limit,
+            @Param(value = "program", defaultValue = "") Program program) {
+        
 
         SymbolTable symbolTable = program.getSymbolTable();
 
-        Function function = ServiceUtils.resolveFunction(program, functionName);
-        if (function == null) {
-            return Response.err("Function not found: " + functionName);
-        }
-
-        AddressSetView functionBody = function.getBody();
+        AddressSetView functionBody = func.getBody();
         SymbolIterator symbols = symbolTable.getSymbolIterator();
 
         // Collect the whole set and let the envelope page it, so `total`
@@ -82,39 +68,86 @@ public class SymbolLabelService {
         return ServiceUtils.paged("labels", labels, offset, limit);
     }
 
-    public Response renameLabel(String addressStr, String oldName, String newName) {
-        return renameLabel(addressStr, oldName, newName, null);
+    /**
+     * Pick the symbol {@code /rename_symbol} operates on.
+     *
+     * <p>One request value must not bind to two parameters. Until 7.0.0
+     * {@code old_name} was declared BOTH as a parameter in its own right and as an
+     * alias of {@code target}, because the two tools this endpoint replaced
+     * disagree about what the name means: {@code rename_global_variable(old_name,
+     * new_name)} meant "the symbol to rename", while {@code rename_label(address,
+     * old_name, new_name)} meant "which label at that address". With both
+     * declarations live, a body carrying only {@code old_name} filled in
+     * {@code target} <em>and</em> {@code oldName} from the same value, and
+     * {@code /mcp/schema} had no way to describe that.
+     *
+     * <p>The alias is gone; {@code old_name} is a parameter and nothing else. The
+     * {@code rename_global_variable} spelling keeps working through this fallback,
+     * which resolves in exactly the order the alias list produced: {@code target},
+     * then {@code address} / {@code function_address} (still aliases, resolved
+     * before this method is reached), then {@code old_name}.
+     *
+     * @param target  the {@code target} parameter as resolved from the request
+     * @param oldName the {@code old_name} parameter as resolved from the request
+     * @return {@code target} when the caller supplied one, otherwise {@code oldName}
+     */
+    public static String resolveRenameTarget(String target, String oldName) {
+        if (target != null && !target.isBlank()) return target;
+        if (oldName != null && !oldName.isBlank()) return oldName;
+        return target;
     }
 
     @McpTool(path = "/rename_symbol", method = "POST",
              description = "Rename a symbol of any kind. kind=auto (default): an address target routes to rename-or-create-label (handles data/label/any symbol at the address); a name target routes to a global. Force with kind=data|global|label|external. For kind=label pass old_name (the current label). Replaces rename_data / rename_global_variable / rename_label / rename_or_label / rename_external_location.",
-             category = "symbol")
+             category = "symbol", access = ToolAccess.WRITE)
     public Response renameSymbol(
             @Param(value = "target", source = ParamSource.BODY, paramType = "address",
-                   aliases = {"address", "function_address", "old_name"},
-                   description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename.") String target,
-            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+                   aliases = {"address", "function_address"},
+                   description = "Address (0x<hex> / <space>:<hex>) or current symbol name to rename. "
+                               + "May be omitted when old_name carries the symbol name, which is how the "
+                               + "replaced rename_global_variable was called.") String target,
+            @Param(value = "new_name", source = ParamSource.BODY,
+                   description = "The name to apply. A data global should be g_ + Hungarian + descriptor "
+                               + "(g_dwPlayerCount); a code label should be snake_case. Convention misses "
+                               + "come back as warnings on an otherwise successful write. IMPORTANT: at a "
+                               + "CODE address with no defined data, this ADDS a label rather than renaming "
+                               + "one — the existing symbol survives and may stay primary, so the listing "
+                               + "can still show the old name after a success. Call delete_label on the old "
+                               + "name first when you meant to replace it.") String newName,
             @Param(value = "kind", source = ParamSource.BODY, defaultValue = "auto",
                    description = "auto | data | global | label | external") String kind,
             @Param(value = "old_name", source = ParamSource.BODY, defaultValue = "",
-                   description = "For kind=label only: the current label name at the address.") String oldName,
-            @Param(value = "program", defaultValue = "") String programName) {
+                   description = "For kind=label: the current label name at the address given by target. "
+                               + "When target is omitted this is used as the target instead, for callers "
+                               + "migrated from rename_global_variable(old_name, new_name).") String oldName,
+            @Param(value = "program", defaultValue = "") Program program,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Per-call override for the naming-quality gate: 'enforce' rejects a "
+                               + "convention miss, 'warn' applies the name and returns the miss as a "
+                               + "warning, 'off' skips the check. Omit to use the project/global setting.")
+                    String strictModeArg) {
+        try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
+            return renameSymbolKind(resolveRenameTarget(target, oldName), newName, kind, oldName, program);
+        } catch (Exception e) {
+            return ServiceUtils.fail("rename_symbol", e);
+        }
+    }
+
+    private Response renameSymbolKind(String target, String newName, String kind, String oldName, Program program) {
         String k = (kind == null || kind.isBlank()) ? "auto" : kind.trim().toLowerCase();
         switch (k) {
-            case "data":     return renameDataAtAddress(target, newName, programName);
-            case "global":   return renameGlobalVariable(target, newName, programName);
-            case "external": return renameExternalLocation(target, newName, programName);
+            case "data":     return renameDataAtAddress(target, newName, program);
+            case "global":   return renameGlobalVariable(target, newName, program, null);
+            case "external": return renameExternalLocation(target, newName, program);
             case "label":
                 return (oldName == null || oldName.isEmpty())
-                        ? renameOrLabel(target, newName, programName)
-                        : renameLabel(target, oldName, newName, programName);
+                        ? renameOrLabel(target, newName, program, null)
+                        : renameLabel(target, oldName, newName, program);
             default: { // auto: address -> rename-or-create-label; name -> global variable
-                ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-                if (pe.hasError()) return pe.error();
-                Address addr = ServiceUtils.parseAddress(pe.program(), target);
+                Address addr = ServiceUtils.parseAddress(program, target);
                 return (addr != null)
-                        ? renameOrLabel(target, newName, programName)
-                        : renameGlobalVariable(target, newName, programName);
+                        ? renameOrLabel(target, newName, program, null)
+                        : renameGlobalVariable(target, newName, program, null);
             }
         }
     }
@@ -129,11 +162,7 @@ public class SymbolLabelService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
@@ -161,38 +190,25 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Rename Label");
+            final Symbol labelToRename = targetSymbol;
             try {
-                targetSymbol.setName(newName, SourceType.USER_DEFINED);
-                List<String> labelWarnings = NamingConventions.validateLabelName(newName);
-                if (labelWarnings.isEmpty()) {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                            "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
-                } else {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                return threadingStrategy.executeWrite(program, "Rename Label", () -> {
+                    labelToRename.setName(newName, SourceType.USER_DEFINED);
+                    List<String> labelWarnings = NamingConventions.validateLabelName(newName);
+                    return Response.successWithWarnings(
                             "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr,
-                            "warnings", labelWarnings));
-                }
+                            labelWarnings);
+                });
             } catch (Exception e) {
-                return Response.err("Error renaming label: " + e.getMessage());
-            } finally {
-                program.endTransaction(transactionId, true);
+                return Response.err("Error renaming label: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
     }
 
-    public Response createLabel(String addressStr, String labelName) {
-        return createLabel(addressStr, labelName, null, null);
-    }
-
-    public Response createLabel(String addressStr, String labelName, String programName) {
-        return createLabel(addressStr, labelName, null, programName);
-    }
-
-    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol")
+    @McpTool(path = "/create_label", method = "POST", description = "Create ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_create_labels.", category = "symbol", access = ToolAccess.WRITE)
     public Response createLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -200,13 +216,9 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels != null && !labels.isEmpty()) {
-            return batchCreateLabels(labels, programName);
+            return batchCreateLabels(labels, program);
         }
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required (or pass labels[] for bulk)");
@@ -239,59 +251,46 @@ public class SymbolLabelService {
                 }
             }
 
-            int transactionId = program.startTransaction("Create Label");
             try {
-                Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
-                if (newSymbol != null) {
-                    List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
-                    if (labelWarnings.isEmpty()) {
-                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                                "Created label '" + labelName + "' at address " + addressStr));
-                    } else {
-                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                return threadingStrategy.executeWrite(program, "Create Label", () -> {
+                    Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
+                    if (newSymbol != null) {
+                        List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
+                        return Response.successWithWarnings(
                                 "Created label '" + labelName + "' at address " + addressStr,
-                                "warnings", labelWarnings));
+                                labelWarnings);
                     }
-                } else {
                     return Response.err("Failed to create label '" + labelName + "' at address " + addressStr);
-                }
+                });
             } catch (Exception e) {
-                return Response.err("Error creating label: " + e.getMessage());
-            } finally {
-                program.endTransaction(transactionId, true);
+                return Response.err("Error creating label: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
-    }
-
-    public Response batchCreateLabels(List<Map<String, String>> labels) {
-        return batchCreateLabels(labels, null);
     }
 
     // Bulk helper for create_label(labels=[...]). Merged into create_label in 7.0.0.
     public Response batchCreateLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels == null || labels.isEmpty()) {
             return Response.err("No labels provided");
         }
 
-        final AtomicInteger successCount = new AtomicInteger(0);
-        final AtomicInteger skipCount = new AtomicInteger(0);
-        final AtomicInteger errorCount = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        int successCount;
+        int skipCount;
+        int errorCount;
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Create Labels");
-                try {
-                    SymbolTable symbolTable = program.getSymbolTable();
+            record BatchCreateCounts(int successCount, int skipCount, int errorCount) {}
+            BatchCreateCounts tallies = threadingStrategy.executeWrite(program, "Batch Create Labels", () -> {
+                int successCountLocal = 0;
+                int skipCountLocal = 0;
+                int errorCountLocal = 0;
+                SymbolTable symbolTable = program.getSymbolTable();
 
                     for (Map<String, String> labelEntry : labels) {
                         String addressStr = labelEntry.get("address");
@@ -299,12 +298,12 @@ public class SymbolLabelService {
 
                         if (addressStr == null || addressStr.isEmpty()) {
                             errors.add("Missing address in label entry");
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
                         if (labelName == null || labelName.isEmpty()) {
                             errors.add("Missing name for address " + addressStr);
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
 
@@ -312,7 +311,7 @@ public class SymbolLabelService {
                             Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
                                 errors.add(ServiceUtils.getLastParseError());
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                                 continue;
                             }
 
@@ -326,58 +325,47 @@ public class SymbolLabelService {
                             }
 
                             if (labelExists) {
-                                skipCount.incrementAndGet();
+                                skipCountLocal++;
                                 continue;
                             }
 
                             Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                             if (newSymbol != null) {
-                                successCount.incrementAndGet();
+                                successCountLocal++;
                                 // Validate label naming convention
                                 List<String> lw = NamingConventions.validateLabelName(labelName);
                                 if (!lw.isEmpty()) errors.addAll(lw);  // Surface as errors for visibility
                             } else {
                                 errors.add("Failed to create label '" + labelName + "' at " + addressStr);
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                             }
 
                         } catch (Exception e) {
                             errors.add("Error at " + addressStr + ": " + e.getMessage());
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             Msg.error(this, "Error creating label at " + addressStr, e);
                         }
                     }
 
-                } catch (Exception e) {
-                    errors.add("Transaction error: " + e.getMessage());
-                    Msg.error(this, "Error in batch create labels transaction", e);
-                } finally {
-                    program.endTransaction(tx, successCount.get() > 0);
-                }
+                return new BatchCreateCounts(successCountLocal, skipCountLocal, errorCountLocal);
             });
+            successCount = tallies.successCount();
+            skipCount = tallies.skipCount();
+            errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
                 "success", true,
-                "labels_created", successCount.get(),
-                "labels_skipped", skipCount.get(),
-                "labels_failed", errorCount.get()
+                "labels_created", successCount,
+                "labels_skipped", skipCount,
+                "labels_failed", errorCount
         );
         if (!errors.isEmpty()) {
             result.put("errors", errors);
         }
         return Response.ok(result);
-    }
-
-    /** Three-arg overload preserving the pre-v5.11.2 signature. */
-    public Response renameOrLabel(String addressStr, String newName, String programName) {
-        return renameOrLabel(addressStr, newName, programName, null);
-    }
-
-    public Response renameOrLabel(String addressStr, String newName) {
-        return renameOrLabel(addressStr, newName, null, null);
     }
 
     // rename_or_label merged into rename_symbol (auto mode for address targets) in 7.0.0; kept as a helper.
@@ -389,14 +377,10 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required");
         }
@@ -417,7 +401,7 @@ public class SymbolLabelService {
             if (data != null) {
                 // This is defined data (global variable) — validate g_ prefix
                 conventions = NamingConventions.validateGlobalName(newName);
-                Response result = renameDataAtAddress(addressStr, newName, programName);
+                Response result = renameDataAtAddress(addressStr, newName, program);
                 if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
                     @SuppressWarnings("unchecked")
                     java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
@@ -429,7 +413,7 @@ public class SymbolLabelService {
             } else {
                 // This is a label (code address) — validate snake_case
                 conventions = NamingConventions.validateLabelName(newName);
-                Response result = createLabel(addressStr, newName, null, programName);
+                Response result = createLabel(addressStr, newName, null, program);
                 if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
                     @SuppressWarnings("unchecked")
                     java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
@@ -441,19 +425,11 @@ public class SymbolLabelService {
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
-    public Response deleteLabel(String addressStr, String labelName) {
-        return deleteLabel(addressStr, labelName, null, null);
-    }
-
-    public Response deleteLabel(String addressStr, String labelName, String programName) {
-        return deleteLabel(addressStr, labelName, null, programName);
-    }
-
-    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol")
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete ONE label (address + name) OR MANY in one call (labels=[{address,name}, ...]). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_delete_labels.", category = "symbol", access = ToolAccess.DESTRUCTIVE)
     public Response deleteLabel(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address (single mode). 0x<hex> or <space>:<hex>. Omit when using labels[].") String addressStr,
@@ -461,13 +437,9 @@ public class SymbolLabelService {
                    description = "Label name (single mode).") String labelName,
             @Param(value = "labels", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {address, name} objects. When non-empty, address/name are ignored.") List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels != null && !labels.isEmpty()) {
-            return batchDeleteLabels(labels, programName);
+            return batchDeleteLabels(labels, program);
         }
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("Address is required (or pass labels[] for bulk)");
@@ -487,13 +459,14 @@ public class SymbolLabelService {
                         "No symbols found at address " + addressStr));
             }
 
-            final AtomicInteger deletedCount = new AtomicInteger(0);
             final List<String> deletedNames = new ArrayList<>();
             final List<String> errors = new ArrayList<>();
 
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Delete Label");
-                try {
+            record DeleteLabelResult(boolean success, int deletedCount, List<String> deletedNames, List<String> errors) {}
+            DeleteLabelResult outcome;
+            try {
+                outcome = threadingStrategy.executeWrite(program, "Delete Label", () -> {
+                    int deletedCount = 0;
                     for (Symbol symbol : symbols) {
                         if (symbol.getSymbolType() != SymbolType.LABEL) {
                             continue;
@@ -507,68 +480,61 @@ public class SymbolLabelService {
                         String name = symbol.getName();
                         boolean deleted = symbol.delete();
                         if (deleted) {
-                            deletedCount.incrementAndGet();
+                            deletedCount++;
                             deletedNames.add(name);
                         } else {
                             errors.add("Failed to delete label: " + name);
                         }
                     }
-                } catch (Exception e) {
-                    errors.add("Error during deletion: " + e.getMessage());
-                } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
-                }
-            });
+                    return new DeleteLabelResult(deletedCount > 0, deletedCount, List.copyOf(deletedNames), List.copyOf(errors));
+                });
+            } catch (Exception e) {
+                return ServiceUtils.fail(e);
+            }
 
             Map<String, Object> result = JsonHelper.mapOf(
-                    "success", deletedCount.get() > 0,
-                    "deleted_count", deletedCount.get(),
-                    "deleted_names", deletedNames
+                    "success", outcome.success(),
+                    "deleted_count", outcome.deletedCount(),
+                    "deleted_names", outcome.deletedNames()
             );
-            if (!errors.isEmpty()) {
-                result.put("errors", errors);
+            if (!outcome.errors().isEmpty()) {
+                result.put("errors", outcome.errors());
             }
             return Response.ok(result);
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-    }
-
-    public Response batchDeleteLabels(List<Map<String, String>> labels) {
-        return batchDeleteLabels(labels, null);
     }
 
     // Bulk helper for delete_label(labels=[...]). Merged into delete_label in 7.0.0.
     public Response batchDeleteLabels(
             @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (labels == null || labels.isEmpty()) {
             return Response.err("No labels provided");
         }
 
-        final AtomicInteger deletedCount = new AtomicInteger(0);
-        final AtomicInteger skippedCount = new AtomicInteger(0);
-        final AtomicInteger errorCount = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        int deletedCount;
+        int skippedCount;
+        int errorCount;
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Batch Delete Labels");
-                try {
-                    SymbolTable symbolTable = program.getSymbolTable();
+            record BatchDeleteCounts(int deletedCount, int skippedCount, int errorCount) {}
+            BatchDeleteCounts tallies = threadingStrategy.executeWrite(program, "Batch Delete Labels", () -> {
+                int deletedCountLocal = 0;
+                int skippedCountLocal = 0;
+                int errorCountLocal = 0;
+                SymbolTable symbolTable = program.getSymbolTable();
 
-                    for (Map<String, String> labelEntry : labels) {
+                for (Map<String, String> labelEntry : labels) {
                         String addressStr = labelEntry.get("address");
                         String labelNameEntry = labelEntry.get("name");
 
                         if (addressStr == null || addressStr.isEmpty()) {
                             errors.add("Missing address in label entry");
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                             continue;
                         }
 
@@ -576,13 +542,13 @@ public class SymbolLabelService {
                             Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
                                 errors.add(ServiceUtils.getLastParseError());
-                                errorCount.incrementAndGet();
+                                errorCountLocal++;
                                 continue;
                             }
 
                             Symbol[] symbols = symbolTable.getSymbols(address);
                             if (symbols == null || symbols.length == 0) {
-                                skippedCount.incrementAndGet();
+                                skippedCountLocal++;
                                 continue;
                             }
 
@@ -598,32 +564,31 @@ public class SymbolLabelService {
 
                                 boolean deleted = symbol.delete();
                                 if (deleted) {
-                                    deletedCount.incrementAndGet();
+                                    deletedCountLocal++;
                                 } else {
                                     errors.add("Failed to delete at " + addressStr);
-                                    errorCount.incrementAndGet();
+                                    errorCountLocal++;
                                 }
                             }
                         } catch (Exception e) {
                             errors.add("Error at " + addressStr + ": " + e.getMessage());
-                            errorCount.incrementAndGet();
+                            errorCountLocal++;
                         }
                     }
-                } catch (Exception e) {
-                    errors.add("Transaction error: " + e.getMessage());
-                } finally {
-                    program.endTransaction(tx, deletedCount.get() > 0);
-                }
+                return new BatchDeleteCounts(deletedCountLocal, skippedCountLocal, errorCountLocal);
             });
+            deletedCount = tallies.deletedCount();
+            skippedCount = tallies.skippedCount();
+            errorCount = tallies.errorCount();
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
                 "success", true,
-                "labels_deleted", deletedCount.get(),
-                "labels_skipped", skippedCount.get(),
-                "errors_count", errorCount.get()
+                "labels_deleted", deletedCount,
+                "labels_skipped", skippedCount,
+                "errors_count", errorCount
         );
         if (!errors.isEmpty()) {
             result.put("errors", errors.subList(0, Math.min(errors.size(), 10)));
@@ -635,10 +600,6 @@ public class SymbolLabelService {
     // Data Rename Methods
     // -----------------------------------------------------------------------
 
-    public Response renameDataAtAddress(String addressStr, String newName) {
-        return renameDataAtAddress(addressStr, newName, null);
-    }
-
     // rename_data merged into rename_symbol(kind=data) in 7.0.0; kept as a helper.
     public Response renameDataAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -649,10 +610,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         // Resolve address before entering SwingUtilities lambda
         Address addr = ServiceUtils.parseAddress(program, addressStr);
@@ -680,7 +638,8 @@ public class SymbolLabelService {
                     + "address=\"" + addressStr + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -697,81 +656,44 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicReference<String> successMsg = new AtomicReference<>();
-
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Rename data");
-                try {
-                    Listing listing = program.getListing();
-                    Data data = listing.getDefinedDataAt(addr);
+            String successMsg = threadingStrategy.executeWrite(program, "Rename data", () -> {
+                Listing listing = program.getListing();
+                Data data = listing.getDefinedDataAt(addr);
 
-                    if (data != null) {
-                        SymbolTable symTable = program.getSymbolTable();
-                        Symbol symbol = symTable.getPrimarySymbol(addr);
-                        if (symbol != null) {
-                            // Idempotent on name: if the address already has the
-                            // requested name, skip setName (Ghidra throws
-                            // DuplicateNameException for same-name reassignment).
-                            if (newName.equals(symbol.getName())) {
-                                successMsg.set("Defined data at " + addressStr + " is already named '" + newName + "' (no-op)");
-                            } else {
-                                symbol.setName(newName, SourceType.USER_DEFINED);
-                                successMsg.set("Renamed defined data at " + addressStr + " to '" + newName + "'");
-                            }
-                            success.set(true);
-                        } else {
-                            symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
-                            successMsg.set("Created label '" + newName + "' at " + addressStr);
-                            success.set(true);
-                        }
-                    } else {
-                        errorMsg.set("No defined data at address " + addressStr + ". Use create_label for undefined addresses.");
-                    }
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Rename data error", e);
-                } finally {
-                    program.endTransaction(tx, success.get());
+                if (data == null) {
+                    throw new Refusal("No defined data at address " + addressStr + ". Use create_label for undefined addresses.");
                 }
+
+                SymbolTable symTable = program.getSymbolTable();
+                Symbol symbol = symTable.getPrimarySymbol(addr);
+                if (symbol != null) {
+                    // Idempotent on name: if the address already has the
+                    // requested name, skip setName (Ghidra throws
+                    // DuplicateNameException for same-name reassignment).
+                    if (newName.equals(symbol.getName())) {
+                        return "Defined data at " + addressStr + " is already named '" + newName + "' (no-op)";
+                    }
+                    symbol.setName(newName, SourceType.USER_DEFINED);
+                    return "Renamed defined data at " + addressStr + " to '" + newName + "'";
+                }
+                symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
+                return "Created label '" + newName + "' at " + addressStr;
             });
+            return Response.successWithWarnings(successMsg, enforcementWarnings);
         } catch (Exception e) {
-            return Response.err("Failed to execute rename on Swing thread: " + e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        if (success.get()) {
-            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message", successMsg.get());
-            if (!enforcementWarnings.isEmpty()) {
-                result.put("warnings", enforcementWarnings);
-            }
-            return Response.ok(result);
-        }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
-    }
-
-    /** Three-arg overload preserving the pre-v5.11.2 signature. */
-    public Response renameGlobalVariable(String oldName, String newName, String programName) {
-        return renameGlobalVariable(oldName, newName, programName, null);
-    }
-
-    public Response renameGlobalVariable(String oldName, String newName) {
-        return renameGlobalVariable(oldName, newName, null, null);
     }
 
     // rename_global_variable merged into rename_symbol(kind=global) in 7.0.0; kept as a helper.
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (oldName == null || oldName.isEmpty()) {
             return Response.err("Old variable name is required");
         }
@@ -783,22 +705,10 @@ public class SymbolLabelService {
         // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
         // naming rules. Look up the symbol's existing data type for the
         // Hungarian-vs-type check.
-        SymbolTable symTableForCheck = program.getSymbolTable();
-        Namespace globalNsForCheck = program.getGlobalNamespace();
-        List<Symbol> initialSymbols = symTableForCheck.getSymbols(oldName, globalNsForCheck);
-        if (initialSymbols.isEmpty()) {
-            SymbolIterator allSymbols = symTableForCheck.getSymbols(oldName);
-            while (allSymbols.hasNext()) {
-                Symbol s = allSymbols.next();
-                if (s.getSymbolType() != SymbolType.FUNCTION) {
-                    initialSymbols.add(s);
-                    break;
-                }
-            }
-        }
+        Symbol existingSymbol = ServiceUtils.findGlobalSymbol(program, oldName);
         String existingTypeName = null;
-        if (!initialSymbols.isEmpty()) {
-            Address sa = initialSymbols.get(0).getAddress();
+        if (existingSymbol != null) {
+            Address sa = existingSymbol.getAddress();
             Data d = program.getListing().getDefinedDataAt(sa);
             if (d != null && d.getDataType() != null) existingTypeName = d.getDataType().getName();
         }
@@ -806,15 +716,16 @@ public class SymbolLabelService {
                 NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
         List<String> enforcementWarnings = new ArrayList<>();
         if (!quality.ok) {
-            String addrHint = !initialSymbols.isEmpty()
-                    ? "0x" + initialSymbols.get(0).getAddress().toString()
+            String addrHint = existingSymbol != null
+                    ? "0x" + existingSymbol.getAddress().toString()
                     : "<global address>";
             String enrichedSuggestion = quality.suggestion
                     + " For globals, prefer set_global("
                     + "address=\"" + addrHint + "\", "
                     + "type_name=..., name=..., plate_comment=...) — "
                     + "single-transaction write that validates name + type "
-                    + "consistency before applying anything.";
+                    + "consistency before applying anything. Pass strict_mode=warn to keep "
+                    + "the name deliberately.";
             Map<String, Object> rejection = JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -830,58 +741,29 @@ public class SymbolLabelService {
             enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
         }
 
-        int txId = program.startTransaction("Rename Global Variable");
-        boolean success = false;
         try {
-            SymbolTable symbolTable = program.getSymbolTable();
-
-            Namespace globalNamespace = program.getGlobalNamespace();
-            List<Symbol> symbols = symbolTable.getSymbols(oldName, globalNamespace);
-
-            if (symbols.isEmpty()) {
-                SymbolIterator allSymbols = symbolTable.getSymbols(oldName);
-                while (allSymbols.hasNext()) {
-                    Symbol symbol = allSymbols.next();
-                    if (symbol.getSymbolType() != SymbolType.FUNCTION) {
-                        symbols.add(symbol);
-                        break;
-                    }
+            return threadingStrategy.executeWrite(program, "Rename Global Variable", () -> {
+                Symbol symbol = ServiceUtils.findGlobalSymbol(program, oldName);
+                if (symbol == null) {
+                    throw new Refusal("Global variable '" + oldName + "' not found");
                 }
-            }
-
-            if (symbols.isEmpty()) {
-                return Response.err("Global variable '" + oldName + "' not found");
-            }
-
-            Symbol symbol = symbols.get(0);
-            Address symbolAddr = symbol.getAddress();
-            // Idempotent: oldName == newName is a no-op success rather than
-            // a DuplicateNameException. Workers re-running rename_symbol
-            // after a successful prior call hit this; treat as already-applied.
-            if (newName.equals(symbol.getName())) {
-                success = true;
-                Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                        "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)");
-                if (!enforcementWarnings.isEmpty()) {
-                    result.put("warnings", enforcementWarnings);
+                Address symbolAddr = symbol.getAddress();
+                // Idempotent: oldName == newName is a no-op success rather than
+                // a DuplicateNameException. Workers re-running rename_symbol
+                // after a successful prior call hit this; treat as already-applied.
+                if (newName.equals(symbol.getName())) {
+                    return Response.successWithWarnings(
+                            "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)",
+                            enforcementWarnings);
                 }
-                return Response.ok(result);
-            }
-            symbol.setName(newName, SourceType.USER_DEFINED);
+                symbol.setName(newName, SourceType.USER_DEFINED);
 
-            success = true;
-            Map<String, Object> result = JsonHelper.mapOf("status", "success", "message",
-                    "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr);
-            if (!enforcementWarnings.isEmpty()) {
-                result.put("warnings", enforcementWarnings);
-            }
-            return Response.ok(result);
-
+                return Response.successWithWarnings(
+                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr,
+                        enforcementWarnings);
+            });
         } catch (Exception e) {
-            Msg.error(this, "Error renaming global variable: " + e.getMessage());
-            return Response.err(e.getMessage());
-        } finally {
-            program.endTransaction(txId, success);
+            return ServiceUtils.fail(e);
         }
         } catch (Exception e) {
             // try-with-resources close() can throw Exception (checked).
@@ -913,10 +795,6 @@ public class SymbolLabelService {
     // External Location Methods
     // -----------------------------------------------------------------------
 
-    public Response renameExternalLocation(String address, String newName) {
-        return renameExternalLocation(address, newName, null);
-    }
-
     // rename_external_location merged into rename_symbol(kind=external) in 7.0.0; kept as a helper.
     public Response renameExternalLocation(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -926,11 +804,7 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String address,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Address addr = ServiceUtils.parseAddress(program, address);
             if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -946,37 +820,21 @@ public class SymbolLabelService {
                         final ExternalLocation finalExtLoc = extLoc;
                         final String oldName = extLoc.getLabel();
 
-                        AtomicBoolean success = new AtomicBoolean(false);
-                        AtomicReference<String> errorMsg = new AtomicReference<>();
-
                         try {
-                            SwingUtilities.invokeAndWait(() -> {
-                                int tx = program.startTransaction("Rename external location");
-                                try {
-                                    Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
-                                    finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
-                                    success.set(true);
-                                    Msg.info(this, "Renamed external location: " + oldName + " -> " + newName);
-                                } catch (Exception e) {
-                                    errorMsg.set(e.getMessage());
-                                    Msg.error(this, "Error renaming external location: " + e.getMessage());
-                                } finally {
-                                    program.endTransaction(tx, success.get());
-                                }
+                            threadingStrategy.executeWrite(program, "Rename external location", () -> {
+                                Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
+                                finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
+                                Msg.info(this, "Renamed external location: " + oldName + " -> " + newName);
+                                return null;
                             });
-                        } catch (Exception e) {
-                            errorMsg.set(e.getMessage());
-                        }
-
-                        if (success.get()) {
                             return Response.ok(JsonHelper.mapOf(
                                     "success", true,
                                     "old_name", oldName,
                                     "new_name", newName,
                                     "dll", finalLibName
                             ));
-                        } else {
-                            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
+                        } catch (Exception e) {
+                            return ServiceUtils.fail(e);
                         }
                     }
                 }
@@ -984,8 +842,8 @@ public class SymbolLabelService {
 
             return Response.err("External location not found at address " + address);
         } catch (Exception e) {
-            Msg.error(this, "Exception in renameExternalLocation: " + e.getMessage());
-            return Response.err(e.getMessage());
+            Msg.error(this, "Exception in renameExternalLocation: " + ServiceUtils.failureMessage(e));
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -993,76 +851,56 @@ public class SymbolLabelService {
     // Address Inspection Methods
     // -----------------------------------------------------------------------
 
-    public Response canRenameAtAddress(String addressStr) {
-        return canRenameAtAddress(addressStr, null);
-    }
 
-    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
+
+    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol", access = ToolAccess.READ_ONLY)
     public Response canRenameAtAddress(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
+                               + "address is unambiguous.") Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
+        
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func != null) {
-                        resultData.set(JsonHelper.mapOf(
-                                "can_rename", true,
-                                "type", "function",
-                                "suggested_operation", "rename_function",
-                                "current_name", func.getName()
-                        ));
-                        return;
-                    }
-
-                    Data data = program.getListing().getDefinedDataAt(addr);
-                    if (data != null) {
-                        Map<String, Object> map = JsonHelper.mapOf(
-                                "can_rename", true,
-                                "type", "defined_data",
-                                "suggested_operation", "rename_symbol"
-                        );
-                        Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
-                        if (symbol != null) {
-                            map.put("current_name", symbol.getName());
-                        }
-                        resultData.set(map);
-                        return;
-                    }
-
-                    resultData.set(JsonHelper.mapOf(
-                            "can_rename", true,
-                            "type", "undefined",
-                            "suggested_operation", "create_label"
-                    ));
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(renameInfoAtAddress(program, addr));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
+        }
+    }
+
+    /** What a rename tool would target at {@code addr}: function, defined data, or a fresh label. */
+    private static Map<String, Object> renameInfoAtAddress(Program program, Address addr) {
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func != null) {
+            return JsonHelper.mapOf(
+                    "can_rename", true,
+                    "type", "function",
+                    "suggested_operation", "rename_function",
+                    "current_name", func.getName()
+            );
         }
 
-        return Response.ok(resultData.get());
+        Data data = program.getListing().getDefinedDataAt(addr);
+        if (data != null) {
+            Map<String, Object> map = JsonHelper.mapOf(
+                    "can_rename", true,
+                    "type", "defined_data",
+                    "suggested_operation", "rename_symbol"
+            );
+            Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
+            if (symbol != null) {
+                map.put("current_name", symbol.getName());
+            }
+            return map;
+        }
+
+        return JsonHelper.mapOf(
+                "can_rename", true,
+                "type", "undefined",
+                "suggested_operation", "create_label"
+        );
     }
 }

@@ -12,8 +12,11 @@
 **Overall Assessment**: The implementation is **80% production-ready** but requires critical fixes in thread safety, error handling, and input validation before deployment.
 
 ### Critical Issues Found: 3
+
 ### Major Issues Found: 5
+
 ### Minor Issues Found: 8
+
 ### Recommendations: 12
 
 ---
@@ -29,6 +32,7 @@
 **Problem**: The three new field analysis methods are NOT wrapped in `SwingUtilities.invokeAndWait()`, but they access Ghidra API which MUST run on the Swing EDT thread.
 
 **Current Code**:
+
 ```java
 private String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
     Program program = getCurrentProgram();  // ❌ NOT THREAD-SAFE
@@ -37,6 +41,7 @@ private String analyzeStructFieldUsage(String addressStr, String structName, int
 ```
 
 **Required Fix**:
+
 ```java
 private String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
     final AtomicReference<String> result = new AtomicReference<>();
@@ -60,6 +65,7 @@ private String analyzeStructFieldUsage(String addressStr, String structName, int
 ```
 
 **Apply to**:
+
 - `analyzeStructFieldUsage()` (line 5895)
 - `getFieldAccessContext()` (line 6079)
 - `suggestFieldNames()` (line 6155)
@@ -75,6 +81,7 @@ private String analyzeStructFieldUsage(String addressStr, String structName, int
 **Problem**: `DecompInterface` is created but if an exception occurs before `decomp.dispose()` is called, the resource is leaked.
 
 **Current Code**:
+
 ```java
 DecompInterface decomp = new DecompInterface();
 decomp.openProgram(program);
@@ -87,6 +94,7 @@ decomp.dispose();  // ❌ Not called if exception occurs
 ```
 
 **Required Fix**:
+
 ```java
 DecompInterface decomp = null;
 try {
@@ -114,12 +122,14 @@ try {
 **Problem**: No validation on `maxFunctionsToAnalyze` parameter. User could pass Integer.MAX_VALUE causing system hang.
 
 **Current Code**:
+
 ```java
 private String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
     // ❌ No validation - could be negative, zero, or extremely large
 ```
 
 **Required Fix**:
+
 ```java
 private String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
     // Validate input
@@ -141,6 +151,7 @@ private String analyzeStructFieldUsage(String addressStr, String structName, int
 **Problem**: Pattern matching is overly simplistic and prone to false matches.
 
 **Issues**:
+
 ```java
 // ❌ Problem 1: Matches field name anywhere in line, even in comments or strings
 if (line.contains(fieldName) || line.contains("+" + offset)) {
@@ -158,6 +169,7 @@ if (token.length() > 2 && !token.equals(fieldName) && Character.isLetter(token.c
 ```
 
 **Recommended Fix**:
+
 ```java
 // Use word boundaries for field name matching
 Pattern fieldPattern = Pattern.compile("\\b" + Pattern.quote(fieldName) + "\\b");
@@ -196,6 +208,7 @@ if (token.length() > 2 &&
 **Problem**: No limit on number of struct components. Could generate massive JSON for large structures.
 
 **Recommended Fix**:
+
 ```java
 DataTypeComponent[] components = struct.getComponents();
 if (components.length > 256) {  // Reasonable limit
@@ -214,12 +227,14 @@ if (components.length > 256) {  // Reasonable limit
 **Problem**: Using `StringBuilder.append()` for JSON is error-prone and inefficient. Should use proper JSON library.
 
 **Current Code**:
+
 ```java
 json.append("\"field_name\": \"").append(escapeJson(component.getFieldName())).append("\",");
 // Repeated hundreds of times, easy to make syntax errors
 ```
 
 **Recommended Fix**:
+
 ```java
 // Add Jackson or Gson dependency
 import com.google.gson.Gson;
@@ -244,6 +259,7 @@ return gson.toJson(result);
 **Problem**: Address arithmetic could overflow, instruction could be null.
 
 **Current Code**:
+
 ```java
 Address fieldAddr = structAddr.add(fieldOffset);  // ❌ Could overflow
 Instruction instr = listing.getInstructionAt(fromAddr);
@@ -255,6 +271,7 @@ if (instr != null) {
 ```
 
 **Recommended Fix**:
+
 ```java
 // Validate field offset
 if (fieldOffset < 0 || fieldOffset > 0x10000) {  // Reasonable limit
@@ -280,12 +297,14 @@ try {
 **Problem**: Decompilation can take very long time. No timeout mechanism.
 
 **Current Code**:
+
 ```java
 DecompileResults results = decomp.decompileFunction(func, 30, new ConsoleTaskMonitor());
 // ❌ Timeout parameter (30) is in seconds, but no enforcement
 ```
 
 **Recommended Fix**:
+
 ```java
 // Add timeout wrapper
 ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -313,12 +332,14 @@ try {
 
 **Locations**: Multiple
 **Examples**:
+
 ```java
 if (token.length() > 2  // Why 2? Should be MIN_TOKEN_LENGTH constant
 DecompileResults results = decomp.decompileFunction(func, 30  // Why 30? Should be DECOMPILE_TIMEOUT_SECONDS
 ```
 
 **Recommended Fix**:
+
 ```java
 private static final int MIN_TOKEN_LENGTH = 3;
 private static final int DECOMPILE_TIMEOUT_SECONDS = 30;
@@ -333,6 +354,7 @@ private static final int MAX_FUNCTIONS_TO_ANALYZE = 100;
 **Problem**: Some errors return plain strings, others return JSON objects.
 
 **Examples**:
+
 ```java
 return "{\"error\": \"No program loaded\"}";  // JSON
 return "Error: Invalid address";              // Plain string (if exists)
@@ -347,6 +369,7 @@ return "Error: Invalid address";              // Plain string (if exists)
 **Problem**: No logging for debugging field analysis operations.
 
 **Recommended Fix**:
+
 ```java
 Msg.info(this, "Analyzing struct at " + addressStr + " with " + functionsToAnalyze.size() + " functions");
 Msg.debug(this, "Found " + fieldUsageMap.size() + " fields with usage data");
@@ -359,6 +382,7 @@ Msg.debug(this, "Found " + fieldUsageMap.size() + " fields with usage data");
 **Problem**: No way to track performance or success rates of field analysis.
 
 **Recommendation**: Add timing metrics:
+
 ```java
 long startTime = System.currentTimeMillis();
 // ... perform analysis
@@ -383,6 +407,7 @@ Msg.info(this, "Field analysis completed in " + duration + "ms");
 **Location**: `GhidraMCPPlugin.java:5994`
 
 **Recommended Fix**:
+
 ```java
 /**
  * Helper class to track field usage information during analysis.
@@ -408,6 +433,7 @@ private static class FieldUsageInfo {
 **Problem**: If no type patterns match, returns empty list. Should have fallback.
 
 **Recommended Fix**:
+
 ```java
 // At end of method, if suggestions is empty:
 if (suggestions.isEmpty()) {
@@ -428,7 +454,7 @@ if (suggestions.isEmpty()) {
 
 ## ✅ PYTHON BRIDGE REVIEW
 
-### Good Practices Found:
+### Good Practices Found
 
 1. ✅ **Input validation** - All tools use `validate_hex_address()`
 2. ✅ **Error handling** - `GhidraValidationError` for invalid inputs
@@ -437,7 +463,7 @@ if (suggestions.isEmpty()) {
 5. ✅ **Type hints** - All parameters typed
 6. ✅ **Consistent API** - Follows existing patterns
 
-### Issues Found:
+### Issues Found
 
 **17. Missing Upper Bound Validation**
 
@@ -451,6 +477,7 @@ data = {
 ```
 
 **Fix**:
+
 ```python
 if not isinstance(max_functions, int) or max_functions < 1 or max_functions > 100:
     raise GhidraValidationError("max_functions must be between 1 and 100")
@@ -469,6 +496,7 @@ if not isinstance(num_examples, int) or num_examples < 1:
 ```
 
 **Enhancement**:
+
 ```python
 # Add upper bounds
 if not isinstance(field_offset, int) or field_offset < 0 or field_offset > 65536:
@@ -482,7 +510,8 @@ if not isinstance(num_examples, int) or num_examples < 1 or num_examples > 50:
 
 ## 📊 PRODUCTION READINESS CHECKLIST
 
-### Must Have (Before Production):
+### Must Have (Before Production)
+
 - [ ] **CRITICAL FIX #1**: Add `SwingUtilities.invokeAndWait()` to all three methods
 - [ ] **CRITICAL FIX #2**: Add try-finally for `DecompInterface.dispose()`
 - [ ] **CRITICAL FIX #3**: Validate `maxFunctionsToAnalyze` parameter
@@ -490,14 +519,16 @@ if not isinstance(num_examples, int) or num_examples < 1 or num_examples > 50:
 - [ ] **MAJOR FIX #5**: Add limit on struct field count
 - [ ] **MAJOR FIX #7**: Add null checks and overflow protection in `getFieldAccessContext()`
 
-### Should Have (For Quality):
+### Should Have (For Quality)
+
 - [ ] Add timeout mechanism for decompilation
 - [ ] Replace StringBuilder with JSON library (Gson/Jackson)
 - [ ] Add comprehensive logging
 - [ ] Extract magic numbers to constants
 - [ ] Add Python upper bound validations
 
-### Nice to Have (For Enhancement):
+### Nice to Have (For Enhancement)
+
 - [ ] Add decompilation result caching
 - [ ] Add performance metrics
 - [ ] Enhance error messages with suggestions
@@ -507,24 +538,28 @@ if not isinstance(num_examples, int) or num_examples < 1 or num_examples > 50:
 
 ## 🔧 RECOMMENDED FIXES - PRIORITY ORDER
 
-### Priority 1 (Fix Today - Critical):
+### Priority 1 (Fix Today - Critical)
+
 1. Add SwingUtilities.invokeAndWait() wrapper
 2. Add try-finally for resource cleanup
 3. Add input validation for max_functions parameter
 
-### Priority 2 (Fix This Week - Major):
+### Priority 2 (Fix This Week - Major)
+
 4. Improve pattern matching with word boundaries
 5. Add struct size limits
 6. Add overflow checks in address arithmetic
 7. Add Python parameter upper bounds
 
-### Priority 3 (Fix Next Sprint - Quality):
+### Priority 3 (Fix Next Sprint - Quality)
+
 8. Add decompilation timeouts
 9. Replace manual JSON building with library
 10. Add comprehensive logging
 11. Extract constants
 
-### Priority 4 (Future Enhancement):
+### Priority 4 (Future Enhancement)
+
 12. Add decompilation caching
 13. Add performance metrics
 14. Improve suggestion quality
@@ -595,11 +630,13 @@ class FieldAnalysisConfig {
 **Blocking Issues**: 3 CRITICAL thread safety and resource management issues
 
 **Timeline to Production Ready**:
+
 - With Priority 1 fixes: **1-2 days** → Beta ready
 - With Priority 1+2 fixes: **3-5 days** → Production ready
 - With all fixes: **1-2 weeks** → Production hardened
 
 **Recommendation**:
+
 1. Apply Priority 1 fixes immediately
 2. Write integration tests for thread safety
 3. Test with large structures (100+ fields)
@@ -609,6 +646,7 @@ class FieldAnalysisConfig {
 7. Plan Priority 3+4 for next version
 
 **Risk Assessment**:
+
 - **Thread Safety**: HIGH RISK - Will cause crashes
 - **Resource Leaks**: MEDIUM RISK - Will cause memory issues over time
 - **Input Validation**: HIGH RISK - Could be exploited for DoS
@@ -618,7 +656,8 @@ class FieldAnalysisConfig {
 
 ## 📚 TESTING RECOMMENDATIONS
 
-### Unit Tests Needed:
+### Unit Tests Needed
+
 ```java
 @Test
 public void testAnalyzeStructFieldUsage_WithValidStruct() { }
@@ -642,7 +681,8 @@ public void testAnalyzeFieldUsageInCode_FiltersCKeywords() { }
 public void testDecompInterfaceDisposedOnException() { }
 ```
 
-### Integration Tests Needed:
+### Integration Tests Needed
+
 - Test with real Ghidra program
 - Test thread safety with concurrent requests
 - Test memory usage with large structures

@@ -6,9 +6,9 @@
 // Output: Console report of __thiscall verification results.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Verify __thiscall conventions via decompiler analysis
-// @menupath Diablo 2.Analysis.Verify Thiscall Conventions
+// @menupath GhidraMCP.Analysis.Verify Thiscall Conventions
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.sourcemap.*;

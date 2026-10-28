@@ -47,7 +47,7 @@ local.setName("newName", SourceType.USER_DEFINED);
 
 - Function signature metadata
 - Symbol tree in Ghidra
-- `get_function_variables` MCP tool output
+- `get_functions(fields="parameters,locals")` output, but only as a fallback: when the function decompiles, `locals` comes from the decompiler (System 2) and each entry carries `in_decompiled_code: true`; storage variables are listed, with `in_decompiled_code: false`, only when decompilation is skipped or fails
 - **NOT in decompiled code** (decompiler uses SSA variables instead)
 
 ### Purpose
@@ -84,6 +84,7 @@ while (symbols.hasNext()) {
 ### Example Names
 
 SSA variables use **Hungarian notation** with type prefix:
+
 - `dVar12`, `dVar13` - Double precision floats
 - `iVar6` - Signed integers
 - `uVar2`, `uVar3` - Unsigned integers
@@ -107,7 +108,7 @@ HighFunctionDBUtil.updateDBVariable(
 
 - **Decompiled code output** (this is what users see!)
 - Decompiler window in Ghidra
-- `get_decompiled_code` MCP tool output
+- `get_functions(fields="decompiled_code,locals")` output
 
 ### Purpose
 
@@ -120,7 +121,7 @@ HighFunctionDBUtil.updateDBVariable(
 
 ### Storage Variables
 
-```
+```text
 Stack[-0xc]:8  ←→  local_c (undefined8)
 ```
 
@@ -128,7 +129,7 @@ This says: "There's an 8-byte value at stack offset -0xc that we'll call `local_
 
 ### SSA Variables (Generated from Storage)
 
-```
+```text
 local_c  →  Decompiler Analysis  →  dVar12, dVar13, dVar14 (multiple SSA vars)
 ```
 
@@ -228,6 +229,7 @@ These represent SIMD registers whose exact type isn't known.
 ### Why Can't They Be Renamed?
 
 They're **implicit/synthetic** - not actual function variables. They represent:
+
 - Calling convention details (implicit register parameters)
 - Return values from function calls (extraout_*)
 - Compiler-generated temporaries (undefined arrays)
@@ -235,7 +237,7 @@ They're **implicit/synthetic** - not actual function variables. They represent:
 ## Summary Table
 
 | Aspect | Storage Variables | SSA Variables |
-|--------|------------------|---------------|
+| -------- | ------------------ | --------------- |
 | **Access API** | `func.getLocalVariables()` | `LocalSymbolMap.getSymbols()` |
 | **Example Names** | `local_c`, `param_1` | `dVar12`, `uVar3`, `bVar1` |
 | **Rename API** | `variable.setName()` | `HighFunctionDBUtil.updateDBVariable()` |
@@ -248,4 +250,9 @@ They're **implicit/synthetic** - not actual function variables. They represent:
 
 **To rename variables that appear in decompiled code, you MUST use the HighFunction/LocalSymbolMap API.**
 
-Storage variable renaming only affects internal metadata that users never see. The batch rename method needs to be fixed to use the correct API.
+Storage variable renaming only affects internal metadata that users never see.
+
+The server's renaming tools follow this (checked against `FunctionService.java`, 2026-10-07):
+
+- `rename_variables` and `set_variables` rename through `HighFunctionDBUtil.updateDBVariable` on the decompiler's `LocalSymbolMap` first, and fall back to the storage variable's `setName` only for names the decompiler does not report.
+- `batch_rename_function_components` is the exception: its `parameter_renames` and `local_renames` still call `setName` on storage variables, so a decompiler name such as `dVar12` matches nothing and is skipped silently (`locals_renamed` in the response shows how many landed). Use `rename_variables` for names you read in decompiled code.

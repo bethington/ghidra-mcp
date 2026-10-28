@@ -1,0 +1,108 @@
+{
+  "_README": [
+    "HAND-WRITTEN, NOT RECORDED. Everything else the fake serves comes from",
+    "tests/conformance/snapshots/, captured from real Ghidra. These few cannot",
+    "be recorded: tests/conformance/cases.ENVIRONMENT_COUPLED excludes them",
+    "because their output describes the operator's machine -- project name,",
+    "Ghidra Server address, which programs happen to be open -- and the first",
+    "recording pass leaked a private server address into a snapshot and tripped",
+    "the repo's own data-egress guard (tests/unit/test_no_default_data_egress).",
+    "",
+    "They live in a separate file so nobody mistakes them for evidence. A test",
+    "that asserts on the CONTENT of anything below is asserting on this file.",
+    "Only the SHAPE is meaningful, and only because the bridge's discovery and",
+    "session code reads these exact keys."
+  ],
+
+  "/mcp/instance_info": {
+    "project": "FakeOfflineProject",
+    "pid": 424242,
+    "tcp_port": 0,
+    "uds_socket": "",
+    "programs": ["Benchmark.dll", "BenchmarkDebug.exe"],
+    "open": true,
+    "version": "7.0.0"
+  },
+
+  "/mcp/health": {
+    "status": "ok",
+    "server_kind": "gui",
+    "version": {
+      "plugin_version": "7.0.0",
+      "plugin_name": "GhidraMCP",
+      "full_version": "7.0.0 (build 0, 0)",
+      "build_timestamp": "0",
+      "build_number": "0",
+      "ghidra_version": "12.1.3",
+      "java_version": "21",
+      "endpoint_count": 215
+    },
+    "connected": true,
+    "open_program_count": 1,
+    "uptime_seconds": 0,
+    "active_requests": 0,
+    "http_pool": {"configured_size": 10, "current_size": 10, "largest_size": 10,
+                  "queue_size": 0, "completed_tasks": 0},
+    "memory_mb": {"used": 0, "total": 0, "max": 0}
+  },
+
+  "/list_open_programs": {
+    "count": 2,
+    "programs": [
+      {
+        "name": "Benchmark.dll",
+        "path": "/FakeOffline/Benchmark.dll",
+        "is_current": true,
+        "changed": false
+      },
+      {
+        "name": "BenchmarkDebug.exe",
+        "path": "/FakeOffline/BenchmarkDebug.exe",
+        "is_current": false,
+        "changed": false
+      }
+    ]
+  },
+
+  "/get_current_program_info": {
+    "name": "Benchmark.dll",
+    "path": "/FakeOffline/Benchmark.dll",
+    "language_id": "x86:LE:32:default",
+    "function_count": 530,
+    "is_current": true
+  },
+
+  "/get_project_info": {
+    "project_name": "FakeOfflineProject",
+    "is_shared": false,
+    "file_count": 2
+  },
+
+  "/list_project_files": {
+    "count": 2,
+    "files": [
+      { "name": "Benchmark.dll", "path": "/FakeOffline/Benchmark.dll", "type": "Program" },
+      { "name": "BenchmarkDebug.exe", "path": "/FakeOffline/BenchmarkDebug.exe", "type": "Program" }
+    ]
+  },
+
+  "/list_scripts": {
+    "count": 1,
+    "scripts": [{ "name": "FakeOfflineScript.java", "category": "Examples" }]
+  },
+
+  "/list_ghidra_scripts": {
+    "count": 1,
+    "scripts": [{ "name": "FakeOfflineScript.java", "category": "Examples" }]
+  },
+
+  "/analysis_status": {
+    "analyzing": false,
+    "program": "Benchmark.dll"
+  },
+
+  "/list_instances": {
+    "count": 1,
+    "instances": [{ "project": "FakeOfflineProject", "pid": 424242 }]
+  }
+}

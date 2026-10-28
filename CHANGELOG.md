@@ -4,7 +4,1712 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
+## Unreleased
+
+Changes on `dev` after 7.0.0.
+
+### Fixed — facade mode compatibility (#527)
+
+- Keep the full tool surface as the default; register the five facade tools only
+  for explicit facade/hybrid mode. Preserve the current CLI options and resource
+  handlers when selecting a surface.
+- Facade calls accept schema parameter aliases and retain parameter descriptions
+  in `ghidra_describe`. Calls use the current error, progress, and write-resource
+  invalidation hooks.
+
+### Security - Docker build verifies the Ghidra download
+
+- `docker/Dockerfile` checks the downloaded Ghidra release zip against
+  `GHIDRA_SHA256` (the SHA-256 from the upstream release notes) before
+  unpacking it. A tampered or truncated download now fails the build
+  instead of installing unverified JARs.
+
+### Fixed — integer and object-array parameters no longer bind lossily
+
+- Integer parameters reject fractional, out-of-range and missing required values
+  instead of truncating them or binding 0. An empty value (`?limit=`) still means
+  "not given" and uses the parameter's default.
+- Object-array parameters reject entries that are not objects instead of
+  silently dropping them.
+- A malformed value is reported after the program resolves, so a missing program
+  is still the first error.
+
+### Fixed — Scorecard push trigger follows the default dev branch
+
+Scorecard's push filter and its test constant still named `main` while the
+repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
+and the existing check against `origin/HEAD` passes on a fresh clone.
+
+### Added — function resources and `/get_change_token`
+
+A function review used to take about five tool calls, and every write forced a re-read.
+The bridge now serves functions and decompilation trees as MCP resources:
+
+| URI | Role |
+| --- | --- |
+| `ghidra://programs` | Discovery root (the sole `resources/list` entry) |
+| `ghidra://program/{program}/index` | Program summary |
+| `ghidra://program/{program}/functions` | `{name, address}` index (capped) |
+| `ghidra://function/{program}/{address}` | The function, rendered as Markdown |
+| `ghidra://function/{program}/by-name/{name}` | Redirect to the address URI |
+| `ghidra://search/{program}/functions/{pattern}` | Name search |
+| `ghidra://program/{program}/changes` | Change token and per-transport delivery caveats |
+| `ghidra://decompile-tree/{id}` | A tree's status, config and search hints |
+
+- **URIs are keyed by address, never by name.** Renaming is the common write, and MCP
+  has no rename notification, so a name-keyed URI would strand a client's cache.
+- **Writes invalidate what they changed.** Every write tool is classified NONE, LOCAL,
+  CALLERS, TYPE or UNBOUNDED, and CI fails on an unclassified one; a struct edit asks
+  `/find_type_users` which functions to invalidate. NONE covers writes no resource shows,
+  `/save_program` above all, which follows nearly every write and would otherwise drop the
+  whole cache. `notifications/resources/updated` is sent before the write's response,
+  because streamable HTTP drops anything addressed to a request whose response has gone.
+  `--stateless-http` refuses `resources/subscribe`, and `--json-response` warns that
+  notifications cannot be delivered.
+- **`/get_change_token`** returns `<saved time>:<session epoch>:<modification number>`;
+  the bridge polls it to catch GUI edits, undo and scripts no write hook sees. Compare it
+  whole: the counter alone restarts at every open.
+- **Bodies are shaped for the model reading them.** A resource body travels inside a JSON
+  string, so a JSON body arrives doubly escaped; the function resource is Markdown
+  (10,131 characters against 18,233 for indented JSON on one bundle, with 336 quote and
+  backslash characters against 2,746). Locals whose name already says their storage
+  (`local_f0`, `uVar7`) are counted rather than listed; the index and search bodies stay
+  JSON but compact, without a per-row URI (`ghidra://program/{program}/functions`
+  234 KB → 90 KB).
+
+### Added — decompilation tree
+
+A program's decompiled C as a file tree an agent searches with its own Grep, Read and
+Glob, so "which functions touch this MMIO page" is one search instead of one tool call per
+function. `decompile_tree_create` registers a tree without sweeping it;
+`decompile_tree_run(action=start|stop)` runs the sweep, which returns in milliseconds;
+`decompile_tree_status` (read-only, so usable in plan mode) and `STATUS.md` on disk report
+progress; `decompile_tree_configure`, `decompile_tree_pin_module` and
+`decompile_tree_delete` manage it. `/decompile_tree_refresh` is an internal route: it
+stays callable over HTTP but is left out of `/mcp/schema` (`@McpTool(internal = true)`),
+and the published "MCP tools" count excludes it. `disassemble_missing` is **off by
+default**; turning it on makes the next sweep disassemble at function entries that still
+lack an instruction (typical PE `.pdata` stubs) and reflow stub bodies — a program write
+routed through the server's threading strategy, not filesystem-only.
+
+- **Each function block carries what `get_functions` returns for it**, one greppable
+  `// key: value` header line per fact (signature, classification, body range, tags,
+  plate and its issues, calls and callers, parameters, locals, labels, comments, xrefs,
+  jump targets) and `// refs:`, every data address the function uses, including
+  literal-pool values and registers reached as base + offset, so `grep 0x40003c0c`
+  finds a register however the C prints it. A real-Ghidra test holds a swept block equal
+  to a fresh `get_functions` result field for field. Each block's `// uri:` line names
+  the function's `ghidra://function/...` resource, which the bridge serves from the next
+  change on.
+- **It stays current.** An observer turns program events into dirty functions (a rename
+  dirties every function that references the symbol, and the old name is searched for in
+  bodies to catch calls through a register or literal pool); a queue splices rebuilt
+  blocks, and undo, redo or a storm of changes triggers a full reconcile. A sweep, a
+  reconcile and a repair converge: a test holds every route to a fresh sweep, file for
+  file. Measured: a callee used 72 times updated everywhere in 1.4 s.
+- **Its status is honest.** `clean`, `spliced` (kept current since the sweep), `stale`
+  (with the reason) and `in_sync`; `close_program(save=false)` marks it stale and the next
+  open reconciles the discarded edits out. A memory-map change (such as
+  `/set_memory_block`) marks it stale, because only a resweep fixes that.
+- **It survives a restart.** Stamps compare the program's saved time and a per-open
+  session epoch, not the modification counter that restarts at every open; trees are
+  re-adopted and reconciled when their program first opens, matched by `program_url`
+  so two projects holding `/fw.bin` never share one.
+- **Exclusions** keep library code out: `tag:` (function tags, FID), `partition:` (a
+  whole compartment) and `range:` (works on stripped binaries). Narrowing deletes the
+  excluded files immediately so Grep cannot lie. Measured full sweeps: a 677-function
+  ARM firmware in 4 s, a 3,230-function driver in 18–28 s, `ls` (25,231) in 669 s.
+
+### Added — `/partition_program`, `/find_type_users`
+
+- **`/partition_program`** groups functions into compartments before anything is
+  decompiled, by qualified names in strings, MMIO page sets, literal locality and address
+  bands, and reports each partition's rule and evidence. On a Windows driver the two
+  library compartments, 42% of the binary, were identifiable from their strings alone.
+  Read-only; it does not write Ghidra's Program Tree.
+- **`/find_type_users`** lists the functions whose decompilation references a data type,
+  or one field of it.
+
+### Performance — `get_functions` opens one decompiler per call (#575)
+
+Every decompile in a `get_functions` call -- each target and each caller decompiled for
+`call_context` -- used to open and dispose its own `DecompInterface` (~238 ms to open, 5-10 ms
+per decompile on an open one), so a 20-function bulk read with call context opened one per
+target plus one per (target, caller) pair. The call now opens one decompiler on first use,
+reuses it for the whole request in single and bulk mode, and disposes it before returning; a
+`fields=` subset that decompiles nothing opens none. Results are kept per entry point for the
+request, so a caller shared by several targets is decompiled once. A decompile that does not
+complete (timeout, dead process, exception) disposes the interface and the next one reopens,
+so one bad function cannot fail the rest of a bulk call. Options and the 12 s per-decompile
+timeout are unchanged, and so is every response field. Measured on the real-Ghidra tier
+(`RequestScopedDecompilerGhidraTest`, 20 leaf targets + 10 shared callers,
+`fields=decompiled_code,call_context`): 14.5 s -> 0.32 s.
+
+### Added — startup project selection
+
+`--project NAME` (or `GHIDRA_MCP_PROJECT`) selects an exact project name before
+initial tool discovery, including when several Ghidra instances are running.
+The flag overrides the environment, and background retries retain the selector.
+Missing or ambiguous matches stay disconnected instead of falling back to another
+project. Discovery checks both transports and deduplicates listeners of the same
+instance; TCP probes send the configured authentication token. Existing auto-connect
+selection is unchanged when no selector is supplied.
+
+### Changed — empty boolean env values mean unset
+
+`GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to
+parse as false because `""` sat in the falsey set. Empty or whitespace now means unset and
+keeps the key's default — the same rule `GHIDRA_MCP_LAZY` already used. Known
+`1/true/yes/on` and `0/false/no/off` spellings are unchanged; each caller still chooses how
+unknown non-empty values behave (default / error / warn) through one `parse_bool` helper.
+
+### Changed — deploy tiers treat `success: false` / `status: rejected` as failures
+
+`_ensure_mcp_ok` (every post-deploy tier that checks an MCP response) used to fail only on
+a truthy `error` field or a body string starting with `"failed"`. Soft failures that arrive
+as `{"success": false, ...}` or `{"status": "rejected", ...}` — the same shapes the bridge
+already treats as tool errors — were ignored, so a tier could exit green after a refused
+write. Those payloads now fail the tier through the shared `tools/mcp_http` client.
+
+### Fixed — one project-path resolver; folder scope and `..` on every site
+
+Caller-supplied project (domain) paths go through `ProjectPaths` (normalize, `file`, `folder`):
+leading-slash policy, rejection of `.`/`..` segments, and `project.folder_scope` no longer
+depend on which tool handled the path. `/list_project_files` listed every folder and file
+whatever the scope; it now lists a folder in the scope or one on the way to it, showing only
+the branch toward the scope. Sites that previously skipped scope (GZF import's target folder,
+`ProjectProgramProvider` import dest / exact-path open) now refuse out-of-scope paths with the
+same text version-control used:
+`Path is outside this server's project-folder scope: /…`. Mutating tools that said
+`Access denied: path is outside the configured project scope.` use that text too. Missing
+files answer `No file at /…` (was `File not found in project: /…` on checkout/checkin).
+
+### Changed — list paging: `limit <= 0` means no limit on four more tools
+
+`/list_function_tags`, `/list_class_members`, `/find_code_gaps`, and `/list_properties`
+now page through `ServiceUtils.paged` (property maps via `pagedWindow` so the iterator
+still skips/takes). Explicit `limit <= 0` is unbounded (the `@Param` default stays each
+tool's own, e.g. 100 for property maps). Responses gain `count`; `/list_class_members`
+reports `total` instead of `total_members`. Documented REJECT limits elsewhere are unchanged.
+
+### Changed — exception error texts no longer read `"null"`
+
+Tool catch tails go through `ServiceUtils.fail` / `failureMessage`: when an exception has no
+message, the response names the exception class instead of the literal `"null"`.
+
+### Changed — write success envelopes go through `Response.success` (+ extras)
+
+Hand-built `{status:"success", message:…}` maps now use `Response.success` /
+`successWithWarnings`. `/rename_variable` always returns that one envelope;
+`warnings` is present only when non-empty. Structured extras still follow
+`status`/`message` (some tools previously put `message` last).
+
+### Changed — structure / enum wrong-kind refusals use one quoted form
+
+`/get_struct_layout` and `/get_enum_values` used to say
+`Data type is not a structure: X` / `Data type is not an enumeration: X` when the name
+resolved to the wrong kind. They now match the write tools:
+`Data type 'X' is not a structure` / `Data type 'X' is not an enumeration`. Not-found text
+is unchanged (`Structure not found: X` / `Enumeration not found: X`).
+
+### Changed — the server resolves programs, addresses and functions before a tool runs
+
+Tool parameters are typed as what they name. `AnnotationScanner` reads the caller's string as
+before and resolves it per call, so programs opened later are found. A name that resolves to
+nothing is answered with the message tools used to return themselves, and the tool never runs.
+
+- **Programs.** 146 tools take the open `Program` ("No program loaded.", "Program not found: …").
+  About 100 compatibility overloads that took a program name, or none, are gone. Three things
+  follow from resolving every program the same way: `switch_program` finds a program the way any
+  tool does (it used to match only programs already open); `run_ghidra_script` and
+  `run_script_inline` report an unknown program before the scripts-allowed check; and
+  `create_folder` lost its `program` parameter, which it never read.
+- **Addresses.** Most address parameters take an `Address` parsed against that program; a bad
+  one is refused with the parse error.
+- **Functions.** 27 tools take the `Function` a reference names: its name, its entry address or
+  any address inside it ("Function not found: …"). 16 of them (`disassemble_function`,
+  `get_function_hash`, the prototype, variable and no-return setters, among others) used to
+  demand the exact entry address. Only `delete_function` and `create_function` still want an
+  exact entry. Since a caller may pass a name or an interior address, every single-function
+  response carries `resolved_function` `{name, address}`, the function the call acted on.
+
+### Fixed — a tree pass's decompiler sees edits made during the pass
+
+The tree decompiles a whole sweep or reconcile pass with one decompiler. The decompile
+process caches the function and symbol data it reads and never re-reads it, so a block
+decompiled after a mid-pass rename or prototype change could show the old name. That decompiler
+now flushes its cache whenever the program changed since it last ran, and only then, so an
+unchanged program keeps the speedup. `rename_variables` no longer runs a throwaway decompile
+after renaming: it flushed a decompiler nobody else used, so it invalidated nothing.
+
+### Fixed — every program write takes the headless write lock
+
+21 tools opened their own transaction inside `runOnUi` or `executeRead`, or on the request
+thread, instead of going through `executeWrite`. On the headless server that skipped the lock
+that serializes writes, so comments, labels, bookmarks, memory blocks, the image base, variable
+renames and types, prototypes and the documentation merge could interleave with any other write.
+They all go through `executeWrite` now, and `WritesTakeTheWriteLockTest` fails on a transaction
+opened inside `runOnUi` or `executeRead`.
+
+- **A tool's own "cannot do that" is a refusal, not an error.** No function there, nothing to
+  disassemble: the write rolls back, the caller gets the message, and neither server logs a
+  stack trace for it, including when the tool runs inside a dry run.
+- **`set_function_prototype` is one unit.** A calling convention that fails to apply rolls the
+  prototype back too, instead of leaving it applied under an error response.
+- **`rename_variables` keeps what its fallback renamed.** When the batch failed and it retried
+  variable by variable, the outer rollback discarded those renames while reporting them done.
+
+### Fixed — batch completeness runs on the request thread
+
+`analyze_function_completeness(addresses=...)` queued each function on the Swing thread
+with `invokeLater` and waited up to 90 s for it: the work ran outside the server lock,
+froze the GUI while it ran, and a timed-out function kept running there after the call
+gave up on it. It now runs on the request thread like the single-function call, bounded by
+the decompiler's own timeout. A function that fails is an `{"error": ...}` entry in
+`results` as before; the `chunk_timeout:` / `chunk_error:` / `chunk_exception:` prefixes
+are gone. `SwingHopsOnlyWhereWindowsAreTest` keeps Swing-thread hops in the classes that
+drive windows. Error messages and comments that still named the Swing thread for work that
+no longer runs there say what failed instead (`Rename failed: ...`, `Write failed: ...`).
+
+### Changed — tool bodies run on the request thread
+
+`ThreadingStrategy.runOnUi` promised the Swing thread but ran on the caller on both servers,
+outside the server lock, and `SwingThreadingStrategy` was never constructed. Both are gone; the
+tools that used it (decompile and analysis reads, save and close, script runs and listings,
+the rename check, the merge dry run) run directly, as they already did. They stay off the
+server-wide lock on purpose: a script run under it would block every other request for up to
+its 30-minute timeout. Results come back from `executeRead`/`executeWrite` as return values
+instead of through `Atomic*` holders; responses are unchanged.
+
+## v7.0.0 - 2026-10-21 — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
+
+**219 tools** — 215 served by the GUI plugin, 200 by the headless server, 196
+by both. 218 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
+only the bridge calls. The advertised surface went from 272 → 251 in the first consolidation
+cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
+7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
+nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
+folds, 211 once both servers shared one set of program-operation names
+(`/load_program`, `/load_program_from_project`, `/project/info` and headless
+`/health` retired), 209 once version control and the CodeBrowser tools
+became shared services (`/server/version_control/checkin` and
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, 209 once `/apply_documentation` replaced
+`/apply_function_documentation` and `/batch_apply_documentation` (53 tools
+removed and 9 added since rc.1, every one named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
+218 with the decompilation tree, `/partition_program` and `/find_type_users`, and
+**219** with `/get_change_token`.
+
+Entries further down quote the catalog as it stood when they landed (251, 253,
+the 235-tool schema recording); the figures above are the current ones.
+
+> **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
+> removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
+> repository on 2026-08-11 and their history belongs there, not in this
+> project's changelog. Nothing was lost — it is in this file's git history —
+> and the entries that remain naming fun-doc are ones where its move-out is
+> the *cause* of a change here (`uv.lock`'s stale dependency group, the
+> release workflows' dangling paths, the benchmark fixture that left with it).
+
+### Fixed — native JSON values reach Java Object parameters through MCP ([#598](https://github.com/bethington/ghidra-mcp/pull/598))
+
+The bridge mapped the schema's `any` type to Python `str`, so FastMCP rejected
+native objects and arrays before dispatch. `apply_data_classification` could
+not receive its required `type_definition` object, and `get_assembly_context`
+could not receive an address array. These bindings now preserve native JSON
+values; existing string arguments remain accepted. The two parameters are now
+advertised to MCP clients with an untyped schema (`{}`); clients with a strict
+schema dialect may need to skip those two tools.
+
+### Fixed — parameter aliases take precedence over omitted defaults ([#599](https://github.com/bethington/ghidra-mcp/pull/599))
+
+FastMCP inserted a canonical parameter's default before the bridge folded
+aliases, so `get_functions(call_context_window=9)` silently sent
+`call_context_lines=3`. Defaults for aliased parameters are now applied after
+alias resolution. An explicitly supplied canonical value still wins, and
+omitting both spellings keeps the upstream default. Array aliases such as
+`apply_documentation(parameters=[...])` no longer lose their value to `"[]"`.
+
+### Fixed — ARRAY classification honors numeric JSON counts ([#600](https://github.com/bethington/ghidra-mcp/pull/600))
+
+`apply_data_classification` handled `count` only as an Integer or string,
+but Gson represents JSON numbers as Double. A request with `count: 64`
+therefore applied a one-element array and reported success; numeric zero and
+negative counts also became one. Numeric counts now use Number conversion
+before the existing positive-count validation. String counts still work.
+
+### Added — decompiled C says which language variant produced it ([#509](https://github.com/bethington/ghidra-mcp/pull/509))
+
+Ghidra's language picker has five columns — processor, endian, size, **variant**,
+compiler. The first three come off the file header and the loader gets them
+right; the variant is the column it *guesses*, and it is the one that changes
+what the bytes mean. `PowerPC:BE:32:default` and `PowerPC:BE:64:VLE-32addr` (VLE)
+decode the same bytes into different instruction streams, so a VLE image opened
+as classic PowerPC decompiles into C that is syntactically perfect and entirely
+fictional. The decompiler reports success, the pseudocode reads plausibly, and
+nothing in the response said which of eleven dialects produced it.
+
+This server never exposed that choice at all. Now:
+
+- **Every response carrying decompiler C is stamped** with `language_id` and
+  `variant` — unconditionally, on every processor. On `get_functions` that is
+  any bundle carrying `decompiled_code` or `call_context` (the callers' decompiled
+  call sites), and in bulk mode **every entry** carries its own stamp, so a
+  bundle lifted out of a bulk response still says what produced it. The stamp is
+  applied in `FunctionFacts.build`, the single producer behind `get_functions`,
+  so any surface that renders that map inherits it. `force_decompile` and both
+  composites are stamped too. A read asking only for metadata
+  (`fields=signature,callers`) carries no stamp: the label travels with
+  decompiler output, not with every read of a function.
+- **A processor whose variants load more than one SLEIGH *decoder* also gets an
+  advisory**: `variant_ambiguous`, `variant_candidates`, and a `variant_notice`
+  sentence built from that processor's own candidates, saying the loader guessed
+  and what to do if the guess is wrong. Absent, not false, on unambiguous
+  processors — a field that is always present and almost always false is one
+  readers learn to skip.
+- **`variant=` is optional on all four C-returning endpoints** — `get_functions`,
+  `force_decompile`, `analyze_function_complete`, `analyze_for_documentation` —
+  **and checked when supplied.** Naming a variant the program is not loaded
+  under is refused (`variant_mismatch`), never answered: the decompiler decodes
+  with the language the program was imported under and cannot be asked for
+  another, so answering would return one dialect's output under a label the
+  caller chose — worse than no answer, because the label makes it look checked.
+  On `get_functions` the check runs ahead of the bulk dispatch and of field
+  selection, so `functions=` is not an unchecked way around it, and a
+  contradicted claim is refused even on a read that asks for no C: every field
+  that endpoint returns was decoded under the program's own language. A full
+  language id (`PowerPC:BE:64:VLE-32addr`) is accepted as well as a bare variant
+  name, and is compared whole, so `PowerPC:BE:64:default` cannot satisfy a 32-bit
+  program on a variant-column match. An unknown name is `unknown_variant`.
+- **`get_language_metadata` reports `variant_ambiguous`, `variant_enumeration_failed`
+  and `available_variants`** (each with `variant`, `language_id`, `description`,
+  the `decoder` it loads, and a `loaded` flag). This is where the legal values
+  are enumerated.
+- **`analyze_function_complete` and `analyze_for_documentation` stamp their
+  pseudocode too, and withhold only that field** on a contradicted claim
+  (`decompiled_code_withheld` says why). Both return `decompiled_code`, so
+  labelling just `get_functions` would have left the same C reachable one tool
+  over with nothing on it — the exact shape of the eviction-guard bypass in
+  `set_global`. Endpoints that decompile internally to derive a score or a
+  field-usage map (`analyze_function_completeness`, `analyze_struct_field_usage`)
+  are untouched: they hand back no pseudocode.
+
+**Why a label and not a required parameter.** The first implementation made
+`variant=` *mandatory* whenever the processor offered more than one variant row.
+Two measurements sank that. It fires on x86 at every width — `default` vs
+`System Management Mode` at 32-bit, `default` vs `compat32` at 64-bit — so every
+ordinary PE and ELF would have had to answer a question about a mode nothing
+loads, on the most-called tool in the catalog. And the confirmation is
+unenforceable: a refusal has to enumerate the legal values or it is an outage,
+which means it names the answer, and the caller — usually a model — re-sends the
+value it was just shown and records a confirmation it never performed. This
+repository already learned that shape from the eviction guard, whose refusal text
+must never name `allow_evict` because a model read the suggestion and used the
+override within one turn; here the override *is* the parameter, so the same fix
+was not available. What remains is the half that carries information rather than
+ceremony.
+
+**Ambiguity counts decoders, not variant rows.** Measured against Ghidra
+12.1.2's `.ldefs` files: of 83 processor/endian/size buckets, 30 hold more than
+one variant but only **19 hold more than one `.sla`**, covering **96 of 177
+non-deprecated languages** rather than 124. All three x86 buckets are in the
+difference (`x86.sla` for `default` and `System Management Mode`; `x86-64.sla`
+for `default` and `compat32`), along with MIPS/64, tricore, Z80, Z180, HC05,
+HC08 and HCS08. What stays flagged is what is worth flagging: PowerPC/BE/32 (ten
+decoders across eleven variants, VLE among them), PowerPC/LE/32, both ARM/32
+buckets, PIC-16, PIC-24, MIPS/32, AARCH64, SuperH, 68000, RISCV and Dalvik. The
+bucket key is `(processor, endian, getSize())` — `getSize()` is the *address*
+size, not the id's middle field, which is why `PowerPC:BE:64:VLE-32addr` (size
+32) shares a bucket with `PowerPC:BE:32:default`.
+
+**The honest limit**, stated rather than left to be found: a shared `.sla` is a
+proxy for "the loader was not choosing between two decoders", not a proof that
+decoding is identical. `x86-16.pspec` sets `addrsize`/`opsize` context defaults
+and `mips64micro.pspec` sets `RELP`, so those same-decoder variants really do
+decode differently — they are simply modes no PE/ELF loader auto-selects.
+Widening the rule to catch them re-admits x86, which is the trade being made;
+the unconditional stamp is what covers the gap. `LanguageVariantsTest` pins both
+directions so the trade cannot be undone by accident. This is detection by the
+reader, not prevention: what would actually prevent a VLE-as-classic-PowerPC
+mistake is a coherence heuristic on the loaded program, which is a separate and
+much larger feature.
+
+Internal Java callers are not checked: the check sits on the MCP boundary, where
+a caller states a belief (`FunctionService.forceDecompileAt` and the internal
+`forceDecompile` overloads). Their output is still stamped, and so are the two
+unrouted C-returning helpers `decompileFunctionByAddress` and
+`batchDecompileFunctions` — the latter now nests its results under `functions`
+beside the stamp, because its keys are references the caller chose.
+
+**Tested at three levels.** The decision table is pure and Ghidra-free in
+`LanguageVariants`, covered offline by `LanguageVariantsTest` (28 cases). The
+measurement is covered by `LanguageVariantDecoderGhidraTest`, which asks Ghidra's
+real language table rather than a reading of its `.ldefs`: a release that gave
+`System Management Mode` its own `.sla` would put the advisory back on every
+32-bit Windows binary, and nothing else would notice. What a caller actually
+receives is covered by `DecompileVariantLabellingGhidraTest`, which drives
+`get_functions` (single, bulk, `call_context`), `force_decompile`, both
+composites and `get_language_metadata` on real x86 and PowerPC programs with the
+real decompiler — in CI's real-Ghidra tier, without a deploy. And
+`DecompiledOutputIsStampedTest` ratchets, from source, every method in the tree
+that obtains decompiler C: a new one fails until someone declares whether it
+reaches a caller and, if it does, stamps it. Its first version listed the two
+files it knew about, which is exactly how the C moving into `FunctionFacts`
+would have walked past it; it now reads every main source file. Live behaviour
+is pinned by `tests/integration/test_decompile_variant_labelling.py`
+(skips itself against a server built before this) and by three curated
+conformance cases on the Benchmark fixture.
+
+### Changed — Diablo II–specific content removed (#562)
+
+This project is a generic Ghidra MCP server; game-specific tooling lives elsewhere.
+
+- **The 22 `debugger_*` proxy tools are off by default.** They used to register on
+  every Windows host, pointing at an external debugger server most users do not run,
+  and mixed silently with Ghidra's own TraceRmi debugger tools (#554). They now register
+  only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`;
+  `GHIDRA_DEBUGGER_TOOLS=0` still wins over a set URL.
+- **Removed the five `oracle_*` tools** (`bridge_mcp_ghidra/oracle.py`). They proxied an
+  in-process oracle inside one specific game build and registered by default on Windows.
+- **Plate validation no longer expects a `Source:` file reference.** The check suggested
+  a game-specific source path and counted as an issue on every plate in every binary.
+- **`ghidra_scripts`:** the `Diablo 2.*` script menus are now `GhidraMCP.*`; five
+  game-specific scripts were removed (`ArgumentsRenamer.py`, `Repair_ArgumentsRenamer`,
+  `Analyze_DetectAndApplyConventions`, `signfunction.py`, `Export_FunctionsToJSON`);
+  `Analyze_FixFunctionParameters` infers only standard x86 calling conventions; a
+  hard-coded stop address that truncated eight scripts on any other binary is gone; and
+  reports go to `$GHIDRA_MCP_REPORTS_DIR` (default `~/ghidra-mcp-reports`) instead of a
+  maintainer's local path.
+- Removed `workflows/` and three session-note docs; tool descriptions, docs and
+  `.env.template` use generic examples.
+
+### Changed — `apply_documentation` replaces both documentation writers
+
+- **`apply_documentation` is the one tool for writing a function's documentation.**
+  It merges `/apply_function_documentation` (a JSON *string* read with a flat regex
+  extractor, whose failures to rename, retype or set a convention were only logged) and
+  `/batch_apply_documentation` (typed fields, but no labels, offsets or return type). It
+  takes the fields `get_function_documentation` exports (`target_address`,
+  `function_name`, `parameters`, `comments` and `labels` by `relative_offset`,
+  `pre_comment`/`eol_comment`) plus prototype, variable types and renames, and applies
+  them through the same services the single tools use, so the naming rules hold and every
+  step reports its own result. Pass the fields at the top level for one function or
+  `entries=[...]` for many: each entry gets its own result, one failing does not stop the
+  rest, and `score` defaults to on for one function and off for many. Exported
+  placeholders (`param_N`, `undefined*`) are skipped, so an export applies back without
+  reverting anything. It is a shared service and runs on headless too; only `goto` needs
+  a window. **Breaking:** `/apply_function_documentation` and
+  `/batch_apply_documentation` are gone (see the migration guide).
+
+### Fixed — check-in dry run, firmware memory permissions, shared-project paths
+
+- **`checkin_program(dry_run=true)` reports instead of refusing.** A check-in is not a
+  transaction, so the scanner's rolled-back dry run cannot cover it. The tool now takes
+  `dry_run` itself and reports `would_save`, `would_close`, the version and
+  `modified_since_checkout` without saving, closing or checking in anything. It also moves
+  from the `project` group to `server`, beside checkout and undo.
+- **`/set_memory_block`** changes an existing block's read/write/execute/volatile flags.
+  Firmware loaders often mark flash writable, so the decompiler reads every literal-pool
+  word as a variable (`iVar2 = DAT_08016e58;`) instead of the peripheral base it holds.
+  On a 339-function firmware, marking flash read-only took those pool reads from 1123 to 4
+  and printed the bases as constants or their labels.
+- **Shared projects default to `~/ghidra-shared-projects`.** Ghidra 12.1.3's
+  `ProjectLocator` rejects a path element starting with `.`, so the old
+  `~/.ghidra-mcp/shared-projects` default made every shared-project open fail.
+- **Debugger tools resolve `program` like every other tool**, so an unknown or ambiguous
+  name is an error naming the candidates instead of falling back to the current program.
+- **The bridge keeps loaded tool groups across a Ghidra restart.** It re-registered only
+  the default groups, so the next call to a `load_tool_group()`-ed tool returned
+  "Unknown tool" mid-task.
+- **Catalog parameters are derived, not accumulated.** `RegenerateEndpointsJson` takes
+  parameter lists from the annotations (names plus aliases) and from
+  `ManualToolDescriptors` for hand-registered routes; the old union kept every name ever
+  listed, so a parameter removed from a tool was advertised forever. Catalog descriptions
+  that had drifted from their tools are refreshed, and the conformance schema snapshot
+  records `destructive`/`read_only` again.
+- **91 dead wrapper methods are gone from `GhidraMCPPlugin`** (~790 lines), left behind
+  when their routes moved into the shared services.
+
+### Fixed — headless scripts get the project; failed scripts say why
+
+- **A script run by the headless server had no project.** Its state was built with a null
+  project, so `getState().getProject().getProjectData()` threw a `NullPointerException` in any
+  script that opened another project file. Found live: an agent's label-sync script died on
+  that line.
+- **A failed script reached the caller as "the server reported failure".** The exception was
+  only in `console_output`, which the bridge did not report, so the agent guessed a cause
+  ("scripts may not open server files") and abandoned the approach. A failed
+  `run_script_inline` / `run_ghidra_script` now carries `error`: the exception and the
+  script's own line (`NullPointerException: ... (SyncLabels2.java:15)`), and the bridge quotes
+  the end of `console_output` for any failed call that gives no other reason.
+- **A script on a program with no memory started at a null location.** The runner built
+  `ProgramLocation(program, program.getMinAddress())`, which is null for such a program, and
+  Ghidra reports that as an error (a dialog in the GUI). It now runs with no location. Found by
+  auditing for the same shape as the missing project: a null handed to Ghidra where the server
+  holds, or can check for, the real value. The other constructions, domain-object opens and
+  tool-manager lookups came out clean.
+
+### Changed — shared services on both servers (version control, lifecycle, GUI tools, batch docs)
+
+The GUI plugin and headless server still built overlapping logic in the plugin class,
+`GhidraServerManager`, and hand-registered routes. The remaining duplication moved into
+annotated services both scanners share, and several routes that used to exist on only one
+server now register on both.
+
+**Version control** — `VersionControlService` owns checkout, undo, add, and check-in.
+The duplicate `/server/version_control/checkin` route is retired; use `/checkin_program`.
+
+**Server lifecycle** — `/server/authenticate` and `/exit_ghidra` are `@McpTool` methods on
+`ServerLifecycleService` on both servers instead of GUI-only hand routes.
+
+**GUI tools** — CodeBrowser navigation and running-tool listing live in `GuiToolService`.
+`/tool/launch_codebrowser` is retired; open a program with `/open_program` (and optional
+CodeBrowser launch via project open options) instead of a separate launch route.
+
+**Batch documentation** — `/batch_apply_documentation` is served by
+`DocumentationBatchService` on both servers.
+
+**Project archive and GZF/GAR** — export, import, archive, and restore project routes are
+served by `ProjectLifecycleService` on the GUI as well as headless (catalog `servers`:
+both).
+
+**UI threading** — services that must touch Swing go through
+`ThreadingStrategy.runOnUi` (the Swing thread on the GUI, the calling thread headless)
+instead of calling `SwingUtilities` directly; the analyst's windows are reached through
+`Workbench`. Note that the plugin is still wired with `DirectThreadingStrategy`, not
+`SwingThreadingStrategy`, so today `runOnUi` runs on the calling thread on the GUI too;
+`Workbench` and `GuiToolService` hop to the Swing thread themselves.
+
+**Ghidra Server repositories** — headless `open_project` accepts `ghidra://` repository
+URLs via `SharedProjectLocator` (local `.gpr` paths still use the file-root allow-list on
+both servers).
+
+**Dead code** — reference analysis removed unused helpers in `ServiceUtils`,
+`XrefCallGraph`, and `DocumentationHashService`; headless POST bodies are bounded
+(`SecurityConfig`, `HeadlessPostBodyTest`).
+
+**Every response says which program it acted on.** Of 12 sampled responses, 2 named
+their program, so a survey of 17 programs could return seventeen identical readings
+without anyone noticing. The scanner now stamps `"program"` on every object payload
+whose request resolved one, unless it already carries `program` or `program_name`. HTTP
+threads are pooled, so the resolved program is cleared on entry and in `finally`; a
+request that resolves nothing never inherits the previous one's label.
+
+**Edits to a file that was not checked out vanished, and every tool said success.** A
+versioned file that is not checked out opens as an in-memory copy that saves nowhere.
+`open_program` now reports `read_only: true` with the reason, each edit carries the
+reason in `warnings`, `save_program` names the cause and the remedy, and
+`close_program(save=true)` refuses and asks for `save=false`. A second checkout answers
+`already_checked_out` instead of Ghidra's "private file exists", and a checkout reopens
+an unedited copy on itself (`reopened`) or reports `reopen_required` for an edited one.
+
+**`dry_run` stays refused on the moved tools.** Version control, project lifecycle,
+`/exit_ghidra`, `/server/*` and `/tool/goto_address` are now annotated tools, so they
+declare `dryRun = false` like the routes they replace; a rollback cannot undo any of
+them.
+
+| retired | use instead |
+| --- | --- |
+| `/server/version_control/checkin` | `/checkin_program` |
+| `/tool/launch_codebrowser` | `/open_project` (project/CodeBrowser launch options) |
+
+Catalog: **209** endpoints — **205** on the GUI plugin, **190** headless, **186** on both,
+from 211 / 203 / 189 / 181 (two routes removed, four archive/import routes gained `gui`
+in `servers`, and `/batch_apply_documentation` and `/server/authenticate` gained
+headless).
+
+### Changed — headless and GUI: one program model, one set of names, one health surface
+
+The GUI had one model of programs; headless had another. Headless kept a map, keyed by bare
+filename, of programs someone had explicitly loaded. So on a headless server
+with the program sitting in its project:
+
+- `get_metadata(program=/fw/gnutrue)` answered `Program not found`.
+- `close_program save=true` released without saving.
+- `switch_program` answered success while doing nothing.
+
+**One program model.** Both providers now extend `ProjectProgramProvider`, a
+path-keyed LRU cache over the project that opens a program the first time any
+endpoint names it. The cache holds at most `GHIDRA_MCP_MAX_CACHED_PROGRAMS`
+programs (default 8, minimum 2); set it in a systemd unit's `Environment=` to
+change it. The GUI adds only its CodeBrowser layer on top.
+
+Resolution is one matcher on both servers, in this order: exact path, exact
+name, the project, and only then a unique name substring. A name two versions
+share is an error listing the candidates, never the first hit. `close_program
+save=false` now really discards on the GUI too; the cache release used to save
+regardless. One `ProgramSaves` helper replaces three save paths that had
+drifted apart.
+
+**One name per operation**, served by both servers, with the old names retired
+and no aliases:
+
+| kept | retired |
+| --- | --- |
+| `/open_program` (now POST with a JSON body) | headless `/load_program_from_project` |
+| `/import_file` | headless `/load_program` |
+| `/get_project_info` | GUI `/project/info` |
+| `/checkin_program` | (was headless-only) |
+
+- `/open_program`: when the path is not found, the failure lists the paths the
+  project does contain and whether it is bound to a server. A program that could
+  only be opened read-only reports `read_only` with the reason. That reason
+  matters: a stale SLEIGH language opens read-only, so `success` alone no longer
+  means the program is current, and `upgrade_project_language --verify` reads
+  the reason.
+- `/import_file`: opens a same-named file already in the folder rather than
+  failing on the duplicate (`reused_existing`).
+- `/checkin_program`: saves, then closes every instance, CodeBrowsers included,
+  before checking in.
+- `/server/status`: means "is a Ghidra Server connected" on both servers. The
+  GUI used to answer `connected: true` for any open project.
+- Headless `/exit_ghidra`: saves and reports what it saved, as the GUI's does.
+
+**One health surface.** `McpHttpServer` builds `/check_connection`,
+`/mcp/health` and `/mcp/instance_info` for both servers:
+
+- `/check_connection` is JSON: `{status, server_kind, version}`, plus
+  `program` when one is current.
+- `instance_info` names the kind, version and endpoint count.
+- `/health` is retired.
+- `VersionInfo` moved to core, so headless stops reporting a hard-coded
+  `7.0.0-headless`.
+- The doctor tool used to tell the servers apart by sniffing two English
+  banners. It now reads `server_kind`, and asks both kinds the same questions.
+
+**Construction.** The shared service set is built once, by `CoreServices`, for
+the plugin, the headless server and the offline tests. `HeadlessEndpointHandler`
+is gone: about 2,150 lines, of which five small route bodies were live. Two of those
+bodies moved to `@McpTool`s:
+
+- `/list_projects` and `/delete_project` now apply the file-root allow-list they
+  skipped.
+- `/configure_analyzer` now reports an unknown analyzer instead of `success:
+  true`, and is served by both servers.
+
+The GUI schema also stopped listing every hand-coded route twice.
+
+### Changed — one HTTP server for every transport
+
+The GUI plugin ran two HTTP stacks, TCP and the Unix socket, each wiring its own services,
+so a route could exist on one and not the other: emulation, the debugger, `/prompt_policy`
+and the hand-coded GUI routes were missing from the socket the bridge prefers, and the GUI
+schema listed every hand-coded route twice. The headless server had no Unix socket.
+
+`McpHttpServer` now serves GUI TCP, GUI UDS, headless TCP and headless UDS from one service
+set per server, so both transports of a server give the same answer. Services ask the
+`ProgramProvider` instead of checking which provider they were given. The unused transport
+abstraction is deleted.
+
+### Changed — one call reads a function: `/get_functions` replaces nine readers
+
+Reviewing a function took five round trips (`decompile_function`,
+`get_function_variables`, `get_function_callers`, `get_comment`, `get_function_xrefs`),
+each paying for its own lookup, and most for their own decompile. `/get_functions`
+returns the whole picture in one call, for one function (`function=`, a name or an
+address) or up to 20 (`functions=`, comma-separated).
+
+- **`fields=` picks what comes back, and what it costs.** signature, classification,
+  return type, entry point and body range, decompiled code, plate comment (with the
+  structural issues `NamingConventions` finds in it), comments of every kind, labels,
+  tags, parameters, locals, callers, callees, call context, xrefs, disassembly, jump
+  targets and `refs`. Omitted or empty returns everything. A selection that needs no
+  decompiled text (callers, parameters, labels, …) does not decompile at all.
+- **Decompiled code shows EOL comments** (`// note` above the statement), so a note
+  written with `set_comment(type=eol)` appears in the code read back. Scoped to this
+  endpoint through a new options hook on `ServiceUtils.createConfiguredDecompiler` /
+  `FunctionService.decompileFunctionNoRetry`: `analyze_function_completeness` counts
+  comment lines in the shared path's output, and its scores are unchanged.
+- **Call context is a window**, `call_context_lines` (3 by default, 1 to 21) centred on
+  each call site, with indentation kept, because the guard and the use of the result are
+  on the neighbouring lines. It costs no extra decompilation.
+- **Storage names the register.** Locals printed the raw varnode address
+  (`register:00001200:8`); they now read `RDI:8`, and p-code temporaries omit the field.
+- **`refs`** lists the absolute addresses a function uses: data references, the values of
+  literal-pool words (`value<word`, with the word they were loaded from), and the memory
+  the decompiled code reads and writes, so a register reached as base + offset is listed
+  by its own address.
+- **Addresses outside the default space are `space:hex`** (`OVL:00001000`) in every field,
+  so two functions at one offset in different spaces stay distinct; the default space
+  stays bare hex (`AddressKeys`).
+- A decompile failure carries its reason (`decompile_error`); `revision` reports the
+  program's change token (`ProgramRevision`: saved time, a per-open epoch and the
+  modification counter, so it differs across a reopen even when the counter does not).
+
+Removed, each a slice of the same payload:
+
+| Tool | Now |
+| --- | --- |
+| `decompile_function` | `get_functions(fields=decompiled_code)`; `functions=` for many |
+| `get_function_by_address` | `get_functions(fields=signature,entry_point,body_start,body_end)` |
+| `get_function_variables` | `get_functions(fields=parameters,locals)` |
+| `get_function_xrefs` | `get_functions(fields=xrefs)` |
+| `get_function_callers` / `get_function_callees` | `get_functions(fields=callers)` / `(fields=callees)` |
+| `get_function_labels` | `get_functions(fields=labels)` |
+| `get_function_signature` | `get_functions(fields=signature)` for the prototype |
+| `get_function_jump_targets` | `get_functions(fields=jump_targets)` |
+
+The deploy-regression benchmark reads functions through `/get_functions` too. The
+structural metrics only `/get_function_signature` returned (`basic_block_count`,
+`cyclomatic_complexity`, instruction count, immediate values, string constants) are no
+longer asserted; `tests/fixtures/benchmark/regression/__schema__.md` says so per key.
+
+### Changed — one parameter, and one meaning, for "which function" ([#566](https://github.com/bethington/ghidra-mcp/pull/566))
+
+Function-scoped tools spelled the same locator four ways (`address`, `name`,
+`function_name`, `function_address`), five carried two of them at once, and two
+resolvers disagreed about what a reference meant.
+
+- **One parameter.** Every tool that identifies a function takes `function`, a name or an
+  address. The old spellings stay accepted as aliases, published once in `/mcp/schema`
+  and `tests/endpoints.json`. Tools that only ever parsed an address now also accept a
+  name, through `ServiceUtils.resolveFunctionAddress`; an address behaves exactly as
+  before. `audit_globals_in_function` parsed its argument as an address before resolving
+  it, so a name was rejected.
+- **One rule.** `FunctionRef` had a case-insensitive fallback and
+  `ServiceUtils.resolveFunction` did not, so a name in the wrong case worked in the
+  call-graph tools and failed in the function tools; neither noticed a name two functions
+  share; an address-first order sent a function named `add` or `dead` to whatever sat at
+  `0xadd`; and a miss said one of seven things. `ServiceUtils.getFunctionOrError` is now
+  the only resolver: an `0x` or `space:offset` value is an address; a bare token that
+  exactly names a function is that function; otherwise an address; otherwise a
+  case-insensitive name, only when nothing matched exactly. A shared name is an error
+  listing the addresses (a non-thunk beats a thunk), and a miss says what was tried.
+  `FunctionRef` is gone.
+- **Declared once.** `paramType = Param.FUNCTION_REF` marks a name-or-address parameter
+  and implies the standard aliases in one order; 25 endpoints had repeated the list by
+  hand, in two orders. `batch_rename_function_components` keeps only `address` and
+  `function_address`, because its own `function_name` parameter is the new name.
+- **The bridge leaves names alone.** It normalises only `paramType = address`; a name
+  passed where an address was also accepted used to reach the server as `0x<name>`.
+- Also: `batch_rename_function_components` looked the return type up by exact path, so
+  `int` or `char*` was skipped while the call reported success; it now refuses an unknown
+  type before writing anything.
+
+### Changed — fewer listing, xref, tag, and utility tools
+
+Further consolidation on the same 7.0.0 line: one search tool, one program
+listing tool, bulk xrefs as a parameter, tags carried on function reads, seventeen
+small tools folded into siblings, version identity on `/mcp/health`, and one GUI
+cursor tool.
+
+- **`/find_functions`** replaces five listing/search tools (`list_functions`,
+  `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`,
+  `search_functions_by_tag`). Tag filters and name patterns share one surface;
+  results include each function's `tags` when present.
+- **`/list_program_items`** with `kind=` replaces eight list-* endpoints (classes,
+  methods, namespaces, imports, exports, segments, data items, external
+  locations).
+- **`/get_xrefs_to`** accepts `addresses=` (comma-separated) for the old bulk xref
+  scan; `get_bulk_xrefs` is gone.
+- **Function tags** are a field on `/get_functions` (`fields=tags`) and a filter on
+  `/find_functions` (`tag=`); `get_function_tags`, `search_functions_by_tag`, and
+  `create_function_tag` as a standalone attach path are removed (definitions still
+  via `list_function_tags` / `add_function_tag`).
+- **Fifteen tools** folded into siblings (struct/type helpers, `find_data_types`,
+  comment/hash bulk modes, debugger step kinds, program options/properties) — see
+  `docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` "Folds after the
+  consolidation".
+- **`/get_version` is gone.** `/check_connection` returns
+  `{status, server_kind, version}` on both servers, and `/mcp/health` carries the
+  nested `version` block plus pool and memory detail. (This pass first moved the
+  version onto `/mcp/health` and headless `/health`; the server-model change
+  above then retired `/health` and gave both servers the same identity routes.)
+- **`/get_ui_cursor`** (`type=address|function|selection|program|all`) replaces the
+  four `get_current_*` tools; headless reports unavailable facets with reasons instead
+  of faking a GUI cursor.
+
+| Removed | Use instead |
+| --- | --- |
+| `list_functions`, `list_functions_enhanced`, `search_functions`, `search_functions_enhanced`, `search_functions_by_tag` | `find_functions` (`tag=` for the last) |
+| `list_classes`, `list_methods`, `list_namespaces`, `list_imports`, `list_exports`, `list_segments`, `list_data_items`, `list_external_locations` | `list_program_items(kind=…)` |
+| `get_bulk_xrefs` | `get_xrefs_to(addresses=…)` |
+| `get_function_tags` | `get_functions(fields=tags)` |
+| `create_function_tag` | `add_function_tag` (attaching creates the tag; `tag_comments` describes a new one) |
+| `get_version` | `check_connection` (read `.version`) |
+| `get_current_address`, `get_current_function`, `get_current_selection`, `get_current_program_info` | `get_ui_cursor(type=…)` |
+| `batch_get_comments` | `get_comment(addresses=…)` |
+| `create_array_type`, `create_pointer_type`, `create_typedef` | `create_derived_type(kind=…)` |
+| `embed_struct_field`, `modify_struct_field_type` | `modify_struct_field` |
+| `get_bulk_function_hashes` | `get_function_hash` (omit `function` for all) |
+| `list_data_types`, `list_data_type_categories`, `search_data_types` | `find_data_types` |
+| `list_option_groups` | `get_program_options` |
+| `list_property_maps` | `list_properties` |
+| `debugger/step_into`, `debugger/step_over`, `debugger/step_out` | `debugger/step(kind=…)` |
+
+`apply_function_documentation` and `batch_apply_documentation` stay separate tools
+in 7.0.0. Merging them into one `apply_documentation` was deferred; the shared
+`DocumentationBatchService` wiring it waited on has since landed (see the
+shared-services entry above).
+
+### Fixed — writes that lost work or reported success for what did not happen ([#569](https://github.com/bethington/ghidra-mcp/pull/569))
+
+- **A nested write no longer rolls back the enclosing transaction.** Ghidra nests by
+  counting entries on one transaction, so an inner `commit=false` aborted everything the
+  outer owner had done. Endpoints nest by design (`apply_function_documentation` drives the
+  rename and comment paths) and every script runs inside the script manager's transaction;
+  a probe script that rolled back its own write discarded a rename, two comments and a
+  struct made before it. All write sites go through `WriteTx`, which joins an open
+  transaction instead of nesting one. `dry_run` inside an open transaction is refused,
+  since it cannot undo only its own part.
+- **A failed transaction end no longer leaks the headless write lock.** An exception from
+  `endTransaction` skipped the unlock, so every later write that takes the lock
+  (`rename_function`, `batch_rename_function_components`, …) waited forever.
+- **`dry_run` is refused where a rollback cannot undo the effect.** It is implemented as a
+  rolled-back program transaction, but was offered to every write tool:
+  `checkin_program(dry_run=true)` checked in for real. `@McpTool(dryRun = false)` marks the
+  35 tools whose effect is elsewhere (save, close, open, check-in, project and file
+  operations, scripts, analysis, the debugger, archive posts); the scanner refuses before
+  anything runs.
+- **Headless saves before it closes.** Closing a modified program on shutdown or project
+  switch discarded its edits; it now saves to the local working copy first (check-in stays
+  explicit), and the shutdown hook runs before Ghidra disposes its databases, so the save
+  has something to write to.
+- **`import_program(overwrite=true)` deleted the new import.** `setName` returns the renamed
+  file and the old handle names the path the import then takes; deleting through it removed
+  the import, kept the backup, and reported success.
+- **Opening or saving an unedited program no longer writes it.** `open_program` stored the
+  "do not ask to analyze" flag on every open and `save_program` saved with nothing to save,
+  so a checked-out file with no edits read `modified_since_checkout=true`. `save_program`
+  reports `saved: false`; `save_all_programs` lists them as `unchanged`.
+- **Clearing a comment removes it** instead of storing an empty record that the decompiler
+  rendered as a bare `//` line.
+- **`exit_ghidra` exits Ghidra.** It saved and closed every tool but left the front end
+  and the JVM running, with the servers stopped.
+- **Emulation, the debugger and `/prompt_policy` are served on the Unix socket**, which the
+  bridge prefers; they were only on the plugin's TCP server.
+- **`rename_symbol` takes `strict_mode`** (`enforce`/`warn`/`off`) per call, like
+  `rename_function`, so a deliberate name outside the convention (a datasheet register
+  name) can be applied; a refusal names the override.
+
+### Changed — the bridge follows the MCP protocol where it used to approximate it ([#553](https://github.com/bethington/ghidra-mcp/pull/553))
+
+Measured against the spec and against what real clients do with each field.
+
+- **Failures set `isError`.** Every failure — `{"error": ...}`, a naming refusal
+  (`{"status": "rejected", ...}`), a failed load (`{"success": false, ...}`), a
+  transport error — used to come back as an ordinary result, so a client
+  branching on `isError` saw every call succeed. Detection stops at the top level:
+  a per-entry error inside a bulk result is still a successful call. A refusal
+  quotes the server's message and suggestion, not just its code.
+- **Every tool declares `readOnlyHint` / `destructiveHint`.** `@McpTool` gained
+  `access = ToolAccess.READ_ONLY | WRITE | DESTRUCTIVE`; the scanner publishes it
+  in `/mcp/schema` and the bridge maps it onto the tool annotations, as do the
+  static, debugger and oracle tools. Declared per tool, never inferred from the
+  HTTP method: `/switch_program`, `/save_program` and `/open_program` were GETs
+  that mutate. Without it, Claude Code prompted for every tool in plan mode and
+  would not run any of them concurrently.
+- **No false capabilities.** The blanket `outputSchema {"result": string}` is
+  gone, and `prompts` / `resources` are no longer advertised while empty.
+- **Progress while a call is in flight.** A call whose client sent a
+  `progressToken` gets a notification every 5 seconds, sent with the request id
+  so a POST-only streamable-http client actually receives it.
+- **Transport fixes.** A bare `OPTIONS /mcp` is answered `204` with the real
+  `Allow` list (#399), and session-less requests no longer each leave a session
+  behind: 50 bare `OPTIONS` plus 50 session-less pings used to leave 100
+  permanent sessions; they now leave none.
+- **New, opt-in:** `GHIDRA_MCP_INBOUND_TOKEN` requires `Authorization: Bearer`
+  on the HTTP transports (a non-loopback bind without it warns);
+  `--json-response` and `--stateless-http` expose the SDK's two
+  streamable-http modes; `--tools-page-size N` pages `tools/list`.
+- Also: `run_script_inline` no longer poisons its script directory with a
+  failed caller-named class that Ghidra replayed onto every later script's
+  output, and refuses to overwrite a hand-written script of the same name; an
+  offline test fails when an annotated service is missing from the test
+  `ServiceFactory`, so a service can no longer sit outside the parity checks
+  unnoticed.
+
+### Added
+
+- **Transport-aware doctor mode** for `tools/ghidra_server_health_check.py`.
+  `--mode health` remains the original single `/check_connection` probe.
+  Opt-in `--mode doctor` adds bounded, read-only checks for plugin connection,
+  GUI versus headless health routing, `/mcp/schema`, and an optional MCP
+  `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
+  or mutate Ghidra/project state. Health-route selection is checked against
+  the `servers` field in `tests/endpoints.json`.
+- **Doctor mode fails fast when nothing is listening.** A refused
+  `/check_connection` is not retried, and the later instance, health, schema,
+  and MCP probes are not run. Timeouts and unexpected HTTP statuses still use
+  the existing retry budget.
+
+### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
+
+`FunctionManagerDB.doRemoveFunction` iterates a function's own tag set while
+removing tags from it — a Ghidra internal, not ours to patch — so
+`deleteFunctionAtAddress` calling `removeFunction` on a tagged function threw
+`ConcurrentModificationException` every time (`HashMap$KeyIterator.next` <-
+`FunctionManagerDB.doRemoveFunction` <- `FunctionSymbol.delete` <-
+`FunctionManagerDB.removeFunction`). Found while clearing tagged funclet
+functions out of a live project; the previous workaround was two calls —
+`/remove_function_tag` with every tag, then `/delete_function`. It now
+detaches the function's tags itself, via the same `func.removeTag(name)` call
+`/remove_function_tag` already uses, before calling `removeFunction`, so
+Ghidra's internal loop has nothing left to iterate. The response now reports
+`detached_tags`.
+
+A second, independent `ConcurrentModificationException` hit every `dry_run`
+delete, tagged or not, even after the fix above. `AnnotationScanner`'s
+dry-run wrapper opened its transaction directly via `program.startTransaction`
+on the calling (HTTP) thread, while the wrapped write's own
+`threadingStrategy.executeWrite` dispatched the real work to a *different*
+thread — the Swing EDT in GUI mode, via a separate
+`SwingUtilities.invokeAndWait` — nesting a transaction opened by one thread
+inside one opened by another. The dry-run wrapper, including the transaction
+it opens, now runs entirely through `threadingStrategy.executeWrite`, so it
+lands on the same thread the wrapped write's own nested `executeWrite` call
+detects (`SwingUtilities.isEventDispatchThread()`) and reuses in place, with
+no second dispatch. `AnnotationScanner` gained a `ThreadingStrategy`
+constructor parameter for this; the two varargs constructors kept for
+existing callers and offline test fixtures default to a same-thread fallback,
+so no existing call site needed to change.
+
+Covered by `FunctionServiceDeleteFunctionTest` (tagged and untagged deletes)
+and `AnnotationScannerOfflineTest`'s
+`testDryRunDeleteFunctionOpensItsTransactionOnlyInsideTheThreadingStrategy`,
+both of which fail against the previous behaviour — the former with a real
+`ConcurrentModificationException` from a live-view tag set, the latter via a
+mocked `Program.startTransaction` that throws if called outside
+`executeWrite`.
+
+### Added — two endpoints, after the consolidation pass
+
+Both landed in the 7.0.0 cycle after the 272 → 251 consolidation, which is why
+rc.1 shipped 253 rather than 251. `/batch_get_comments` was folded into
+`get_comment(addresses=…)` after rc.1; `/list_shadowed_globals` remains.
+
+- **`/list_shadowed_globals`** (GET, `listing`) — named global DATA symbols
+  that have no type of their own because a larger unit starting earlier covers
+  them. It exists because **`/list_globals` structurally cannot show this
+  population**: it resolves the *containing* data unit, so a swallowed global
+  reports the eater's type and renders as perfectly typed in every panel.
+  Corpus-wide, 539 of 540 such globals were invisible to every dashboard read,
+  each hard-capped at 79 by the untyped ceiling and unable to band
+  COMPLETE_80. Each record names the container that swallowed it, so the
+  answer is not just "this is untyped" but "this is what ate it". Its symbol
+  gates are *shared* with `listGlobals`, not copied — two views of "the
+  globals in this binary" disagreeing on their denominator is the exact bug
+  class it was built to expose.
+- **`/batch_get_comments`** (GET, `comment`) — the read-side counterpart to
+  `batch_set_comments`: all five comment kinds at many addresses in one call,
+  same per-address shape as `get_comment`. `only_with_comments=true` omits
+  addresses with no comment at all, which is the common case for a corpus
+  sweep where most functions are undocumented and only the documented subset
+  is interesting.
+
+### Added — the MCP bridge ships as a container
+
+See "the MCP bridge is now part of the Docker stack" below
+([#522](https://github.com/bethington/ghidra-mcp/pull/522)): `docker compose
+up -d --build` now brings up `ghidra-mcp` on `:8089` **and** `ghidra-mcp-
+bridge` on `:8081` speaking MCP over streamable-http at `/mcp`.
+`docker/Dockerfile.bridge` existed and worked before this; nothing referenced
+it, so the stack came up with a REST server and no MCP endpoint at all. A
+Dockerfile nothing builds is a file, not a deployment.
+
+### Housekeeping
+
+- **One published tool count, derived from the catalog
+  ([#525](https://github.com/bethington/ghidra-mcp/pull/525)).** Six surfaces
+  disagreed with `tests/endpoints.json` and with each other — 272, 267, 251,
+  243, 225/175/183/196. All now derive from the catalog, and each says *which*
+  count it is (`extension.properties` and `@PluginInfo` describe the GUI
+  extension, so they carry the GUI plugin's count — 239 then, 205 now — not the
+  catalog's). `tests/unit/test_published_counts.py`
+  pins every one of them with no fallback: an unmatched marker fails rather
+  than passing quietly. It also caught a **control character shipping since
+  v5.17.0** — a bulk count bump had rewritten `Provides 256 MCP tools for` as
+  `Provides 267<SOH> for` in `extension.properties` and `AGENTS.md`, so Ghidra's
+  *Install Extensions* dialog rendered a SOH byte and a sentence with no noun.
+- **Gradle is the documented default
+  ([#528](https://github.com/bethington/ghidra-mcp/pull/528)).** Every runbook
+  led with Maven. Gradle now leads, with the three genuinely Maven-only
+  commands named as such: the `RegenerateEndpointsJson` catalog regenerator
+  (Gradle cannot pass `-Dregenerate` into the forked test JVM — it exits BUILD
+  SUCCESSFUL having regenerated nothing), the JaCoCo coverage gate, and the
+  `headless`/`docker` build profiles. CI still builds and gates with Maven, so
+  it is a peer, not a fallback.
+- **Every removed tool is proved to have a successor
+  ([#526](https://github.com/bethington/ghidra-mcp/pull/526)).**
+  `tests/unit/test_migration_guide_successors.py` reads
+  `MIGRATION_7.0.0_TOOL_CONSOLIDATION.md` and checks all 23 removals against
+  the shipped catalog. 7.0.0 has no aliases, so that guide is the only
+  migration path there is. `tests/unit/test_migration_guide_coverage.py` later
+  extended this to every tool removed since 6.0.0, against a frozen 6.0.0
+  catalog fixture, because the post-rc.1 passes had removed dozens of tools
+  the guide did not name.
+- **Dependency and action bumps** carried by Dependabot: `gradle-wrapper`
+  9.6.1 → 9.7.1, `actions/setup-java` 5.6.0 → 6.0.0, `astral-sh/setup-uv`
+  9.0.0 → 10.0.1, `github/codeql-action`, `DavidAnson/markdownlint-
+  cli2-action`, `maven-surefire-plugin`, `maven-compiler-plugin`, `docker-
+  maven-plugin`, and the `mcp` requirement. `.github/dependabot.yml` groups
+  the codeql-action bumps and drops the removed fun-doc ecosystem
+  ([#461](https://github.com/bethington/ghidra-mcp/pull/461)).
+- **JetBrains is credited** in the README for the Open Source development
+  licence ([#487](https://github.com/bethington/ghidra-mcp/issues/487)), and
+  two images nothing referenced were deleted.
+
+### Fixed — `preflight` aborted on a missing Maven it never uses
+
+`python -m tools.setup preflight` — the command CONTRIBUTING.md hands a
+**Python-only** contributor to "check what you have", in a section that says
+"Python-only changes need Java and Ghidra for nothing at all" — exited 1 on a
+machine with no Maven, printing one line and checking nothing else:
+
+```text
+$ python -m tools.setup preflight
+Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path.
+$ echo $?
+1
+```
+
+`cmd_preflight` resolved Maven via `find_maven_command()` before anything else,
+whichever backend was selected. Nothing downstream needed it: `preflight` never
+invokes `mvn`, `collect_preflight_issues` is Maven-free, and Gradle — the
+backend the docs lead with since
+[#528](https://github.com/bethington/ghidra-mcp/pull/528) — needs it for
+nothing. So the first command a new contributor runs hard-failed for a reason
+that did not apply to them, and the fix in #528 was to document the rough edge
+rather than remove it.
+
+Maven is now a **report line**, not a gate. Absent, it prints
+`Maven: not found (the Gradle backend does not need it)` plus the list of
+commands that do need it, and preflight continues through uv, the MCP spawn
+check, Java, the versions and the full Ghidra sweep. Present but running Java
+below 21 — the same class of problem — is likewise a warning, not an abort.
+
+**The hard failure stays where Maven is genuinely required**: `run_maven`
+(`build`, `clean`, `run-tests` under the Maven backend) and
+`install_ghidra_dependencies` (`ensure-prereqs`, `install-ghidra-deps`) both
+still call `find_maven_command()` and still refuse to start without it, with
+the same message. `find_maven_command()` keeps raising; the new
+`locate_maven_command()` is its non-raising counterpart, for callers that only
+report.
+
+Those refusals now read as refusals. Preflight names `build` as a command that
+needs Maven, and running it produced a Python **traceback** ending in
+`FileNotFoundError` — the message was there, but it looked like a crash in the
+tool rather than a "you need Maven for this". `find_maven_command()` raises
+`MavenNotFoundError` (a `FileNotFoundError` subclass, so every existing handler
+still catches it) and `tools.setup`'s entry point turns it into two lines and
+exit 1, naming the subcommand and the Gradle route.
+
+Pinned by `tests/unit/test_setup_cli.py` (preflight exits 0 with Maven
+unresolvable, names what actually needs Maven, writes nothing to stderr, and
+warns without failing on an old-Java Maven; plus the resolver's own raising and
+non-raising paths) and `tests/unit/test_setup_ghidra.py`
+(`collect_preflight_issues` stays Maven-free with no Maven on disk;
+`install_ghidra_dependencies` still raises). CONTRIBUTING.md's "known rough
+edge" paragraph is replaced by what the command now does.
+
+### Fixed — `docker/Dockerfile` could not build, and no gate could see it
+
+The documented Docker deployment did not work. `docker compose up --build` died
+in the server image:
+
+```text
+[ERROR] Failed to execute goal on project GhidraMCP: Could not resolve dependencies
+[ERROR] dependency: ghidra:Graph:jar:12.1.2 (test)
+[ERROR]     Could not find artifact ghidra:Graph:jar:12.1.2 in central
+```
+
+Ghidra is not on Maven Central, so four files hand-maintain a list of
+`mvn install:install-file` calls that stamp jars out of a Ghidra installation:
+`tests.yml`, `release.yml`, `pre-release.yml` and `docker/Dockerfile`. Four
+copies of one list, none derived from `pom.xml`, which is what actually decides
+what the build needs.
+
+`ghidra:Graph` was added as a dependency and three of the four were updated.
+`docker/Dockerfile` installed 15 jars against the pom's 16.
+
+**CI stayed green throughout, because nothing in CI builds the Docker image.**
+The only possible signal was a person running the documented command — which is
+the worst place to find out, and exactly why the check added here is offline and
+costs nothing.
+
+`tests/unit/test_ghidra_jar_install_lists.py` asserts every installer list
+*covers* `pom.xml`'s `ghidra:*` dependencies. Coverage rather than equality on
+purpose: the CI workflows also install `PDB` and `FunctionID`, which the pom
+does not declare, and an extra jar is harmless while a missing one is a build
+that cannot resolve.
+
+With the one missing line added, `docker compose up -d --build` was run for real
+and both containers reported healthy. Recorded because the previous entry could
+only promise it:
+
+```text
+Container ghidra-mcp          Healthy
+Container ghidra-mcp-bridge   Started
+
+ghidra-mcp-bridge   Up (healthy)
+ghidra-mcp          Up (healthy)   0.0.0.0:18089->8089/tcp, 0.0.0.0:18081->8081/tcp
+```
+
+The topology behaved as designed, and the container's own logs say why it works:
+
+```text
+Auto-connected via TCP to http://127.0.0.1:8089, registered 83 tools
+MCP endpoint: http://0.0.0.0:8081/mcp
+```
+
+- the bridge's `NetworkMode` is `container:38e338c76504…`, which is the
+  `ghidra-mcp` container's id — the namespace really is shared, which is what
+  makes `127.0.0.1:8089` mean Ghidra;
+- the bridge's own published ports are `map[]` — it publishes nothing, and both
+  host ports are on the `ghidra-mcp` service;
+- a real MCP client over the published port got `initialize` (protocol
+  `2025-11-25`), `tools/list` with **91 tools** (83 registered from the headless
+  server's schema plus the 8 static bridge tools), and
+  `tools/call list_open_programs` → `{"programs":[],"count":0}` — a true answer
+  for a container with nothing imported yet, not an error;
+- `GHIDRA_MCP_AUTH_TOKEN` is enforced end to end: **401** with no token, **200**
+  with the compose token, **401** with a wrong one.
+
+Host ports were remapped to 18089/18081 for that run only, because a live Ghidra
+already owned 8089 on the machine; container-side ports, and therefore
+everything above, are exactly as shipped.
+
+### Fixed — the release gate failed on a missing `dbgeng.dll` it could have worked around
+
+The `release` deploy tier passed five of its six steps and then raised:
+
+```text
+RuntimeError: /debugger/launch failed: Debugger launch timed out after 90s
+waiting for a Trace RMI connection.
+```
+
+`run_release_regression_tests` catches `DebuggerLiveTestSkipped` but not a hard
+`RuntimeError`, so the deploy exited non-zero and
+`record_release_regression_evidence` never ran — for a deploy that was otherwise
+fine. Two independent defects, both fixed here.
+
+**`windbg_dir` on `/debugger/launch` (new parameter).** `pybag.__init__` does
+`ctypes.windll.LoadLibrary(os.path.join(dbgdir, 'dbgeng.dll'))` against a
+hard-coded Windows Kits path. That path only exists when the Debugging Tools
+for Windows SDK feature is installed — on a stock machine
+`Windows Kits\10\Debuggers\x64` holds `dbgcore`/`dbghelp`/`srcsrv`/`symsrv`
+and no `windbg.exe` or `cdb.exe` — so the import raises `FileNotFoundError`,
+the back-end dies before it can connect, and Ghidra reports only a Trace RMI
+timeout. Windows itself ships a perfectly usable `dbgeng.dll` in `System32`,
+and `local-dbgeng.bat` declares `::@env WINDBG_DIR:dir=""` precisely so it can
+be pointed there — but `DebuggerService.configureLauncher` wired only
+`OPT_TARGET_ARGS`, `CWD`/`OPT_CWD`/`OPT_TARGET_DIR` and `OPT_PYTHON_EXE`, so
+there was **no way to supply the override over HTTP at all**.
+`_resolve_windbg_dir` now resolves `WINDBG_DIR` from the environment, then
+`.env`, then `C:\Windows\System32` — and only returns a directory that
+actually contains the DLL, so a machine with a genuinely absent backend falls
+through to the skip classifier instead of being handed a path that fails one
+layer down. Measured: with the override the live test **runs** rather than
+skipping — `Debugger live test passed: launched BenchmarkDebug.exe and read
+trace state.`
+
+**The skip classifier could not see its own commonest case.** Every entry in
+`_DEBUGGER_LAUNCH_SKIP_HINTS` matches a failure that *names* its cause
+(`"ghidratrace"`, `"could not load dbgeng"`, `"dbgeng.dll"`). The dominant
+real-world failure names nothing: the launcher is a separate process, so an
+import error in `local-dbgeng.py` goes to the launcher terminal and Ghidra sees
+silence, then emits a timeout that helpfully lists the three possible causes
+and matches none of the hints written to catch them. A machine with no debugger
+backend therefore failed the release gate hard — the exact environmental case
+the classifier exists to tolerate. `"waiting for a trace rmi connection"` is
+now a hint.
+
+Operator note: the launcher Python is resolved by `_resolve_debugger_python`,
+which falls back to `shutil.which("python")`. On Windows that is frequently the
+Microsoft Store build, which has neither `ghidratrace` nor `pybag` — set
+`GHIDRA_DEBUGGER_PYTHON` in `.env` to an interpreter provisioned from Ghidra's
+own shipped wheels (`Ghidra/Debug/Debugger-agent-dbgeng/pypkg/dist` and
+`Ghidra/Debug/Debugger-rmi-trace/pypkg/dist`), so the versions match the
+install exactly.
+
+### Fixed — four GUI endpoints were exempt from the offline tier's parameter checking
+
+The recorded `/mcp/schema` snapshot held **235** tools; the GUI server serves
+**239**. `tests/offline/fake_ghidra.py` sets `EndpointSpec.params = None` for an
+endpoint the recording does not cover and skips parameter validation entirely,
+so the offline tier routed calls to `/move_file`, `/move_folder`,
+`/list_shadowed_globals` and `/batch_get_comments` and validated **no
+parameter** of them — the exact blind spot [#112]'s tier was built to close,
+since `AnnotationScanner` silently uses the default for an unknown parameter
+name and returns 200.
+
+[#532](https://github.com/bethington/ghidra-mcp/pull/532) pinned the set as
+`SCHEMA_RECORDING_PREDATES` so it could not grow silently, but could not fix
+it: re-recording needs a live Ghidra with the current JAR deployed, and
+teaching the fake to synthesise a contract would be the fake asserting on
+itself. Re-recorded at the 2026-09-18 deploy — 239 tools, all four present,
+`SCHEMA_RECORDING_PREDATES` now **empty** and asserted in both directions. The
+14 endpoints still uncovered are the headless-only project-management surface,
+which a GUI recording legitimately never advertises.
+
+No contract breach surfaced: `expected_contract_violations.json` and
+`known_integration_call_breaches.json` both stay empty. That is a weaker result
+than it reads — only `/list_shadowed_globals` is called by any test today, so
+the other three gained a contract nothing yet exercises. What changed is that a
+future call to any of them is checked.
+
+Re-recording turned up two bugs that had to be fixed first, both of which made
+the snapshot unrecordable rather than merely stale:
+
+- **The conformance runner would record an MCP-level error as a golden.**
+  [#440](https://github.com/bethington/ghidra-mcp/issues/440) made lazy tool
+  loading the default, so the bridge advertised CORE_GROUPS only — 118 of 239
+  tools — and `mcp_schema` was not among them. `--update-snapshots` overwrote
+  the committed 7,119-line `mcp_schema.snap` with the single line
+  `Unknown tool: mcp_schema` and reported `new=1`, as if it had recorded a
+  response. The existing guard could not see it: that one tests for a JSON
+  `{"error": ...}` body, and a transport error is not JSON. `_handle_snapshot`
+  now refuses any `isError` result outright — `expect_error_payload` opts into
+  a refusal *body*, not a call that never reached the tool.
+- **`bridge_transport` now passes `--no-lazy`.** The corpus is a statement
+  about the *server's* surface; scoping it to whichever groups a client happens
+  to load by default makes it a statement about the client instead. Without the
+  flag, every case for a tool outside CORE_GROUPS dies on `Unknown tool`.
+
+Also here:
+
+- **`--only PATTERN` on the conformance runner.** `--update-snapshots` was
+  all-or-nothing, so re-recording one golden meant accepting whatever the other
+  118 returned in the same pass — 118 unreviewed rewrites to fix 1, which is
+  why the schema snapshot simply went stale instead. A pattern matching nothing
+  is fatal, never a quiet zero-case run: `--only mcp_scheme --update-snapshots`
+  would otherwise exit 0 having recorded nothing.
+- **The offline tier's tool count is derived, not typed.** `235` was hardcoded
+  in two assertions in `test_bridge_end_to_end.py` and went stale the moment
+  the snapshot was re-recorded. Both now read the count from the snapshot,
+  which is what they actually mean — "the bridge parsed every tool the server
+  served", and "lazy mode parsed fewer". The absolute size of the surface is
+  pinned by `tools.audit_server_scope --release-counts` and the catalog parity
+  tests, which is where a change to it should be reviewed.
+- **Published aliases and the annotation parser are pinned to agree.**
+  [#470](https://github.com/bethington/ghidra-mcp/pull/470) made
+  `ParamDescriptor` emit `aliases`, and this is the first recording that
+  carries them — 6 routes, identical to what `tests/offline/param_aliases.py`
+  reconstructs from the Java source. Two sources of one fact is how this repo
+  has been bitten repeatedly, so the agreement is now asserted rather than
+  assumed; it is also what will prove the parser can be retired without losing
+  aliases on the way out.
+
+### Fixed — a release could publish with the live regression never having run
+
+`release.yml` and `pre-release.yml` gated publishing on:
+
+```text
+needs.release-regression.result == 'success' || needs.release-regression.result == 'skipped'
+```
+
+On a **tag push** that job is *always* skipped — its own `if` requires
+`workflow_dispatch`. So `skipped` was the only value a tagged release ever
+produced, and the gate that is supposed to stop a broken release from shipping
+had never once blocked one. It could not.
+
+It cannot be fixed by running the tier in CI, and that is a decision rather than
+an oversight. The regression needs a live Ghidra GUI on Windows, so it targets
+`runs-on: [self-hosted, Windows]`, and **zero self-hosted runners are
+registered** — on a public repository, labelling a fork PR would run a
+stranger's code on the maintainer's machine.
+
+So the gate is **recorded local evidence**. A passing
+`deploy --test release` writes `docs/releases/live-regression-evidence.json`,
+the maintainer commits it, and both publishing workflows refuse to publish
+without one that covers the release being cut.
+
+**It records a source fingerprint, not a timestamp.** A timestamp says a
+regression ran; it does not say it ran against the code being shipped. The
+fingerprint is a SHA-256 over the git blob id of every tracked file under
+`src/main/java`, `python/bridge_mcp_ghidra`, `tools/setup`,
+`tests/fixtures/benchmark`, `tests/endpoints.json`, `pom.xml` and
+`build.gradle`. Change any of them after the tier ran and the release fails
+until it is re-run.
+
+Three details that decide whether this works in practice:
+
+- **Line endings are normalised here, not delegated to git.** The maintainer's
+  Windows checkout has `core.autocrlf=true` — `pom.xml`, `build.gradle` and
+  `tests/endpoints.json` really do sit on disk as CRLF there — and the release
+  runner checks out LF. Hash the bytes as they sit and the two never match, on
+  every single release, and the gate gets switched off within a week. The first
+  cut delegated this to `git hash-object`, which applies git's own
+  normalisation — usually. **Measured:** in this repository a CRLF working-tree
+  file hashes to its stored LF blob, but in a fresh clone with the same
+  `core.autocrlf=true` it hashes the CRLF bytes instead. "Works on this machine
+  today" is not a property to hang a release gate on, so files containing a NUL
+  byte (the fixture's PE images) are hashed raw and everything else has its
+  CRLF pairs collapsed first. Content comes from the **working tree**, so an
+  uncommitted edit moves the fingerprint, describing the tree that was tested,
+  not the last commit.
+- **The scope is deliberately narrow.** A CHANGELOG line written after the run —
+  including the entry describing the release itself — must not invalidate hours
+  of live testing. A gate people route around is not a gate.
+- **No fallback of any kind.** No `|| true`, no default, no
+  `continue-on-error`, and a test asserts their absence. `release.yml` published
+  "Headless Endpoints: 1" in v6.0.0 because a grep of a deleted file was
+  softened with `|| echo "0"` and a suppressed read error became a plausible
+  number.
+
+A real self-hosted run still counts as its own evidence: the step is
+conditioned on `needs.release-regression.result != 'success'`, so if a runner is
+ever registered nothing here gets in the way.
+
+`tests/unit/test_release_evidence.py` covers the fingerprint (stable, moves on
+source change, sees uncommitted edits, ignores docs, ignores the evidence file
+itself, refuses an empty source set, line-ending independent), the verifier
+(missing, wrong version, wrong tier, failed result, malformed JSON, a fingerprint
+recorded over a different path set), and both workflows — including that the
+verification step exists at all, which fails against the previous `release.yml`
+and `pre-release.yml` with the reason spelled out.
+
+### Fixed — Scorecard ran on `dev`, where it can only fail
+
+`scorecard-action` refuses to run on anything but the repository's **default
+branch**. It validates that itself and exits with
+`validating options: only the default branch main is supported` — not a
+warning, not skippable.
+
+`scorecard.yml`'s push trigger said `dev`. The default branch is `main`. So
+every push to `dev` started a run that could only fail, in about 13 seconds:
+all 8 of the most recent Scorecard runs were that, including every commit of
+the v7.0.0 merge queue.
+
+What made it durable is that the **scheduled** runs follow the default branch
+automatically and kept passing, so the badge stayed green and the push failures
+read as noise rather than as a misconfiguration.
+
+This line has now been wrong in both directions — it said `main` while the
+default was `dev` (3 failures, 2026-08), then `dev` after the default moved
+back. So it is asserted rather than commented:
+`tests/unit/test_ci_workflow_triggers.py` pins the trigger against a
+`DEFAULT_BRANCH` constant, and cross-checks that constant against git's own
+`origin/HEAD` wherever it resolves — so the constant cannot quietly go stale
+either. That file previously excluded Scorecard on the reasoning that it is
+"intentionally main-only"; the intent was right and the mechanism was
+misunderstood — it is a constraint the action enforces, not a preference.
+
+### Added — the MCP bridge is now part of the Docker stack
+
+`docker/Dockerfile.bridge` existed and worked; nothing referenced it, so
+`docker compose up` brought up a Ghidra REST server and no MCP endpoint at all.
+A Dockerfile nothing builds is a file, not a deployment.
+
+`docker compose up -d --build` now starts two containers: `ghidra-mcp` on
+`:8089` (the plugin's plain HTTP API) and `ghidra-mcp-bridge` on `:8081`
+(MCP over streamable-http, at `/mcp`).
+
+Three constraints shape that wiring, and none of them is visible in the YAML:
+
+- **The bridge shares the Ghidra container's network namespace**
+  (`network_mode: "service:ghidra-mcp"`). `validate_server_url()` refuses any
+  Ghidra URL whose host is not loopback, so `http://ghidra-mcp:8089` — the
+  obvious Compose spelling — is rejected before a socket is opened. That rule
+  is not incidental: the bridge speaks plain HTTP with no TLS and forwards a
+  bearer token, so it is deliberately not allowed to send either across a
+  network. Sharing the namespace is what makes `127.0.0.1:8089` mean Ghidra.
+- **The bridge's port is published on the `ghidra-mcp` service.** A container
+  in another container's namespace has no network stack to publish from, and
+  `docker compose config` does not catch a `ports:` entry on such a service —
+  it validates cleanly and fails at `up`.
+- **`GHIDRA_MCP_AUTH_TOKEN` is required, not optional.** `entrypoint.sh` binds
+  `0.0.0.0` and `SecurityConfig.requireAuthForNonLoopbackBind` refuses that
+  bind without a token, so an unset token was never a weaker deployment — it
+  was a container that starts and dies. Both services now take it as
+  `${GHIDRA_MCP_AUTH_TOKEN:?...}`, which turns that into one line at the prompt.
+  The same token is what MCP clients must send as `Authorization: Bearer` once
+  [#438](https://github.com/bethington/ghidra-mcp/pull/438) lands: the bridge
+  binds `0.0.0.0` (a published port cannot reach a loopback bind) while holding
+  a credential for Ghidra, and an unauthenticated bridge in that position is a
+  confused deputy.
+
+`docker-compose.multi.yml` deliberately gets **no** bridge, and now says why:
+`network_mode: "service:X"` names one container and cannot target a scaled
+service, and `nginx.conf` balances with `least_conn` and no session affinity —
+so a bridge in front of it would hand consecutive MCP tool calls to different
+Ghidra instances holding different projects, with a `decompile` and the
+`rename` after it not talking about the same program. That needs a topology
+decision, not a copied service block.
+
+`tests/unit/test_docker_compose_bridge.py` pins every one of these, and asserts
+the configured `GHIDRA_MCP_URL` against the **real** `validate_server_url()`
+rather than a restatement of its rule. It needs no Docker daemon, which is the
+point — the daemon is exactly what CI does not have.
+
+**Verified, and what was not.** The bridge was driven end to end with the real
+MCP client SDK over the exact command line `Dockerfile.bridge`'s `CMD` runs
+(`--transport streamable-http --mcp-host 0.0.0.0 --mcp-port <port>`), against a
+Ghidra reached over loopback: a real `initialize` (protocol `2025-11-25`), a
+real `tools/list` (**117 tools**), and a real `tools/call list_functions`
+returning 464 functions — with the strict offline fake reporting **zero**
+contract violations. The Dockerfile's own build steps were reproduced from only
+the files it copies, producing a working `bridge-mcp-ghidra` console script.
+
+What is **not** verified: `docker compose up` itself. Docker Desktop on the
+machine this was written on cannot start — it dies in
+`initializing Ingest server` on an orphaned `sailor-ingest.sock` that cannot be
+renamed or deleted — so the image build, the shared namespace and the published
+port have not been exercised against a live engine. The compose file is
+validated by `docker compose config`, and the invariants are pinned by tests,
+but a first `docker compose up` on a working engine is still owed.
+
+### Fixed — a typo in `GHIDRA_MCP_DEPLOY_TESTS` silently skipped every deploy test ([#484](https://github.com/bethington/ghidra-mcp/issues/484))
+
+`--test relase` was rejected by argparse. `GHIDRA_MCP_DEPLOY_TESTS=relase` in a
+local `.env` was not: it resolved to `['relase']`, the dispatching `elif` chain
+in `run_deploy_tests` had no `else`, so the loop matched nothing and deploy
+exited **0** having run only the smoke test. Two routes into one function, and
+the silent one is the route a release cut reads from — `deploy --test release`
+is CLAUDE.md's fourth release-floor command.
+
+Reproduced at `0cf545b1` before changing anything:
+
+```text
+resolve_deploy_test_modes -> ['relase']
+run_deploy_tests(['relase']) completed, steps actually run: ['smoke']
+```
+
+and after:
+
+```text
+resolve_deploy_test_modes RAISED UnknownDeployTestMode:
+unknown deploy test tier(s) ['relase'] from GHIDRA_MCP_DEPLOY_TESTS in ...\.env.
+Valid tiers: benchmark-read, benchmark-write, debugger-live, endpoint-catalog,
+multi-program, negative-contract, release, selected-contract.
+```
+
+`tools/setup/ghidra.py` now holds `DEPLOY_TEST_MODES`, the **only** tier list.
+`--test` takes its argparse `choices` from it and the `.env` value is validated
+against it, so the two routes cannot drift again. A second copy is what drifted
+in the first place, so the fix is one list rather than two validations.
+
+Both directions are closed:
+
+- An unknown tier is **refused, not ignored**, naming the bad value, where it
+  came from, the valid tiers, and `off` for "run none".
+- A tier listed in `DEPLOY_TEST_MODES` with no dispatch branch raises too. That
+  is the same silence one step later — a tier that passes validation, matches
+  nothing, and reports a pass for an implementation that does not exist.
+
+Resolution happens first in `cmd_deploy`, before anything is built, copied or
+restarted, so a typo costs a second instead of surfacing after a build, a Ghidra
+restart and a deploy.
+
+**The Gradle backend had the same hole through a different door.** `cmd_deploy`
+passed `--test` straight to `run_gradle(["deploy"])`, and `build.gradle`'s
+`deploy` task is `stopGhidra` + `deployExtension` + `installUserExtension` +
+`patchGhidraUserConfig` — it runs no post-deploy tier and has no way to. So
+`TOOLS_SETUP_BACKEND=gradle python -m tools.setup deploy --test release`
+accepted the tier, ran none of it, and exited 0, on a backend CLAUDE.md
+documents as supported. It now refuses and names the Maven backend. Naming a
+tier and not running it is the failure mode; the message is not the fix, the
+refusal is.
+
+### Fixed — 14 offline security tests had never run in CI ([#483](https://github.com/bethington/ghidra-mcp/issues/483))
+
+CI does not run `mvn test`. It runs a filtered build:
+
+```text
+mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+```
+
+Surefire's `*` does not cross the package separator, so `GarArchiveRestoreTest`
+(9 tests) and `GzfExportImportTest` (5 tests) — both in package `com.xebyte` —
+were never selected. They are the path-traversal and exact-name guards added in
+PR #264: the ones that pin that a caller cannot escape `parent_dir`, cannot
+smuggle a traversal `project_name`, and that `exportProgramToGzf` resolves a
+program by an **exact** name rather than a substring. They compiled, they were
+committed, and from #264 until now not one of their assertions had executed.
+
+Measured rather than assumed: the surefire reports published by CI run
+`35343488609` at `0cf545b1` name **59 executed classes**, and neither of those
+two is among them.
+
+Both classes moved to `com.xebyte.offline`, beside `HeadlessPathsTest`, which
+tests the same #264 surface from the package CI already selects. The offline
+Java tier goes from 535 to **549 tests across 56 classes**, all green.
+
+**The move is not the deliverable.** `tests/unit/test_ci_java_test_globs.py`
+is: it enumerates every Java class that declares tests, models Surefire's glob
+semantics over the fully-qualified name, and fails when a class is not selected
+by any `-Dtest` pattern in any workflow. An unselected test cannot fail, so this
+gap is invisible to CI by construction — it needs an offline check, not a
+convention. Exemptions are explicit and carry a reason (the three live-server
+integration classes, and the `RegenerateEndpointsJson` catalog tool), and the
+list is a ratchet in both directions: an entry naming a class that no longer
+exists fails too, so the exemption cannot outlive what it excuses.
+
+Two details the guard had to get right, both found by it failing:
+
+- **Detection is by content, not filename.** A class named `FooTests` is
+  selected by no glob in this repository, and a `*Test.java` scan would agree
+  with the glob rather than check it.
+- **It has to span two JUnit generations.** The first cut scanned for `@Test`
+  and reported that `AppTest`, `EndpointRegistrationTest` and
+  `GhidraMCPPluginTest` did not exist. All three are alive and are JUnit 3 —
+  `extends TestCase`, bare `testXxx()` methods, no annotations at all. A scan
+  that sees only annotations declares the older half of this suite to be
+  not-tests, which is the same blind spot it exists to catch.
+
+It also pins that the offline glob is character-identical in `tests.yml`,
+`release.yml` and `pre-release.yml`. Those three are copies of one command, and
+a release gate quietly running a narrower set than the PR gate is the same bug
+one level up.
+
+### Fixed — `set_variable_storage` reported storage instead of setting it ([#446](https://github.com/bethington/ghidra-mcp/issues/446))
+
+`/set_variable_storage` was a no-op. It looked the variable up, read its
+*current* storage, logged the request, and returned HTTP 200 with
+`"status": "unsupported"`. Nothing was ever written. The stated reason was
+wrong: `Variable.setDataType(type, storage, force, source)` together with
+`Function.setCustomVariableStorage(boolean)` has been public Ghidra API for many
+versions.
+
+Returning success for a write that never happened is worse than refusing it,
+because the caller cannot tell the difference — and this is the one case where
+the caller has no alternative. An argument layout that assigns registers in a
+fixed ordered run (`R0`+`R2`, a lone `R28` — a NEC V60 target in the report)
+cannot be expressed by **any** calling convention, so adding one to the `.cspec`
+does not help. Custom storage is the only route.
+
+The endpoint now:
+
+- parses the shapes Ghidra itself prints, so storage read back from
+  `get_function_variables` can be handed straight in: `EAX`, `EAX:4`,
+  `R0:4,R2:4` (one value split across registers) and `Stack[-0x10]:4`. Size
+  defaults to the variable's data-type length.
+- switches the function to custom variable storage when the target is a
+  **parameter**, whose storage is otherwise re-derived from the `.cspec`, and
+  reports that as `custom_storage_enabled` because it pins every other
+  parameter too.
+- **reads the storage back off the variable** and compares it to what was asked
+  for, instead of echoing the request. Echoing is what let the stub look like it
+  worked.
+- returns genuine errors — unknown register (naming the language), a size larger
+  than the register, an unparseable offset, an overlap that did not take.
+- leaves nothing behind when it refuses: the spec is parsed *before* the
+  function-wide storage mode is touched, and any failure after that point puts
+  the mode back. A mistyped register name previously answered
+  `Unknown register 'R99'` having already detached the function's whole
+  parameter list from its calling convention.
+
+Reported by drojaazu. Covered by `VariableStorageWriteTest`.
+
+### Fixed — lazy tool loading is now the default, unbreaking the Gemini API ([#440](https://github.com/bethington/ghidra-mcp/issues/440))
+
+Eager loading put every endpoint into a single `tools/list`. For Gemini that is
+not merely expensive, it is over a hard limit: the API compiles function
+declarations into a constrained-decoding state machine and rejects the whole
+request before any tool is ever called.
+
+```text
+400 INVALID_ARGUMENT
+The specified schema produces a constraint that has too many states for serving
+```
+
+So the old default did not degrade those clients, it broke them outright, and no
+client-side configuration could work around a server that only ever offered the
+full set. The bridge now loads `listing,function,program` (57 endpoints plus the
+8 static tools) on connect and registers the rest on demand. This is also the
+concrete half of the "too many tools for agents" complaint in
+[#307](https://github.com/bethington/ghidra-mcp/issues/307) /
+[#245](https://github.com/bethington/ghidra-mcp/issues/245) /
+[#267](https://github.com/bethington/ghidra-mcp/issues/267): the capability is
+unchanged, only what is advertised by default.
+
+Eager only ever existed for clients that ignore `tools/list_changed` and would
+therefore never see a later `load_tool_group()` registration. **Those clients
+keep an escape hatch, by either route:**
+
+```bash
+uv run bridge-mcp-ghidra --no-lazy   # when you control the command line
+export GHIDRA_MCP_LAZY=0             # when you don't (Docker, uvx, some client configs)
+```
+
+`GHIDRA_MCP_LAZY` is new here — `--no-lazy` alone is not an escape hatch for a
+container `ENTRYPOINT` or a client config that gives the user no way to add a
+flag. An explicit flag beats the variable; an unrecognised value is ignored with
+a warning rather than guessed at. Startup logs which mode is in effect.
+
+### Fixed — `program` in a POST body was silently ignored, sending writes to the wrong program
+
+`@Param.source()` defaults to `ParamSource.QUERY`. On a POST tool that declares
+its other parameters as `BODY`, any parameter left at that default was looked
+for in the query string only — so a caller following this project's own "POST
+params go in the body" convention had it dropped. **192 `program` declarations
+across 103 POST tools** have that shape.
+
+For `program` the consequence was not a missing argument but a wrong target:
+resolution fell through to `getProgramOrError(provider, "")`, i.e. the *current*
+program. A `set_bookmark`, `set_comment` or rename addressed to one program
+landed in whichever program happened to be active, and the response said
+`success` — with no `program` field to reveal where it actually went.
+
+Observed in the field: **16,442 bookmarks describing one DLL were written into
+another**, across two separate publishing runs, without a single error. The
+callers were correct; every one named its target program in the body.
+
+`resolveParam` now falls back to the other source when the declared one does not
+carry the parameter at all. The declared source still wins when it has a value,
+so the Python bridge's synthesized query params are unaffected. This generalises
+what `isDryRunRequested` already did by hand for `dry_run` — same root cause,
+found earlier, where a query-only check meant a dry run performed a real write.
+`resolveProgramForDryRun` was reading `query.get("program")` only and is fixed
+the same way.
+
+Covered by `AnnotationScannerParamSourceTest`, which fails against the previous
+behaviour (`expected:<D2Common.dll> but was:<null>`).
+
+### Dead parameters: nine advertised switches that did nothing (breaking, schema)
+
+A parameter-documentation sweep found nine parameters the server published in
+`/mcp/schema` and never read. An inert parameter is worse than a missing one: a
+missing parameter is absent from the schema, so a model never reaches for it,
+whereas an inert one looks like a real control — the model sets it, the call
+succeeds, and the model then reasons about a result it believes it configured.
+Each was independently re-verified against the source before being touched.
+
+**Wired up** (the endpoint now does what it always claimed):
+
+| Endpoint | Parameter | Now |
+| --- | --- | --- |
+| `/run_ghidra_script` | `capture_output` | `false` omits `console_output` and reports `output_captured: false`. A **failed** script keeps its output either way, so the flag can never lose an error. |
+| `/rename_variables` | `force_individual` | `true` dispatches straight to the per-variable path instead of running the batch path anyway. `GhidraMCPPlugin.batchApplyDocumentation` had been passing `true` and silently getting batch mode. |
+| `/server/version_control/add` | `keepCheckedOut` | Passed through to `DomainFile.addToVersionControl` instead of a hardcoded `false`, and echoed as `keep_checked_out`. GUI mode only — the headless route is a repository-verification stub that does not add anything. |
+
+**Removed** (nothing implemented them, and implementing them means designing a
+feature, not flipping a flag). These change the published tool surface, so
+clients that generate signatures from `/mcp/schema` will see the parameters
+disappear; passing them is now ignored rather than accepted-and-ignored:
+
+| Endpoint | Parameter | Why removed |
+| --- | --- | --- |
+| `/analyze_data_region` | `include_assembly_patterns` | The endpoint scans data bytes and has no assembly-pattern section to include. `/get_assembly_context` is the tool that does this. |
+| `/detect_array_bounds` | `analyze_loop_bounds`, `analyze_indexing` | The body is one fixed xref scan. Neither name toggles anything that exists; both would be new analyses. |
+| `/get_assembly_context` | `include_patterns` | Patterns are always detected and returned. It was also **required** (no default), so callers had to supply a value for an inert field — the conformance corpus skipped the tool for exactly that reason. |
+| `/server/connect` | `host`, `port` | Vestigial. GUI mode reports the already-open project; headless mode connects with the host/port `GhidraServerManager` reads from `GHIDRA_SERVER_HOST`/`GHIDRA_SERVER_PORT` into `final` fields at construction, and `connect()` takes no arguments. The tool description now says where the values actually come from. |
+
+**Related fix.** Wiring `force_individual` exposed a live bug in the path it
+routes to. `batchRenameVariablesIndividual` decided success by comparing
+`renameVariableInFunction(...).toJson()` to the bare string `"Variable
+renamed"` — a test written against the pre-`Response` raw-text contract that has
+not matched since. Every successful rename was therefore counted as a failure
+and its success payload filed under `errors`, while `success` was hardcoded
+`true`. It now inspects the `Response`, reports `success` based on the actual
+failure count, and propagates the Hungarian-notation warnings it used to drop.
+This path is also the automatic fallback when a batch rename throws, so the
+miscounting was reachable without the new flag.
+
+**Regression cover.** `DeadParameterTest` (offline) fails on any `@McpTool`
+parameter whose identifier is never referenced in the method that declares it.
+It carries a short, reason-annotated allowlist of six parameters that are still
+inert — `/list_data_items_by_xrefs#format` (a documented no-op kept for
+compatibility) plus five that are a genuine backlog — and a companion test that
+fails when an allowlist entry is finally wired up, so the list cannot outlive
+its own justification.
+
+### Parameter coercion fixes
+
+- Omitted nullable `Boolean` parameters whose annotation uses `defaultValue = ""`
+  now resolve to `null` for both query-string and JSON-body inputs. Previously,
+  the empty string was coerced to `false`, silently activating tri-state filters
+  such as `has_custom_name`, `is_thunk`, and `is_external`.
 
 ### Tool consolidation (breaking) — 272 → 251 tools
 
@@ -64,6 +1769,10 @@ name-quality rejection that `rename_data` applied.
 
 **Bug fixes shipped with the merges.**
 
+- `GHIDRA_MCP_ALLOWED_HOSTS` now extends Host/Origin validation for loopback
+  HTTP binds as well as wildcard binds. Containers can therefore address a
+  bridge through a host-routing alias while the listener remains bound to
+  `127.0.0.1`; defaults and DNS-rebinding protection remain unchanged.
 - `validate_data_type_exists` returned a false negative for every bare type
   name (`int`, `DWORD`, `char *`) because it required a full category path. The
   survivor reuses `get_type_size`'s resolver.
@@ -74,14 +1783,11 @@ name-quality rejection that `rename_data` applied.
 - `get_function_labels` accepts an address as well as a name, and reports a
   clear error when the parameter is missing.
 
-**Internal callers migrated.** fun-doc (workers, prompts, provider tool
-allowlists, benchmark harness), the Python bridge's per-endpoint timeout table,
+**Internal callers migrated.** The Python bridge's per-endpoint timeout table,
 the deploy smoke tests in `tools/setup`, the bundled `DocumentFunctionWithClaude`
 script, the integration/offline test suites, and the operator docs all now call
-the survivors. A latent bug was fixed on the way: fun-doc's plate writes passed
-`program` in the POST **body**, where it is ignored (`@Param` defaults to
-`ParamSource.QUERY`) — those writes were landing on whichever program was
-focused in the UI and bypassing fun-doc's scope guard.
+the survivors. Out-of-repo consumers of this server's HTTP API have to migrate
+themselves; there are no aliases.
 
 ### Response contract (breaking) — every tool returns JSON
 
@@ -108,14 +1814,180 @@ List-shaped tools now return a named plural key plus `count`/`total`; errors are
 - An error is no longer distinguishable by "does the string look like a
   sentence" — check for the `error` key.
 
-Every in-repo caller (fun-doc, the bridge, `tools/setup`, the scripts, the
-deploy gate, the tests) is migrated. `tests/performance/test_response_contract_callers.py`
+Every in-repo caller (the bridge, `tools/setup`, the scripts, the deploy gate,
+the tests) is migrated. `tests/performance/test_response_contract_callers.py`
 guards against a caller that reads a reshaped endpoint without unwrapping it —
 added after two rounds of the sweep each missed sites the previous one had not.
 
 One shape bug this exposed and fixed: parameters can now declare that an empty
 string is *meaningful*, rather than treating empty as absent. Clearing a comment
 did not work end to end before that.
+
+### Every schema parameter now describes itself
+
+`/mcp/schema` used to advertise **294 parameters with no description at all** —
+239 of the 674 `@Param` declarations on `@McpTool` methods, plus all 55
+parameters of the hand-registered routes in `ManualToolDescriptors`. The bridge
+builds each tool's `inputSchema` from that schema, so those reached the model as
+a bare name and a type, and it had to guess formats the server already knew:
+whether an address wants a `0x` prefix, whether a count is bytes or elements,
+what a boolean does in its *false* state. That guessing is the expensive half of
+a large tool surface, and nothing failed while it went on — the annotation
+compiled, the endpoint worked, the schema was just quieter than it should be.
+
+All 294 are now written against what the code actually does with the value, and
+`ParamDescriptionCoverageTest` (offline) fails the build if a new one appears.
+
+The descriptions record behaviour that was previously only discoverable by
+experiment, for example:
+
+- **Paging is not uniform.** Endpoints going through `ServiceUtils.paged` treat
+  `limit <= 0` as "no limit"; `search_strings`, `list_functions_enhanced`,
+  `list_external_locations`, `search_functions_enhanced` and `find_code_gaps`
+  slice by hand, so `limit=0` returns an **empty** page there. `list_class_members`
+  is neither — it clamps `limit` to a minimum of 1, so `0` returns one member.
+- **Units.** `create_array_type.length` is elements; `resize_struct.new_size`,
+  `create_memory_block.size`, `add_struct_field.offset`, `max_scan_bytes` and
+  `field_offset` are bytes; `search_strings.min_length` is characters of decoded
+  text.
+- **Silent no-ops.** `batch_rename_function_components.return_type` is resolved
+  by exact data-type-manager *path*, not the recursive resolver, and a failed
+  lookup is skipped without error while the call still reports success.
+- **Five parameters are accepted and never read** by the method that declares
+  them: `analyze_data_region.include_assembly_patterns`,
+  `detect_array_bounds.analyze_loop_bounds`, `detect_array_bounds.analyze_indexing`,
+  `get_assembly_context.include_patterns`, and
+  `run_ghidra_script.capture_output`. Each is now described as such rather than
+  as a switch that does something.
+
+One existing description was wrong rather than missing and is corrected:
+`search_strings.encoding` claimed to be a "String encoding filter (omit for all
+encodings)". It never filtered — the value is echoed into each match's
+`encoding` field, substituting the literal `ascii` when blank.
+
+### `create_memory_block` accepts byte contents (#404)
+
+The tool could only ever produce an *empty* block, so laying down a known region
+— a patch stub, a decrypted overlay, an MMIO map with a real signature in it —
+took a `create_memory_block` call followed by a byte-writing tool that does not
+exist in this server. Reported by @antoniovazquezblanco.
+
+Five new body parameters:
+
+| Param | Meaning |
+| --- | --- |
+| `bytes_hex` | contents as hex (`"deadbeef"`, `"de ad be ef"`, `"0xdeadbeef"`) |
+| `bytes_base64` | contents as standard base64, for large or fully binary payloads |
+| `initialized` | create an initialized block with no supplied contents |
+| `fill_byte` | value (0-255) for every byte past the supplied contents |
+| `overlay` | create the block in a new overlay address space |
+
+Both encodings are offered because `EmulationService`'s memory-region contract
+already accepts both for the same job; they are mutually exclusive and named
+`bytes_*` rather than the bare `hex`/`data` that collide with `read_memory`'s
+differently-shaped response fields.
+
+The behavior that matters:
+
+- **Supplying contents forces `initialized=true`** — an uninitialized block has
+  nowhere to put bytes. The default is still an uninitialized block, so every
+  pre-existing call behaves exactly as before.
+- **Contents longer than `size` is an error, never a truncation.** Silently
+  dropping bytes the caller sent would produce a block that reports success and
+  contains the wrong program. Contents *shorter* than `size` pad with
+  `fill_byte` and report `padded_bytes` — "a 4 KB region whose first 16 bytes
+  are this header" is the common real request, and making the caller hand-build
+  kilobytes of zero digits to express it would be hostile. Omitting `size`
+  entirely sizes the block to the contents.
+- **Nothing is written on a bad request.** Decoding and size reconciliation both
+  run before the transaction opens, so a malformed payload cannot leave a
+  half-created block behind. The creation itself is a single Ghidra call that
+  creates *and* fills, so there is no window where an empty block exists; any
+  failure still leaves `endTransaction(tx, false)` to roll the whole thing back.
+- **Caps, not OOMs.** Contents are limited to 16 MB (matching `read_memory`, and
+  fitting inside the 64 MB request-body cap in either encoding) and the limit is
+  checked against the *encoded* length, before any array is allocated. An
+  initialized block is capped at 256 MB because those bytes are real database
+  storage written on the Swing thread; uninitialized blocks stay uncapped, which
+  is the pre-existing behavior and the reason a multi-gigabyte MMIO aperture
+  still works.
+- **`overlay=true` skips the overlap check**, because shadowing existing memory
+  is the entire point of an overlay; the response reports the generated space in
+  `address_space`.
+
+The response gained `initialized`, `overlay`, `address_space`, `bytes_written`,
+`padded_bytes` and `fill_byte`.
+
+### Tool catalog: `category` is the tool group, and 63 entries named the wrong one
+
+`tests/endpoints.json` records a `category` per endpoint and CLAUDE.md points at
+it as the authoritative tool inventory. That field is not a label — it is the
+**tool group** the bridge lazy-loads by (`list_tool_groups`, `load_tool_group`,
+`check_tools`, `search_tools`, and `CORE_GROUPS`). But the bridge never reads the
+catalog: it groups on the `category` field of `/mcp/schema`, which the plugin
+generates from `@McpTool` / `@McpToolGroup`. Nothing compared the two, so they
+drifted freely — **63 of 219 annotation-scanned entries disagreed**.
+
+The catalog had been left on a pre-tool-group *verb* taxonomy. Forty-one entries
+carried a category naming a group that does not exist at runtime at all —
+`getter` (14, as a verb sense), `utility` (10), `search` (6), `rename` (5),
+`decompile` (4), `script` (2) — so `load_tool_group("decompile")` could never
+resolve. The other 22 named a real group that does not own the tool
+(`analysis` 16, plus `listing`/`comment`/`datatype` 2 each, e.g. `set_bookmark`
+filed under `comment` when it lives in `ProgramScriptService`/`program`).
+`malware` had **zero** catalog entries while holding five real tools.
+
+**User-visible effect, now corrected.** With lazy tool-group loading becoming the
+default, "which group is this tool in" decides whether a tool is available on
+connect. `CORE_GROUPS` is `{listing, function, program}`. The catalog placed
+**27 tools** in non-default groups that the annotations — i.e. the runtime — put
+in default ones, so the published catalog understated what is available without a
+`load_tool_group` call. The drift was entirely one-directional: **no** tool the
+catalog called default was actually non-default, so nothing that read the catalog
+was told a tool was available when it was not. The 27:
+
+`batch_rename_function_components`, `clear_instruction_flow_override`,
+`convert_number`, `create_function`, `create_memory_block`, `decompile_function`,
+`delete_bookmark`, `delete_function`, `disassemble_bytes`, `disassemble_function`,
+`force_decompile`, `get_entry_points`, `get_external_location`,
+`get_function_by_address`, `get_function_count`, `get_function_variables`,
+`get_metadata`, `read_memory`, `rename_function`, `rename_variables`,
+`run_ghidra_script`, `run_script_inline`, `search_functions`, `search_strings`,
+`set_bookmark`, `set_function_prototype`, `set_variable_storage`.
+
+The annotations were right in all 63 cases and none were changed. Verified
+against `tests/conformance/snapshots/mcp_schema.snap` — a capture of a live
+server's `/mcp/schema` — which agrees with the annotations on **all 235** tools
+it contains and needed no refresh.
+
+- **The catalog now follows the annotations.** `RegenerateEndpointsJson` no
+  longer preserves the catalog's `category` the way it preserves hand-authored
+  descriptions. Preserving it is what made the drift permanent: every
+  regeneration copied the stale value forward. To move a tool between groups,
+  change `@McpTool.category` or the class's `@McpToolGroup`; the catalog follows.
+- **The catalog's top-level `categories` map** was the last place the dead verb
+  taxonomy was still documented as real. Rewritten to the 18 groups actually in
+  use, adding the previously undescribed `documentation`, `function`, `headless`,
+  `debugger`, `malware`, `symbol`, `system` and `xref`.
+- **Three new guards in `EndpointsJsonParityTest`** so this cannot drift again:
+  catalog category vs. scanned category; catalog category vs.
+  `ManualToolDescriptors` (the runtime group for hand-registered routes); and the
+  `categories` map covering exactly the categories in use, with nothing stale.
+- **`tools/audit_endpoint_categories.py`** reproduces the finding without Maven,
+  a JVM or Ghidra by parsing the Java sources directly, mirroring
+  `AnnotationScanner`'s resolution rule. Run it with `--json` for the raw diff.
+  Its independent count agreed exactly with the regenerator's (`updated from
+  scanner: 63`).
+- **`PromptPolicyService` was missing from the offline `ServiceFactory`**, so
+  `/prompt_policy` — live, registered by `GhidraMCPPlugin`, and present in
+  `/mcp/schema` — sat outside every offline parity test. Added; the scanned
+  surface those tests cover is now 219, not 218.
+- README's API Reference is regenerated from the corrected catalog: its sections
+  are now the real loadable groups, so the four dead headings (Search,
+  Decompilation & Disassembly, Renaming & Labels, Scripting) are gone and
+  Malware & Anti-Analysis and Symbols, Labels & Globals appear.
+- `.gitignore`'s blanket `audit_*.py` one-off rule would have silently swallowed
+  the reproducer. `tools/` is now negated too.
 
 ### MCP-protocol conformance suite
 
@@ -129,8 +2001,442 @@ had been passing on tools that returned the wrong thing — one baseline case
 asserted `nonempty` against `"Search pattern is required"`, so it passed while
 testing nothing.
 
+### CI: the Python coverage ratchet, paid off instead of lowered
+
+The unit-test coverage gate had been red-lining pull requests that touch no
+Python at all — #442 is two `.md` files and reported Build Status=FAILURE, and 6
+of 8 open dependabot PRs were red for the same reason. The whole contributor
+queue looked stalled on review when it was blocked on a number.
+
+Nothing had got less tested. Commit `6f7e7e8` dissolved `scripts/` into
+`tools/`, and `tools/` is a coverage source while `scripts/` was not, so 533
+uncovered statements entered the DENOMINATOR in a single commit —
+`upgrade_project_language.py` (530 stmts / 343 missed),
+`build_reference_index.py` (147/147) and `ghidra_server_health_check.py`
+(43/43). The measured total fell to 57%, the floor was 58, and the gate sat on a
+knife-edge. Dropping it to 55 unblocked the queue but left the debt.
+
+The debt is now paid rather than hidden: those three operator scripts are
+**covered, not scoped out**. No module was added to `[tool.coverage.run] omit`.
+
+| Module | Before | After |
+| --- | --- | --- |
+| `tools/upgrade_project_language.py` | 35% (343 missed) | **99%** (1 missed) |
+| `tools/build_reference_index.py` | 0% (147 missed) | **99%** (1 missed) |
+| `tools/ghidra_server_health_check.py` | 0% (43 missed) | **98%** (1 missed) |
+| **total** | **57.24%** | **69.22%** |
+
+The one missed line in each is the `sys.exit(main())` under
+`if __name__ == "__main__"`, which cannot execute under import.
+
+Three new suites, ~150 tests, pinning behaviour rather than touching lines —
+`tests/unit/test_ghidra_server_health_check.py`,
+`tests/unit/test_build_reference_index.py` and
+`tests/unit/test_upgrade_project_language_main.py`. They cover the traps these
+scripts were built around: the 24h refusal on a repeat whole-project `--apply`
+(the tool is not idempotent and must not be used as its own verification), the
+MSYS `--folder` mangling that turns a run into a silent no-op, the reconciliation
+that catches a planned program which was never attempted, the checkout-leak
+bookkeeping, "saved" being distinct from "committed" on a shared project, the
+`bsim` password reaching each child on stdin and never argv, and `add_binary`
+verifying its ARTIFACT because `analyzeHeadless` exits 0 when a script throws.
+
+`--cov-fail-under` goes **55 → 67** against a measured 69.22% — a ~2 point
+margin, deliberately not the ~0.5 point knife-edge that caused the outage. The
+comment block in `.github/workflows/tests.yml` now records the whole history so
+the number is not re-derived from scratch next time.
+
+### Parameter aliases: published, and reachable — `/mcp/schema`, `/rename_symbol`
+
+Two defects in what the server told clients about itself. Neither changed
+behaviour for a caller who was already using a canonical spelling.
+
+**`/mcp/schema` never published `@Param` aliases.** `AnnotationScanner` resolves
+the canonical name and then each declared alias, for both query and body values,
+so the server genuinely serves every spelling — but `ParamDescriptor.toJson` had
+no `aliases` field, so the schema advertised only the canonical one. Anything
+reasoning about "is this a parameter the server accepts?" from the schema alone
+called a valid spelling unknown: `/get_function_labels` accepting `address=` was
+reported as a contract breach when `address` is a declared, working alias. The
+recorded schema snapshot shows the gap — 235 tools, **zero** parameters carrying
+aliases. `ParamDescriptor` now carries them and emits `"aliases": [...]`, omitted
+entirely when a parameter declares none, so the ~200 tools without aliases
+produce byte-identical schema. Six `@McpTool` routes and eleven spellings are
+affected: `/get_function_labels`, `/rename_function`, `/rename_symbol`,
+`/set_function_no_return`, `/set_function_this_type`, `/set_variable_type`.
+
+**The bridge could not use an alias even once the schema named it.** FastMCP
+validates arguments against the signature `registry._build_tool_function` builds,
+using a pydantic model whose `extra` policy is `ignore`. Measured: an alias
+argument against an optional canonical was **silently discarded** and the request
+went out without the value; against a *required* canonical the call was
+**rejected client-side** with a validation error, for a spelling the server would
+have served. The bridge now declares each alias as an optional parameter and
+folds it onto the canonical name before dispatch, in the same order Java
+resolves — canonical first, then each alias in declaration order. A required
+parameter that has aliases is no longer required in the signature (the alias may
+be the value); the check moved into the handler, which names every accepted
+spelling when none arrives. Address sanitisation applies to the folded value.
+
+**`/rename_symbol` bound one request value to two parameters.** `old_name` was
+declared both as a parameter in its own right *and* as an alias of `target`,
+because the two tools it replaced disagree about the name:
+`rename_global_variable(old_name, new_name)` meant "the symbol to rename", while
+`rename_label(address, old_name, new_name)` meant "which label at that address".
+A body carrying only `old_name` filled in `target` **and** `oldName` from the one
+value, and no schema can describe that. `target` now declares only `address` and
+`function_address`; `old_name` is a parameter and nothing else. The
+`rename_global_variable` call shape keeps working through an explicit fallback
+that resolves in exactly the order the alias list produced. **A caller sending
+both is unchanged**: `target` names the symbol, `old_name` stays the `kind=label`
+selector, and it is never used as the target while a target is present. Callers
+sending only `old_name`, only `target`, or only `address`/`function_address` are
+all unchanged too. A new offline guard fails the build if any tool ever again
+declares an alias that collides with another parameter's canonical name.
+
+Note for consumers: `tests/conformance/snapshots/mcp_schema.snap` predates this
+and will need refreshing against a deployed build before it reflects the aliases.
+
+### Setup: `preflight` resolves the launcher your MCP client has to spawn (#441)
+
+A client started from a **systemd user service** or a GUI/desktop launcher
+inherits *that launcher's* PATH, which routinely lacks `~/.local/bin` and
+`~/.cargo/bin`. The documented `"command": "uv"` then dies with
+`spawn uv ENOENT` at process-spawn time — before any bridge code runs, so
+nothing appears in any log. `python -m tools.setup preflight` now resolves `uv`
+and the `bridge-mcp-ghidra` console script with `shutil.which`, prints the
+absolute path when found, prints **every PATH entry it searched** (plus PATHEXT
+on Windows) when a required launcher is missing, and emits a ready-to-paste
+client-config snippet with the absolute path already substituted in.
+
+The check is deliberately **advisory and self-limiting**: it resolves against
+the PATH of the shell running preflight, not the client's, and its output says
+so in as many words. Implying otherwise would send people looking in the wrong
+place when the spawn still fails, which is worse than not checking at all. A
+missing console script never fails preflight — `uv run` does not install one.
+
+Every client-config example in the repo (`README.md` quick start, the macOS
+Cursor/Claude config, the Autohand invocation, and the repo's own `.mcp.json`)
+now uses an absolute `command` path, and a new troubleshooting entry covers
+`spawn uv ENOENT` directly. Reported by @Arshad-Kamal on Fedora.
+
+### Docs: minimal read-only tool allowlist
+
+For clients that gate tools through a narrow allowlist, `README.md` now
+documents a **closed** four-tool read-only set — `get_metadata`,
+`list_methods`, `get_entry_points`, `decompile_function` — plus the ordered
+next additions. The point is that an allowlist without a discovery tool is
+self-defeating: the agent cannot enumerate functions through MCP, so it falls
+back to `curl`-ing the HTTP API directly and the allowlist buys nothing.
+`list_methods` is the addition that closes the loop over the three tools
+suggested in #441 (all of which exist under exactly those names).
+
+The section also notes that tool **groups** come from the `category` on the
+Java `@McpTool` annotation as published at `/mcp/schema` — not the `category`
+column in `tests/endpoints.json`, which is separately maintained and disagrees
+for 63 of the 201 annotated endpoints.
+
+#### A refusal is not a golden
+
+That class was wider than one case. **20 of 124 committed goldens were bodies
+consisting of nothing but `{"error": ...}`** — the server's correct refusal of a
+call whose *arguments* were wrong, recorded by `--record` as the expected
+result. Each of those cases then passed forever while asserting that the
+endpoint stays broken, because nothing in either assertion layer could see it:
+
+- `assert: is_error: false` checks the MCP **protocol** flag `isError`. A tool
+  that returns an error *body* did not raise a protocol error, so the flag is
+  false and the assertion passes.
+- `assert: nonempty: true` passes because an error string is not empty.
+- The snapshot then matched its own recorded refusal on every later run.
+
+Three changes, so this cannot recur:
+
+- **`search_instructions` fixed.** The case supplied `function`, `limit` and
+  `program` but neither `mnemonic` nor `operand_pattern`, and the endpoint
+  requires at least one — a cross-parameter constraint the schema has no way to
+  express, so the synthesizer could not have known. Verified against a live
+  server that supplying `mnemonic` returns matches: the endpoint was never
+  broken, the case was. The false golden is deleted rather than re-recorded,
+  because a golden must come from the benchmark fixture in a known state.
+- **`TOOL_ARG_OVERRIDES`** in `tests/conformance/cases.py` — a per-tool argument
+  override applied after name-keyed synthesis. `--generate` overwrites
+  `generated_baseline.yaml` wholesale, so a fix hand-edited into the YAML alone
+  would be silently reverted by the next regeneration; the override is the half
+  that survives.
+- **The runner refuses to record a bare error payload** as a golden, and reports
+  that refusal as a case *failure* rather than a snapshot tally. A case whose
+  point genuinely is the refusal opts in with `expect_error_payload: true`.
+
+`tests/unit/test_conformance_snapshots.py` covers all of it offline, and carries
+the remaining 19 as an enumerated debt list with a per-entry diagnosis. The list
+can only shrink: a new error golden fails, and so does an entry that has been
+fixed but not removed. Their root causes are two — one parameter name meaning
+different things in different tools (`pattern` is a type name for
+`search_data_types` and a hex byte string for `search_byte_patterns`;
+`source_type` is a Ghidra `SourceType`, not a data type), and a synthesized
+address that is real but wrong for that particular tool.
+
+### Offline HTTP tier — the integration suite without Ghidra (#112)
+
+`tests/offline/fake_ghidra.py` is a strict fake of the plugin's HTTP surface.
+It routes from `tests/endpoints.json` (253 endpoints), checks every parameter
+against the recorded `/mcp/schema` (235 tools, each carrying its declared
+`source`), and serves payloads from the 119 committed conformance snapshots.
+Two commands now run on any machine with Python and nothing else:
+
+```bash
+pytest tests/offline/                                        # 37 tests
+pytest tests/integration/test_readonly_endpoints.py \
+       -p tests.offline.replay_plugin                        # 61 pass, 11 skip
+```
+
+The second one is the read-only integration file — the one that previously
+needed a live Ghidra on :8089 with a binary open — running with no Ghidra at
+all. Both are wired into CI as `Offline HTTP Tier (no Ghidra)` and gate
+`build-status`. The job needs no Ghidra download, so it runs in parallel with
+`java-build` and adds nothing to the workflow's critical path.
+
+It is deliberately a *strict* fake, not a response replayer. A replayer can
+only say yes: it hands back the recorded body whatever it is asked, so a caller
+using the wrong method, an invented endpoint, or a query parameter in the JSON
+body still gets 200. This one refuses. `@Param(value = "program")` defaults to
+`ParamSource.QUERY`, and a `program` sent in the body is ignored by the plugin,
+which then writes to whatever program is *current* — so that case is now a 400
+at the wire instead of a silently successful wrong-binary write. Verified by
+injection: dropping the `source` field in `schema._parse_schema` leaves all 560
+unit tests green and fails the offline tier.
+
+Its first run found ten contract breaches in the read-only suite, each a call
+the endpoint catalog does not support and each returning 200 against a live
+server, so the test passed while asserting nothing —
+`/list_functions` sent `limit`/`offset` although `ListingService` documents it
+as "no pagination"; `/search_functions_enhanced` sent `pattern` where the
+declared name is `name_pattern`; `/analyze_function_completeness` and
+`/get_function_labels` sent `address` where the declared selectors are
+`function_address` and `name`; `/get_full_call_graph` sent an undeclared
+`max_depth`; `/search_functions_by_name`, `/get_decompiled_code`,
+`/get_disassembly` and `/list_ghidra_scripts` are not endpoints at all; and
+`/disassemble_bytes` was called with GET where the catalog declares POST. They
+are recorded in `tests/offline/fixtures/expected_contract_violations.json` as a
+ratchet asserted exactly in both directions.
+
+Also surfaced: `tests/conformance/snapshots/search_instructions.snap` is a
+recorded *error* response, not a successful one.
+
+### Read-only suite contract breaches — all ten fixed, and made unrepeatable
+
+The ten breaches above are fixed and the violation baseline is now **empty**.
+Nine were broken tests; one was never a breach at all.
+
+Parameter names corrected to the declared spelling
+(`search_functions_enhanced` → `name_pattern`,
+`analyze_function_completeness` → `function_address`), and the corrected tests
+gained the assertion the wrong name had made impossible — that the filter
+actually filters and the limit actually bounds. Pagination moved to the
+endpoint that has it: `/list_functions` declares only `program`, so the two
+"pagination" tests now exercise `/list_functions_enhanced`, and four other
+calls simply stopped sending a `limit` the server drops.
+`/search_functions_by_name` → `/search_functions`;
+`/list_ghidra_scripts` → `/list_scripts`, rewritten to cover its `filter`
+parameter, since the unfiltered call was already covered.
+`/get_decompiled_code` and `/get_disassembly` were deleted: they are aliases
+for `/decompile_function` and `/disassemble_function`, which the tests
+immediately above them already cover, so the tests were duplicates that could
+only ever 404.
+
+**`/disassemble_bytes` left the read-only tier rather than being corrected in
+place.** Calling it properly is a POST that creates instructions inside a
+transaction, so "fixing" the call would have turned a permanent no-op into a
+listing mutation in the suite whose whole contract is that it never writes.
+
+**`/get_function_labels` sending `address` was NOT a breach.** `@Param(value =
+"name")` there declares `aliases = {"function", "address", "function_address"}`
+and `AnnotationScanner` honours every one at dispatch — but
+`ParamDescriptor.toJson` never emits them, so `/mcp/schema` advertises only the
+canonical name and any consumer reasoning from the schema calls a valid alias
+unknown. `tests/offline/param_aliases.py` reads the annotations directly to
+close that gap for the offline tier; the test still moved to the canonical
+`name`, which is what the annotation itself says new callers should prefer.
+
+**The guard.** `tests/unit/test_integration_call_contract.py` AST-scans every
+file in `tests/integration/` and checks each HTTP call's path, method and
+parameter names against `tests/endpoints.json` and the recorded `/mcp/schema`.
+It needs no server, no fixtures and no Ghidra, so it runs in the unit tier CI
+always executes — across all 15 integration files, not just the one the
+offline tier replays. Verified to go red on each breach shape: a nonexistent
+endpoint, a wrong parameter name, and a GET on a POST route.
+`tests/unit/fixtures/known_integration_call_breaches.json` recorded the 29
+breaches that already existed in the *other* integration files, ratcheted in
+both directions, and the read-only suite is asserted to hold zero.
+
+### The other nine files — 29 breaches to zero, and the check's own blind spots
+
+The baseline is now **empty across the whole tier** and must stay empty.
+
+Of the 29, **26 were real**. The shapes were the same as the read-only ten:
+parameters that do not exist (`/set_function_prototype` sent `address` where
+the selector is `function_address`; `/batch_set_comments` the reverse;
+`/rename_function` sent `address`, which is not among `old_name`'s aliases;
+`/apply_function_documentation` sent `address` + `documentation` when it
+declares only `json_body`), and routes that do not exist
+(`/batch_rename_variables`, renamed to `/rename_variables` before 5.0;
+`/run_script`, which is `/run_ghidra_script`). Every corrected assertion was
+mutation-tested: 19 flip PASS → FAIL when their expectation is changed, and 20
+are red against the offline fake for a stated fixture reason.
+
+**`/build_function_hash_index` and `/lookup_function_by_hash` were deleted.**
+They describe a persistent hash index and a reverse hash → function lookup this
+server does not have, and both tests accepted 404. What exists is
+`/get_function_hash` + `/get_bulk_function_hashes`, so the replacements ask the
+surviving surface the same questions: that bulk hashing works, and that a
+function's own hash is the one the bulk listing reports for it.
+
+**The `method_not_allowed` shape is not a 404.** `GhidraMCPPlugin` registers
+one HTTP context per path and never checks the method, so a GET on a
+POST-declared endpoint reaches the handler with an *empty* body and every
+`ParamSource.BODY` parameter silently takes its default. That is why fourteen
+GET calls on five POST endpoints all returned 200 while doing nothing. Each of
+those five (`/analyze_data_region`, `/detect_array_bounds`,
+`/get_assembly_context`, `/analyze_struct_field_usage`,
+`/get_field_access_context`) opens no transaction — they are POST because their
+payloads are structured, not because they write — so correcting the calls did
+not move any test into a mutating tier.
+
+**Three of the 29 were the check's own false positives**, and three more
+breaches were invisible to it. `by_path.get("/set_global")` is a dict lookup
+over the endpoint catalog, not a GET; it was reported as `method_not_allowed`
+against POST endpoints no test ever called with GET. Meanwhile `_PARAM_KWARGS`
+omitted `json_data=`, which is the keyword `http_client.post` actually takes,
+so every JSON body in the tier was unexamined; the `f"{server_url}/path"` call
+form was not parsed at all; and `tests/conftest.py` was outside the scanned
+directory even though it supplies the tier's shared fixtures — two of which
+(`sample_address`, `sample_function`) made the same bad `/list_functions` call,
+inherited by every test that asks for them. All are fixed, and an unclassified
+receiver or base URL now fails `test_every_receiver_is_classified` by name
+rather than being silently dropped.
+
+**Boundary, stated in the code and in `tests/offline/README.md`:** this proves
+the bridge speaks the protocol and that response shapes match what Ghidra
+really returned when the snapshots were recorded. It proves nothing about
+whether Ghidra does the right thing today, and it never will — the payloads are
+frozen. An endpoint with no recording returns a body stamped
+`"_fake": "synthesized"` so an assertion against one cannot look like evidence.
+
+### The GUI and headless servers do not serve the same routes, and now the catalog says so
+
+`tests/endpoints.json` records a `servers` array per endpoint — `["gui"]`,
+`["headless"]`, or both. **212 of 253 endpoints are on both servers; 27 are
+GUI-only and 14 are headless-only.** Calling one against the wrong server
+returns a 404, not a message, which is the first thing a headless user hits.
+
+The split is **derived, never declared**. Each server builds its own
+`AnnotationScanner` from a different service list and hand-registers a different
+set of legacy routes, so the scope of a tool is a property of the wiring, not of
+the tool. `tools/audit_server_scope.py` reads both servers' sources — the
+`new AnnotationScanner(...)` argument list and the
+`ManualToolDescriptors.addAll(...)` path list — resolves each argument to its
+declared type, and stamps the catalog. Adding a service to one server moves every
+one of its endpoints with no per-tool edit. This follows the rule the category
+fix established: the scanner always wins, because a hand-maintained flag drifts.
+`tests/unit/test_audit_server_scope.py` fails when the catalog and the sources
+disagree, and when a new endpoint is left unstamped.
+
+What the split turns out to be:
+
+- **GUI-only (27):** the 18 `/debugger/*` tools (Ghidra TraceRmi needs a live
+  `PluginTool`), `/prompt_policy`, and 8 hand-registered routes — `/tool/*`,
+  `/project/info`, `/mcp/health`, `/server/authenticate`,
+  `/get_current_selection`, `/batch_apply_documentation`.
+- **Headless-only (14):** `HeadlessManagementService`'s program/project
+  lifecycle (`/load_program`, `/create_project`, `/import_program`,
+  `/export_program`, `/archive_project`, `/restore_project`, …) plus `/health`,
+  `/list_projects`, `/delete_project`, `/configure_analyzer`.
+- The 11 shared services take a `ThreadingStrategy` precisely so one `@McpTool`
+  serves both modes, which is why nothing here needed a per-tool annotation.
+
+Consequences worth knowing if you run headless:
+
+- **`/mcp/health` and `/mcp/instance_info` are GUI-only.** The headless
+  equivalent of the first is `/health`; the second has no headless equivalent at
+  all. `/check_connection` is the only liveness probe both servers answer.
+- **The bridge's instance discovery is therefore GUI-only.**
+  `python/bridge_mcp_ghidra/discovery.py` probes `/mcp/instance_info` over both
+  UDS and TCP, so `list_instances` cannot see a headless server by design, not by
+  accident. Point the bridge at a headless server explicitly.
+
+The README's API Reference now marks each **(GUI only)** / **(headless only)**
+tool, and its Production Status table carried 249 / 196 / 195 against a real
+253 / 239 / 226 — three numbers the existing consistency test could not see,
+because its regex wants `<N> MCP tools` and that table writes the count after the
+label. Now pinned.
+
+### Release notes stop publishing "Headless Endpoints: 1"
+
+`.github/workflows/release.yml` derived its GUI and headless counts by grepping
+`src/main/java/com/xebyte/core/EndpointRegistry.java` — a file deleted on
+2026-07-25. A `|| echo "0"` fallback turned the missing file into a plausible
+zero, so v6.0.0 shipped **GUI Endpoints: 35** (a `createContext` line count, two
+of which were comment lines) and **Headless Endpoints: 1** (the `safeContext`
+helper's single call site), next to a tool count that was correct. Both now come
+from the catalog via `python -m tools.audit_server_scope --release-counts`, which
+raises rather than defaulting if the catalog is unreadable or unstamped — the
+fallback default is what made two releases publish a wrong number quietly.
+
+### The real-Ghidra test tier now actually runs
+
+`src/test/java/com/xebyte/core/*GhidraTest.java` builds a real `ProgramDB` through
+`ghidra.program.database.ProgramBuilder` and exercises actual disassembly and
+flow-override repair. It had **never run anywhere**, in either direction:
+
+- with `GHIDRA_INSTALL_DIR` set, all 7 tests died in `@Before` with
+  `NoClassDefFoundError: org/apache/logging/log4j/LogManager`;
+- with it unset, the `@BeforeClass` `assumeTrue` skipped every one of them — and
+  that is the branch CI took, so the suite was green while testing nothing.
+
+The cause is that the `ghidra:*` module jars are installed with
+`mvn install:install-file`, which records **no transitive dependencies at all**.
+Ghidra bundles the libraries that loading a SLEIGH language needs, but nothing
+put them on Maven's test classpath. `ApplicationConfiguration.setInitializeLogging(false)`
+does not help: `DefaultLanguageService`'s static initializer resolves `LogManager`
+before any configuration flag is consulted.
+
+The chain is 12 jars deep and was measured by leave-one-out — log4j-api/core,
+guava (+failureaccess), commons-lang3, commons-collections4, antlr-runtime,
+isorelax/msv/relaxngDatatype/xsdlib (RELAX NG validation of the language-definition
+XML), and javahelp — plus `ghidra:Graph`, which every workflow already installed
+but the pom never declared. Every one of those except failureaccess is
+load-bearing: removing it turns 7 passing tests into 7 errors.
+
+- **pom.xml** gains a `ghidra-runtime-tests` profile, activated by the presence of
+  `GHIDRA_INSTALL_DIR` — exactly the condition the tier's own `assumeTrue` gates on
+  — that adds those jars from the installation itself. This is the Maven equivalent
+  of what `build.gradle` already did with `fileTree`, which is why the Gradle
+  backend was green throughout and only Maven was broken.
+- **CI** now runs the tier in its own step with `GHIDRA_INSTALL_DIR` set. Ghidra is
+  already downloaded and unzipped for the jar install, so the marginal cost is the
+  test time alone (~34 s measured on Linux with Ghidra on local disk). The offline
+  step deliberately keeps the variable unset so the coverage ratchet goes on
+  measuring the same tier it always measured.
+- The CI step asserts on the **surefire skip counts**, not just on exit status. A
+  green `mvn test` is not proof the tier ran — `assumeTrue` reports skips as
+  success, which is precisely how this stayed dead.
+- `GhidraRuntimeClasspathGhidraTest` guards the classpath itself, reading the jar
+  list out of pom.xml rather than restating it. The filenames are version-stamped,
+  so a Ghidra upgrade renames them, and a missing classpath element is silently
+  ignored by the JVM — it would otherwise resurface as an opaque
+  `NoClassDefFoundError` in whichever test builds a `Program` first.
+
 ### Fixed
 
+- **The headless Docker image builds on current Ubuntu Noble-based Temurin
+  images while preserving access to existing data and project volumes.**
+  Container user creation reclaims UID and GID 1000 from the base image and
+  assigns them explicitly to `ghidra`, retaining the numeric ownership expected
+  by persisted volumes.
+- **`ensure-prereqs` no longer requires `pip` inside a uv-managed environment.**
+  The optional Ghidra `ghidratrace` wheel is installed with `uv pip --python`,
+  so the debugger dependency sync works after `uv sync` removes unmanaged pip.
 - **`close_program` and auto-analysis could freeze the MCP server.** Both paths
   now stay responsive.
 - **`debugger_launch`** failed for reasons that had been misattributed to the
@@ -143,173 +2449,375 @@ testing nothing.
   documented optional.
 - **`get_comment` silently omitted comment kinds** — it now emits all five.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
+- **`list_project_files`, `create_folder`, and `delete_file` failed in headless mode with `"requires GUI mode"`.**
+  Now routed through `resolveProject()` to operate across GUI, FrontEnd, and headless modes alike.
+  Headless `delete_file` closes the program it deletes by **exact** path: the first cut
+  went through `close_program`'s substring matcher, which would also close (and, headless,
+  discard the unsaved edits of) any open program whose path merely contained the target.
 - **`rename_function` now refuses to overwrite a Function ID name** unless
   `strict_mode=warn`. See below for why.
+- **A non-loopback HTTP bridge approved a browser's preflight and then refused
+  the request it had just authorized (#399, #307).** Adding `CORSMiddleware`
+  stopped the bare `OPTIONS /mcp` → `405 Method Not Allowed` that made the
+  bridge unusable from Open WebUI and MCP Inspector, but the Origin header is
+  read by **two** gates, not one: `CORSMiddleware` answers the preflight, and
+  the SDK's `TransportSecurityMiddleware` re-checks Host and Origin on the
+  actual request inside the transport app. Their allowlists were maintained
+  side by side in different syntaxes and had drifted — the CORS regex was
+  `^https?://host(:\d+)?$` (either scheme, port optional) while the rebinding
+  list held only `http://host:*` (http only, port required). So a bridge behind
+  a TLS-terminating proxy answered the preflight `200` with a full
+  `Access-Control-Allow-*` grant and then answered the POST `421 Misdirected
+  Request` (proxy on :443 forwards a **portless** Host) or `403 Forbidden`
+  (**https** Origin). That reads as a network fault rather than a policy one,
+  and it is invisible to any test that asserts on the preflight alone. Both
+  gates are now derived from one `_policy_hosts()` set, so they cannot disagree;
+  `GHIDRA_MCP_ALLOWED_HOSTS` widens both together, and it is now honored for an
+  explicit remote bind instead of only a wildcard one. Loopback behaviour is
+  unchanged (rebinding protection stays off there, native clients send no
+  Origin), strangers are still refused by both gates, and `mcp-session-id` stays
+  in `expose_headers` *and* is accompanied by `Access-Control-Allow-Origin` on
+  the real response — without that header a browser discards the session id even
+  though it was exposed.
+- **`disassemble_function` returned one instruction for a whole function** when
+  Ghidra's stored body was degenerate, and said nothing about it. See below.
 
 A change that was **reverted after deploy**: suppressing the PDB analyzer fixed
 a contract issue but broke real analysis. Both the revert and the re-baselined
 snapshots are in the history rather than squashed away.
 
-### Documentation correctness: `doc_lint` + Function ID
+### `uv.lock` refreshed — the stale `fun-doc` group is gone
+
+`uv.lock` still carried a `[package.dev-dependencies] fun-doc` group that
+`pyproject.toml` stopped declaring when fun-doc moved to the `d2-game-exe`
+repository on 2026-08-11. A lock that disagrees with its manifest is not a
+tidiness problem: **`uv run` re-locks before it runs**, so every plain
+`uv run …` in this repo silently rewrote `uv.lock` with a 653-line deletion.
+Four separate maintainer sessions hit that, each noticing and reverting it by
+hand; CI hits it too (`tests.yml` runs `uv run`, not `uv run --frozen`), which
+means the committed lock was never the thing CI installed. The failure mode
+being avoided is a 653-line unexplained lock diff riding along inside an
+unrelated PR.
+
+The refresh is `uv lock` against the current `pyproject.toml` and is a pure
+subtraction: **103 → 80 locked packages, 23 removed, 0 added, and not one
+resolved version changed.** The 23 are exactly the closure of the dead
+`fun-doc` group and nothing else — the 6 it declared (`claude-agent-sdk`,
+`flask`, `flask-socketio`, `openai`, `psycopg`, `sqlalchemy`) plus the 17
+reachable only through them: `bidict`, `blinker`, `distro`, `greenlet`,
+`itsdangerous`, `jinja2`, `jiter`, `markupsafe`, `psycopg-binary`,
+`python-engineio`, `python-socketio`, `simple-websocket`, `sniffio`, `tqdm`,
+`tzdata`, `werkzeug`, `wsproto`. `sniffio` looks like it should have survived
+on `anyio`'s account, but anyio 4.14 no longer depends on it.
+
+`python-dotenv` was **kept** despite being declared by `fun-doc`: it is also a
+transitive dependency of `pydantic-settings`, which `mcp` requires. Dropping a
+package because one of its two parents died is the mistake this refresh was
+most at risk of making.
+
+The only non-deletion in the diff is a marker tightening: `pybag`'s
+dependencies (`capstone`, `pywin32`, `win32more`) now carry
+`sys_platform == 'win32'`, inherited from `pybag`'s own marker in the
+`debugger` group. Nothing in `mcp`, `pytest`, `coverage` or the `test` group
+moved, so the coverage gate and the 3.10–3.13 matrix resolve exactly as before
+— verified by locking on each of the four interpreters.
+
+### Fixed: the offline test suite failed for anyone who cloned with Git for Windows' defaults
+
+`HardeningWiringTest` and `RunGhidraScriptProgramPropagationTest` failed on a
+**clean checkout** — 2 failures out of 444 — for contributors whose Git had
+`core.autocrlf=true`, which is what the Git for Windows installer configures by
+default. Both tests located a method by `indexOf` on a string literal
+containing `"\n"`; such a clone materialises the LF-stored sources as CRLF, so
+the literal could not match and the tests reported `Could not locate 3-arg
+runGhidraScript`. That message reads like a real code regression, and it was
+believed to be one: two independent outside contributors (#447, #448) reported
+it as pre-existing breakage and shipped their pull requests without a green
+suite, one stating he had not run the tests as a result.
+
+- Source-reading tests now go through a new test helper,
+  `com.xebyte.offline.ProjectSource`, which **normalises line endings to LF**
+  and **locates the project root from the compiled test classes** rather than
+  from the JVM's working directory. Applied to `HardeningWiringTest`,
+  `RunGhidraScriptProgramPropagationTest`, `EndpointsJsonParityTest`,
+  `ManualToolDescriptorsParityTest` and `FunctionServiceThisTypeTest` — the
+  last three carried the same latent fragility and had simply not been
+  triggered yet.
+- The two method-signature lookups are now whitespace-tolerant regexes instead
+  of literals pinning an exact newline and indent, so a reformat of the
+  declaration no longer breaks them either.
+- `HardeningWiringTest` gains a **behavioural** check that the
+  `runGhidraScript` sink refuses before resolving the requested program
+  (passing a deliberately nonexistent program name); the source-ordering
+  assertion stays as the backstop for developers who have
+  `GHIDRA_MCP_ALLOW_SCRIPTS` set.
+- New `ProjectSourceTest` pins the helper's behaviour and fails the build if
+  any test reintroduces a working-directory-relative repo path.
+- Maven and Gradle now both pass `-Dproject.basedir` to the test JVM.
+
+Verified green from two working directories on both backends, including a
+fresh `core.autocrlf=true` clone — the exact checkout that previously failed
+2/444 now passes 451/451.
+
+Note for maintainers: 93 of the repo's 197 Java files are stored **CRLF in the
+index** and there is no `.gitattributes`, so a file's on-disk line ending is
+not something a test may assume. Normalising the index would touch ~300 files
+and is deliberately left as a separate, coordinated change.
+
+### Contributor-facing process documentation
+
+`CONTRIBUTING.md` rewritten from the repository rather than from open-source
+boilerplate: both build backends, the tier-by-tier testing table stating which
+tiers need a live Ghidra on port 8089 and which need nothing, the CI job list
+with which jobs gate and which are advisory, the change-to-test map, and the
+gotchas that have measurably cost someone time. Every command in it was run
+before it was written down. It replaces a guide that documented an `examples/`
+directory, a `CONTRIBUTORS.md`, a `TOOL_REFERENCE.md` and a
+`DOCUMENTATION_INDEX.md` that do not exist, told contributors to register HTTP
+routes by hand with `httpServer.createContext` (routes have been annotation-
+discovered for several major versions), and said PRs merge to `main` when the
+default branch is `dev`.
+
+The single most important addition is not a command: **a first-time
+contributor's workflow runs need maintainer approval before any CI runs at
+all**, so a PR showing no checks is waiting on the maintainer. Five outside pull
+requests sat three weeks with zero CI results for exactly this reason, and
+nothing told either side what the wait was. Also recorded: a PR can be red for a
+reason unrelated to its content, which happened when the coverage floor sat one
+point above measured coverage and failed a two-file Markdown change.
+
+`ROADMAP.md` rebuilt from open issues, open PRs and `CHANGELOG.md` into six
+themes, each with what is done, what is in flight, and what is not started —
+plus an explicit **Not planned** section, which is the part that lets someone
+stop waiting. It carries no dates, deliberately.
+
+Issue forms (`.github/ISSUE_TEMPLATE/`) and a pull request template now ask up
+front for the four things that otherwise cost a round trip on every report:
+Ghidra version, plugin/bridge version, MCP client and transport, and the exact
+command with its exact output.
+
+### The release gate works again: a benchmark fixture that lives here
+
+The deploy-regression gate was non-functional for three weeks. When `fun-doc/`
+moved to the `d2-game-exe` repository on 2026-08-10 it took `Benchmark.dll` with
+it, and six of the eight `--test` tiers — `release`, `benchmark-read`,
+`benchmark-write`, `multi-program`, `debugger-live`, `negative-contract` — raised
+in `reset_benchmark_fixture()` before running a single assertion. `release` is
+the release-regression workflow's default tier, the gate the release checklist
+names, and the fourth command in CLAUDE.md's release floor. The two tiers that
+still worked, `endpoint-catalog` and `selected-contract`, never touch a program:
+they check that endpoints are *registered*.
+
+**The fixture is now generated rather than compiled.**
+`tests/fixtures/benchmark/make_fixture.py` emits both PE32 images directly, with
+a small x86 assembler and a small PE writer, and no toolchain at all. The old
+one was built by a pinned, licensed MSVC 6 / VS2003 tree that lived outside git
+with gitignored outputs — so it could not survive a directory move, could not be
+rebuilt by anyone without the media, and had already moved every function
+address once when the toolchain changed under it while the C sources stood
+still. Its own baseline recorded that: both toolchains linked at the same base
+and reported the same linker version, so the PE headers could not tell them
+apart and `build_manifest.json` was the only witness.
+
+Generating closes that trap rather than documenting it. The images are
+byte-identical on any machine with a Python interpreter, the addresses in
+`regression/*.yaml` are chosen by code under review instead of observed from a
+build, and `tests/unit/test_benchmark_fixture.py` fails **offline, in CI, in
+seconds** if the baseline and the binary ever disagree about one — where before
+the only symptom was a red deploy on release day.
+
+**The fixture proves itself without Ghidra.** `BenchmarkDebug.exe` is a real
+CRT-less 32-bit console program. Run bare it exits with the CRC-16/CCITT of its
+banner; run with `@` it `LoadLibraryA`s `Benchmark.dll`, resolves `calc_crc16`
+through the generated export directory and exits with the result. Both return
+`0x5db7`, which is what that CRC is in Python. A pass means the Windows loader
+accepted both images, bound the `KERNEL32` imports, ran `DllMain` and executed
+the generated machine code correctly. The regression numbers are measured too,
+by `analyzeHeadless` in a throwaway project;`cyclomatic_complexity` is
+deliberately absent from the baseline because it was not measured, and a guessed
+assertion inside a release gate is worse than no assertion.
+
+Three defects surfaced while wiring it back up:
+
+- **`negative-contract` was missing from `BENCHMARK_DEPLOY_TEST_MODES`** although
+  `run_deploy_tests` resets the fixture for it like every other entry. That set
+  is what enables the prompt policy before the imports and cleans up restored
+  CodeBrowser tools afterwards, so `--test negative-contract` imported two
+  binaries with neither.
+- **`run_benchmark_yaml_regression` printed "skipping" and returned success**
+  when it found no baselines. Its assertions are the only part of the release
+  tier that checks an *answer* rather than checking that an endpoint answered;
+  everything else the tier does is liveness. A silent skip there is precisely
+  the failure the gate exists to prevent, so it now raises.
+- **The regression schema documented two fields the runner has never read** — a
+  `data:` block and `program.symbol_count_min` — and the shipped baseline used
+  `symbol_count_min: 700`. An assertion the runner cannot see is worse than a
+  missing one, because the file reads as covering something it does not.
+
+`debugger-live` is restored **in part, and labelled as such**: its debuggee is
+back and runnable, but the tier still needs a Ghidra GUI, a dbgeng backend and
+`ghidratrace`, and none of that was verified here. The `release` tier's pass
+line now names the debugger outcome (`ran` / `SKIPPED (<reason>)`) instead of
+printing an unqualified "passed" over a step that quietly did not run.
+
+### Release workflows: stale references left by the `fun-doc` move-out
+
+Auditing every workflow that runs on a tag or a release event, ahead of cutting
+v7.0.0, found references to files that left the repository weeks earlier.
+
+- **`release-regression.yml` built a fixture from a directory that no longer
+  exists.** The `Build Benchmark.dll` step ran
+  `uv run python fun-doc\benchmark\build.py`; `fun-doc/` moved to the
+  `d2-game-exe` repository on 2026-08-10 (commit `10960f76`). The step is
+  removed, with a comment recording what it did.
+- **Removing that step is not the whole fix, and pretending otherwise would
+  have been worse.** The fixture itself moved, not just its build script, so
+  every deploy tier that calls `reset_benchmark_fixture()` — `release`,
+  `benchmark-read`, `benchmark-write`, `multi-program`, `debugger-live`,
+  `negative-contract` — cannot run here at all. `release` is the workflow's
+  own default tier and the gate the release checklist named. A guard now fails
+  in seconds with that explanation instead of after a full build, Ghidra
+  restart and deploy. Only `endpoint-catalog` and `selected-contract` still
+  run from this repository; choosing the replacement release gate is an open
+  maintainer decision, deliberately not guessed at here.
+- **`RELEASE_CHECKLIST.md` and `docs/TESTING.md` documented the unrunnable
+  path as routine.** Both now say so at the point of use, and the checklist
+  no longer asks the maintainer to enable `run_live_regression`, which
+  dispatches the same dead tier.
+- **The release checklist's offline Java step omitted its prerequisite.** On a
+  clean machine `mvn test -Dtest='com.xebyte.offline.*Test'` fails to resolve
+  dependencies before running anything; `install-ghidra-deps` is now listed
+  ahead of it, along with the `endpoints.json` regeneration pair.
+- **`.github/workflows/README.md` documented `build.yml`**, deleted on
+  2026-06-08 when build was consolidated into `tests.yml`. Replaced with the
+  workflows that actually exist.
+- **`pre-release.yml` reported installing 15 Ghidra JARs while installing 18.**
+
+### `disassemble_function`: a degenerate body is not a one-instruction function
+
+Ghidra's boundary analysis records `body_end == body_start` on a measured
+fraction of real binaries. `disassemble_function` bounded its listing by that
+stored body, so it emitted exactly **one** instruction and returned the ordinary
+`{instructions, count}` envelope. Measured 2026-08-11 against Game.exe: 8 of 24
+launcher functions, 7 of them answering with a single instruction —
+`IsFieldSeparator` is 44 bytes and came back as `MOV EAX,[0x0040cf30]`,
+`count: 1`.
+
+The damage is not the missing instructions, it is that **a truncated listing is
+shaped exactly like a complete one**. A caller cannot distinguish "the function
+ends here" from "I stopped looking", so it reasons about a fragment as though it
+were the whole function. The same defect is already known to have corrupted
+reconstruction manifests, where a degenerate extent of 1 scored a vacuous
+one-byte "match".
+
+The listing is now re-bounded by the **tighter** of the next function's entry
+point and the end of the memory block that contains the entry point, trailing
+`NOP`/`INT3` alignment fill is trimmed, and the response gains three fields so
+the caller knows why this disagrees with the function's stored extent:
+
+| Field | Meaning |
+| --- | --- |
+| `body_degenerate` | `true` — the stored body cannot be the whole function |
+| `bounded_by` | `next_function` \| `memory_block` \| `function_body` |
+| `warning` | why the stored extent, including any byte-for-byte comparison built on it, is unreliable here |
+
+**The healthy path is untouched**: a function with a sound body returns exactly
+the `{instructions, count}` envelope it always did, with no added fields, and a
+test pins that. Bodies of a single address are only flagged when they fail to
+reach the end of their *own first instruction* — a genuine one-byte function
+(an empty `__cdecl` compiles to a bare `RET`) is correct and is left alone. The
+memory-block clamp is what stops the last function in a block being bounded by
+a "next function" that lives in a different block, or in a different address
+space entirely, where `Address.compareTo` orders by space id and the bound would
+be meaningless.
+
+An empty stored body also used to reach the listing loop as a null `end` and
+fail the call with `Error disassembling function: null`; it now takes the same
+re-bounded path.
+
+### CI: the Markdown lint gate had never linted anything
+
+`.github/workflows/tests.yml` passed `config: '.markdownlintrc'` to
+`markdownlint-cli2-action`. `.markdownlintrc` is a markdownlint-cli **v1**
+filename and markdownlint-cli2 refuses it, so every run aborted before opening
+a single Markdown file:
+
+```text
+markdownlint-cli2 v0.23.1 (markdownlint v0.41.1)
+##[error]Failed due to error: Error: Unable to use configuration file
+'/home/runner/work/ghidra-mcp/ghidra-mcp/.markdownlintrc'; Configuration file
+should be one of the supported names (e.g., '.markdownlint-cli2.jsonc') ...
+```
+
+`continue-on-error: true` then turned that abort into a green check —
+run `33332052889` logged the error above and still concluded `success`. The
+documentation quality gate was decorative for its whole life.
+
+- **The config is now `.markdownlint-cli2.jsonc`**, a name the tool accepts,
+  with every rule choice carrying a comment explaining it. `.markdownlintrc`
+  is deleted so it cannot silently become the wrong source of truth again.
+- **`continue-on-error` is gone.** The job stays advisory by being absent from
+  `build-status`'s `needs` — a Markdown violation now shows a real red X and
+  blocks nothing. Softening a finding and hiding a broken tool were the same
+  switch, which is why it went.
+- **2,598 violations across 91 files → 0.** Fixed, not suppressed: 2,483 by
+  `--fix` (blank lines around headings/lists/fences/tables, table pipe
+  spacing, trailing punctuation in headings, bare URLs), and 115 by hand,
+  including a language tag on 112 code fences that no tool can infer.
+- **Three rules are off, each because its auto-fix corrupted this repo's
+  prose.** MD037 (spaces in emphasis) turned `UnitAny* not int*` into
+  `UnitAny*not int*` and `g_ prefix` into `g_prefix` — RE documentation is
+  full of C pointer syntax and Hungarian prefixes, and all 11 hits were false
+  positives. MD029 (ordered-list prefix) renumbered a 1..13 backlog that runs
+  through four headings into four lists that each restart at 1, in a document
+  whose prose refers to items by number. MD036 (emphasis as heading) wanted to
+  promote bolded lead-ins such as CONTRIBUTING's closing thank-you into real
+  headings. MD060 is pinned to `compact` rather than the default `consistent`,
+  which otherwise infers a different expectation per file.
+- **`markdownlint --fix` is not safe unsupervised**, and this is the evidence:
+  besides MD037, it inserted blank-line blockquote markers at column 0 inside
+  an indented blockquote in README, terminating the list item that contained
+  it and breaking the numbering of the install steps. Both were caught by
+  diffing every file with whitespace collapsed, not by re-running the linter.
+- **`tests/unit/test_project_consistency.py::TestMarkdownLintConfig`** pins
+  the failure: the configured path must exist, must be a name
+  markdownlint-cli2 accepts, must parse, must justify every disabled rule in a
+  comment, and the job must not carry `continue-on-error` or gate
+  `build-status`. Each assertion was verified to fail when its condition is
+  violated.
+
+### `rename_function` refuses to bury a Function ID identification
 
 `analyze_function_completeness` measures whether documentation is *present*. It
-cannot measure whether it is *true* — measured: `DATATBLS_DecimalStringToDouble`
-and `CLIENT_IsAllZeros` both scored COMPLETE_90 while tagged `LIB_CRT`.
+cannot measure whether it is *true*: a function can score COMPLETE_90 under a
+subsystem name that is simply wrong, because it is statically-linked library
+code that a documentation pass renamed.
 
-`fun-doc/doc_lint.py` is the correctness axis. It keys on **callees** rather
-than names, and its tier 0 is Ghidra's Function ID analyzer, read from
-`Function ID Analyzer` bookmarks. Those bookmarks **survive a rename**, which
-makes an overwritten library name *recoverable*, not merely detectable.
+Ghidra's Function ID analyzer already knows better, and it records what it knew
+in a `Function ID Analyzer` **bookmark** — which survives a rename. So the
+identification is not merely detectable after the fact, it is *recoverable*, and
+the server can refuse to lose it in the first place.
 
-That mattered immediately: FID had identified 4,325 functions corpus-wide, and
-143 had a subsystem prefix layered over the top by a documentation pass
-(`_vsprintf` → `DATATBLS_PrintFormattedString`; `___acrt_locale_free_numeric` →
-`DATATBLS_FreeUnitResourceArray`). All 143 were restored through a journalled,
-dry-run-default script. Six more were identified by hand, since FID never
-matched them — among them `_atodbl`, `_cftoe`, and `_NMSG_WRITE`, which is
-certain because it builds "Runtime Error!" and shows a box captioned "Microsoft
-Visual C++ Runtime Library". Five of those six carried a plate comment claiming
-a fabricated source file; all corrected.
+`NamingConventions` gains `FID_BOOKMARK_CATEGORY`, a parser for the library name
+inside that bookmark comment, and `overridesFidName`, the predicate for whether a
+proposed name would bury an identification.
+`FunctionService.rename_function` gates on it and **rejects** the rename, naming
+the library function it would have hidden. `strict_mode=warn` is the deliberate
+override, for the case where a human has decided the FID match is wrong.
 
-`doc_lint` then reported **0 findings corpus-wide, down from 149**.
+Two abstentions keep it from being a blanket "FID names are frozen" rule. The
+gate fires only when the proposed name carries a **module prefix** — renaming
+within the library's own naming scheme is not an override — and never when the
+recorded FID name is **mangled** (`?`-prefixed), because demangling it is an
+improvement.
 
-Two calibration guards are load-bearing and should not be dropped:
-`RUNTIME_PREFIXES` and `EH_ONLY_CALLEES`. Pure corpus calibration flagged
-`CRT_Init` (the conservative detector saw only 10 of 79 `CRT_` functions, so
-`CRT_` read 87% "non-library"), and treating `_CxxThrowException` as library
-evidence misfiled hand-written `PD2_AllocItemExtraData` as CRT. Those two guards
-cut a 43-finding run to 14.
+The bookmark category string is `"Function ID Analyzer"`, not `"Function ID"`.
+A filter on the shorter string matches nothing, silently, which is why it is a
+named constant rather than a literal at the call site.
 
-### Function ID databases
-
-`scripts/fid/` gains tooling to build a FID database from any static-library
-directory, plus `CountFidMatches` / `ReportFidCoverage` so a database's value is
-**measured rather than assumed**.
-
-The VC6 database works: **12 → 87 matches on `Benchmark.dll`** (7×), 92% of
-library code identified with zero false claims against the 9 authored functions.
-
-It adds nothing to D2Common (175→176) or D2Client (216→216), and the reason is
-recorded because the first attempt got it wrong: **Diablo II's static CRT is
-VS2003 SP1, not VC6.** Diagnosed two independent ways — relocation-masked byte
-comparison scores known-CRT functions at 6–18% against VC6 LIBCMT while the same
-method scores `_strlen`/`_memset` at 100.0% on `Benchmark.dll` (so the method is
-sound and the answer is negative); and the Rich header of
-D2Common/D2Client/D2Game/Fog/Storm contains **zero** VC6-compiler objects, every
-entry being a 710-series product at build 6030 = VS .NET 2003 SP1. VC6 SP6 is
-build 8804.
-
-
-### fun-doc: live-prove ABI detection + shared-build failure attribution
-
-**Only 15% of `live_prove_failed` verdicts were about the function.** Measured
-2026-07-31 over 523 terminal rows:
-
-| n | share | cause |
-| --- | --- | --- |
-| 152 | 29% | `marshal_fault` / SEH — ABI |
-| 126 | 24% | unresolved symbol from **another** candidate — collateral |
-| 78 | 15% | genuine semantic mismatch |
-| 58 | 11% | compile error (own draft) |
-| 37 | 7% | unresolved symbol in own draft |
-| 24 | 5% | duplicate symbol — collateral |
-
-`live_prove_failed` is TERMINAL, so 150 functions were permanently retired for
-build failures that were not theirs, their reimpl never executed once.
-
-**Root cause: no locking.** Every `candidates/*.cpp` links into ONE provider
-DLL built in ONE CMake tree with a `CONFIGURE_DEPENDS` glob, and the dashboard
-routinely runs six port workers at once with nothing serializing them. Worker A
-configures, CMake sweeps in worker B's just-written candidate, A fails on code
-it never wrote — and A's heal loop then deletes B.cpp *while B is still proving
-it*, so both retire. `_provider_build_lock` now serializes the build (the
-drafting, which dominates wall-clock, stays parallel), and an in-flight
-registry stops any worker healing a candidate another live worker owns.
-
-**LNK2019 was unattributable.** `build_provider_attributed` heals compile
-errors naming `candidates\X.cpp` and LNK2005 duplicate symbols, but an
-unresolved-external names only the `.vcxproj` — so it matched no attributor and
-fell through to a blanket verdict. `_find_unresolved_symbol_offender` reads
-"referenced in function F", maps F to its candidate, and quarantines the real
-offender. 126 victims traced to 35 offending candidates (top 15 = 67%).
-Attributed-collateral stages are now non-terminal, so the function is re-queued
-rather than retired — the same principle as `bad_target`.
-
-**`cdecl` was never emitted.** `translate_layout_to_spec` took the calling
-convention from the LLM-drafted `param_layout`, which knows which registers
-hold inputs but not who cleans the stack, and defaulted every stack-argument
-function to `stdcall`. `D2Oracle_Call` casts to the declared convention, so a
-cdecl callee declared stdcall means *nobody* pops — ESP leaks 4×argc per call.
-Whether that faults depends on the enclosing epilogue, which is why it showed
-up as a tendency rather than a law: **79% of `marshal_fault` functions end in a
-bare RET against 41% of live-proven ones**. The oracle has accepted `cdecl`
-since it was written (`ParseCallConv`); the translator simply never emitted it.
-The convention is now read from the disassembly, and a `RET n` that contradicts
-the drafted arity is *refused* rather than called — a wrong slot count on a
-callee-cleans convention skews ESP and access-violates the game.
-
-Repair for the existing data:
-`fun-doc/scripts/requeue_collateral_build_failures.py` (dry-run default).
-
-### fun-doc: dependency health monitoring + unattended recovery
-
-**An oracle outage stopped a six-worker prove fleet for 70 minutes and nothing
-recovered it.** Measured 2026-07-30: `consecutive_down: 94`,
-`game_running: false`, `relaunch_stage: null` — *zero* recovery attempts. Three
-correct-in-isolation decisions deadlocked each other:
-
-1. `_maybe_auto_recover` was reachable only via `game_wedged`, which requires
-   `running and not reachable`. A game that fully **exited** had no unattended
-   path back at all.
-2. The need-predicate was "a port worker is running". A dead oracle makes port
-   workers drain into `oracle_unavailable` and exit, so once the last one went
-   the predicate went false and recovery refused with *"nothing needs the
-   oracle right now"*.
-3. Recovery gave up permanently after 3 attempts.
-
-The waste was measurable: `ce0c6ae1` burned 50 of 52 candidates against the
-dead oracle (96%), `9b7d7928` 78 of 100.
-
-**Recovery** (`oracle_health.py`) now triggers on a dead game as well as a
-wedged one, and the need-predicate widened to "a port worker is running **or**
-unresolved port candidates exist" — the durable fact rather than its transient
-consequence. The 3-attempt cap became a *burst*: past it the interval doubles
-to a 30-minute floor and retries continue indefinitely, so an overnight stall
-self-heals instead of waiting for a human, while a permanently broken launcher
-settles at ~2 attempts/hour rather than looping.
-
-**Ghidra** got a monitor at all (`ghidra_health.py`, new). It also emits the
-`ghidra_health` bus event that `audit/rules.yaml`'s `ghidra_offline_sustained`
-rule has been keyed on since Phase 1 — **no production code had ever emitted
-it**, so that rule had never fired in its life. Restore policy is narrower than
-the oracle's by design: launch only when no Ghidra process exists, never kill a
-running one (that risks unsaved programs and stranded shared-server checkouts).
-Two traps it avoids, both live on the dev box: process detection matches
-`ghidra.GhidraClassLoader` rather than a bare `*ghidra*` glob, which would
-false-match this repo's own VSCode Java language server; and install resolution
-prefers the root observed on the running process, because `GHIDRA_INSTALL_DIR`
-pointed at a nonexistent path and `try_launch_ghidra`'s fallback list then
-reached a *different version* that does exist.
-
-**Worker roster** now survives the stop that erases it. `save_priority_queue`
-was *stripping* `dashboard_active_workers` on every write — that, not the
-restore call site, is where auto-restore was really retired, and it is why the
-restart had nothing to offer. The roster is kept and surfaced as a one-click
-banner; auto-restore stays retired, so a crash-looping dashboard can never
-silently re-spawn the fleet.
-
-**PORT workers** stop burning candidates on a dead oracle
-(`PortOracleBackoff`): after 3 consecutive `oracle_unavailable` they wait for
-the oracle instead, heartbeating through `on_idle` so the watchdog does not
-stall-kill them. Capped, so static-harness work is never starved.
-
-**Dashboard** gained a 5-dot header strip (Dashboard · Ghidra · Oracle+Game ·
-Provider · Store) behind `/api/health/all`. The dot that was there before
-reported the *browser's socket.io link*, which stays green while every
-dependency is dead. Degradations also fire a native Windows toast
-(`notify.py`, edge-triggered and rate-limited), and
-`install-scheduled-task.ps1` registers the dashboard to start elevated at logon
-with **no UAC prompt** — which the self-elevating script cannot do.
+A corpus-scale documentation audit built on these bookmarks, and the linter that
+drove it, live in the `d2-game-exe` repository along with the rest of the
+Diablo II reconstruction work. Only the server-side gate is recorded here.
 
 ### `analyze_global_completeness`: an untyped global can never band COMPLETE_80
 
@@ -317,7 +2825,7 @@ with **no UAC prompt** — which the self-elevating script cannot do.
 core axis budget is name(25) + comment(25) + type(20) + bytes(15) = 85, so an
 untyped global that was perfect on every *other* core axis landed on precisely
 the lowest band floor. It was then counted as documented by the `Complete`
-property map, by fun-doc's `effective_score >= Target` draft gate, and by every
+property map, by any downstream `effective_score >= Target` gate, and by every
 dashboard rollup — for a value whose width and interpretation are still unknown.
 The type is the one axis you cannot read around: a good name and a good plate
 comment describe what the bytes *mean*, not how many of them there are or how to
@@ -332,136 +2840,12 @@ inflated. The response carries `score_ceiling` / `score_ceiling_reason` so a
 caller can see why it stopped at 79 instead of guessing.
 
 Clamping the score rather than only suppressing the band is deliberate: the band
-is not the only consumer. fun-doc's assess pass tallies `at_target` off
+is not the only consumer. Downstream passes tally `at_target` off
 `effective_score` directly, so a band-only fix would have left untyped globals
 counted at Target while showing no band.
 
 Covered by `com.xebyte.offline.GlobalCompletenessTypeGateTest`, which sweeps the
 whole 0-100 range and asserts no gated score bands.
-
-### fun-doc: pending vectors are namespaced by binary and their append is locked
-
-**Golden-vector staging files were keyed on the function name alone, so different
-binaries' same-named functions merged into one file.** Running Prove (PORT)
-workers on eleven binaries concurrently surfaced it immediately:
-`vectors/_pending/shutdown_stub_no_op.json` had accumulated **101 vectors from
-five DLLs** — D2Common, Bnclient, Fog, Storm and D2CMP — all filed under a single
-`fn: "ShutdownStubNoOp"` key. Those are five distinct compiled functions that
-merely share a stub name, and stub/CRT names (`StubReturnZero`, `strcoll`,
-`NoOp`, `UnwindExceptionFrame`) recur in nearly every D2 DLL. Merging their
-golden values is how false divergences get manufactured — the same failure shape
-as reading `MOVZX` as a 32-bit datum. Four staging files were polluted this way.
-
-`write_pending_vectors` now takes the source binary as its first argument and
-writes `<module>_<system>.json`, mirroring `write_draft`'s `{module}_{symbol}`
-convention, which had this right all along (`Fog_ShutdownStubNoOp.hpp` vs
-`Storm_ShutdownStubNoOp.hpp`). The argument is required, not optional: a default
-would let the bug return silently.
-
-**The append was also an unguarded read-modify-write.** Two workers staging the
-same binary's vectors concurrently lost one side's entries outright — measured at
-up to **23 of 24 concurrent appends dropped**. It is now wrapped in an
-`_interprocess_lock` mirroring `provider_pause`'s (msvcrt/fcntl, fail-open), which
-is required rather than a thread lock because the `--port` CLI runs in a different
-process from the dashboard's worker threads and both call this function. Lock
-files live in the system temp dir, never in `_pending/` — that directory is a
-human-review surface.
-
-`fun-doc/scripts/migrate_pending_vectors.py` re-splits legacy files by the source
-binary recorded in each vector's own `note`, normalizing the two program spellings
-(`/Mods/PD2-S12/D2Common.dll` and bare `D2Common.dll`) to one stem. Dry-run by
-default, archives originals to `_pending/_premigration/` rather than deleting, and
-never drops an unattributable vector. Applied: 148 files migrated, 3,605 vectors
-rewritten, 0 lost, 0 multi-binary files remaining, idempotent on re-run.
-
-### fun-doc: globals lose the DOC_ rung ladder; dashboard read layer un-broken
-
-**The dashboard's Globals and Functions inventories had both been returning zero
-rows against a live Ghidra.** `conformance_dashboard.py` still parsed
-`/list_globals`, `/list_segments` and `/list_functions` as newline text; 6.0.0
-reshaped all three into JSON envelopes, and the `isinstance(txt, str) else ""`
-fallbacks turned each dict into an empty string. Measured on
-`/Mods/PD2-S12/D2Common.dll`: globals `0 → 2,222`, functions `0 → 2,195`,
-`_image_range` `None → 0x6fd50000-0x6fdf9000`.
-
-The 6.0.0 caller sweep had a guard test for exactly this class of miss, and it
-was green — `tests/performance/test_response_contract_callers.py` blanket-exempted
-`conformance_dashboard.py` to keep its endpoint-name contract table quiet, which
-also blinded it to eight real call sites in the same file. The exemption is now
-per-line and shape-based (`("GET", "/path")` table rows), the file is checked,
-and `list_functions` was added to the reshaped-endpoint list. Verified failing on
-a reintroduced bug, not just passing.
-
-**Globals no longer carry DOC_DRAFT / DOC_REVIEWED / DOC_VERIFIED.** A survey of
-all 32 project binaries found 19,996 `Doc` property entries and every one was
-`DOC_DRAFT`: the other two rungs had no producer anywhere and read zero on every
-binary, forever — `DOC_VERIFIED` had no reachable definition at all, since
-there is no proof pipeline for a data address. `DOC_DRAFT` itself was a watermark
-rather than a quality signal (stamped on any global crossing Target, then used as
-the assess pass's skip condition), which is why D2Common read 96% "documented"
-against 51% typed and why 2,142 of its 2,231 globals could never be re-scored.
-4,848 of the entries (28%) also sat on the wrong program — D2CMP.dll held 4,049
-of which only 307 were its own — from `/set_property`'s query-sourced `program`
-parameter being passed in the body.
-
-Globals now have two independent signals:
-
-- **Completeness** — the `Complete` band map (`COMPLETE_80/90/95/100`), machine-scored,
-  live, demoting. This is the single Globals bar; the second "Globals · Documentation"
-  bar and its hatched typed-groundwork underlay are gone. The underlay's `_GLOB_PRIM`
-  regex also disagreed with the Java scorer about what "typed" means (it rejected
-  `int`/`dword`/`word`/`byte`; the scorer only rejects `undefined*`), which is the
-  rest of the 96%-vs-51% gap. One definition now, matching the scorer.
-- **Trust** — `Doc` reduced to the single value `REVIEWED`, meaning a *different*
-  provider re-checked the global against its real uses and left no blocking issues.
-  New `config.globals_audit_provider` (default `null`, separate from the per-function
-  `audit_provider`); it refuses loudly if set to the provider doing the documenting.
-  Manual Confirm/Clear per row via `POST /api/conformance/global_review`.
-
-`run_assess_globals_pass` now re-scores every in-scope global every pass with no
-cache. The scorer is ~15 ms/address measured, so a full 2,231-global sweep is ~32
-seconds — never enough saving to justify a cache that could go stale.
-
-`fun-doc/migrate_doc_map.py` retires the legacy entries: dry-run survey by default,
-always snapshots to `fun-doc/backups/doc_map_<stamp>.json` first, `--apply` to
-clear, `--strays-only` for the wrong-program subset, `--restore` to replay.
-
-`fun-doc/assess_globals_all.py` sweeps the re-score across every project binary and
-reports what moved. Needed because the retired cache had frozen bands project-wide,
-not just on one binary.
-
-### fun-doc: priority_queue.json config writes merge instead of clobbering
-
-`save_priority_queue()` wrote the whole file from the caller's in-memory snapshot,
-making every writer a last-writer-wins clobberer of every other writer. Observed
-live twice while verifying the globals work: `globals_audit_provider` was set
-through the dashboard, confirmed on disk, and then silently reverted to `null` by a
-concurrent process that had loaded the queue before the edit and saved it back
-after. No error, no log line — the setting simply vanished, and it was only caught
-because a worker started afterwards with the wrong policy.
-
-`load_priority_queue()` now stamps a baseline and `save_priority_queue()` does a
-3-way merge on `config`, inside the write lock: a key the caller never touched
-takes whatever is on disk now, a key the caller changed wins. Explicitly setting a
-value to `null` still counts as an opinion, so settings remain clearable. Scoped to
-`config` — `pinned` is a list with add/remove semantics that a blind merge would
-corrupt by resurrecting unpinned entries. Covered by
-`tests/performance/test_queue_config_merge.py`, which reproduces the exact
-production sequence and fails without the merge.
-
-### fun-doc: worker progress counters stop reporting successes as failures
-
-Both the globals and port lanes bucketed "anything that is not `completed` or a
-short list of skips" into `failed`. A globals pass with 2 documented and 1
-legitimately unchanged global reported `failed=1`; the port lane reported 66
-failures that were all ordinary classifications. Both lanes now use their real
-outcome vocabularies — globals: `improved`/`lateral_change` are successes and
-`no_change` is a skip; port: `shadow_leaf_pending` is a success and
-`unknown_skip`/`handle_abort_hazard_skip`/`oracle_unavailable` are skips, leaving
-`harness_failed`/`blocked`/`error` as the only failures. A counter that cries wolf
-trains you to ignore the number that is supposed to mean something.
-
----
 
 ## v6.0.0 - 2026-07-25 (major: security hardening with a breaking default, program storage tools, provider resilience)
 
@@ -474,6 +2858,11 @@ trains you to ignore the number that is supposed to mean something.
 > backward-incompatible default is why this release is a major version bump.
 
 ### Security (pre-release hardening)
+
+- **Authenticated non-loopback MCP bridge.** When the bridge has
+  `GHIDRA_MCP_AUTH_TOKEN` and exposes its HTTP/SSE transport beyond loopback,
+  clients must present the same bearer token. This prevents the bridge from
+  acting as an unauthenticated confused deputy for its protected Ghidra server.
 
 - **Anti-CSRF / DNS-rebinding guard on the HTTP servers.** Loopback binding
   does not stop a web page the operator visits from issuing a cross-origin
@@ -841,10 +3230,10 @@ Patch release fixing Windows UDS/TCP fallback regression and decompiler output a
   in schema, with optional deprecation logging per alias hit (configurable). Non-breaking change:
   all existing API calls continue to work unchanged.
   
-  **Comprehensive Audit & Standardization Complete (v5.14.1)**: 
+  **Comprehensive Audit & Standardization Complete (v5.14.1)**:
   - Audited all 251 endpoints across 14 service classes (~20K lines)
   - 99%+ parameter naming compliance achieved (most services already compliant)
-  - FunctionService standardized: `/rename_variable`, `/set_local_variable_type`, 
+  - FunctionService standardized: `/rename_variable`, `/set_local_variable_type`,
     `/set_parameter_type`, `/set_function_this_type`, `/mark_no_return`
   - All remaining services verified 100% compliant with snake_case standard
   - Parameter resolution: canonical name first, then aliases in order, full backward compatibility
@@ -1039,6 +3428,7 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   traversal vector that could place or overwrite a program outside the
   intended folder. Covered offline by `GzfExportImportTest`.
 
+<!-- markdownlint-disable-next-line MD024 --><!-- repeats on purpose: carried over from 5.12.0, see lead-in above -->
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -1051,6 +3441,7 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   `" ARM:LE:32:Cortex "` resolve instead of failing the lookup. The
   success response now also echoes the resolved `language`.
 
+<!-- markdownlint-disable-next-line MD024 --><!-- repeats on purpose: carried over from 5.12.0, see lead-in above -->
 ### Fixed
 
 - **Headless: `/export_program` refuses to guess on an ambiguous bare
@@ -2362,8 +4753,7 @@ were biting the globals worker:
 
 ### Tests
 
-- **17 new offline JUnit tests** for `NamingConventions.checkGlobalNameQuality`
-  + `checkGlobalPlateComment` (53 total — was 47, +6 plate-comment).
+- **17 new offline JUnit tests** for `NamingConventions.checkGlobalNameQuality` + `checkGlobalPlateComment` (53 total — was 47, +6 plate-comment).
 - **19 new offline Python tests** for `global_scorer.py` (ordering,
   blacklist, pause-gate, persistence shape, threaded-class behavior).
 - **18 new live integration tests** in `tests/integration/test_global_endpoints.py`
@@ -2854,20 +5244,23 @@ changes. Semver PATCH bump.
   Changed the gate to `!= 0`.
 
   Live verification (2026-04-15 14:18–14:23, 5 runs across both providers):
-  ```
+
+  ```text
   InitializeVideoState            codex   59→100  (+41)  FULL:comments  completed
   ResetNpcMenuState               claude  59→100  (+41)  FULL:comments  completed
   CreateMissileCheckingSkillFlags codex   61→100  (+39)  FULL:comments  completed
   InitializeExpansionAudio        claude  61→ 92  (+31)  FULL:comments  completed
   ReinitializeExpansionAudio      codex   61→ 91  (+30)  FULL:comments  completed
   ```
+
   Average delta: **+36.4%** vs. yesterday's +13-25%. Five for five reached
   the `good_enough_score` (80) on the first attempt.
 
 - **Infinite re-pick loops on no-progress runs** — Selector had no
   mechanism to blacklist a function that keeps completing with zero
   progress. Observed pattern on 2026-04-15:
-  ```
+
+  ```text
   RenderResourceBarProgress       codex  ×46 runs, all +0%
   CLIENT_UpdateUnitDisplayEffects codex  ×68 + claude ×18, all +0%
   IsPathTargetMonsterBoss         codex  ×24 runs, 23 at +0% then +10
@@ -2875,6 +5268,7 @@ changes. Semver PATCH bump.
   CheckNetworkSessionTimeout      claude ×27 runs, pattern [-8,+8,+0×25]
   CLIENT_UpdateUnitDisplayEffects claude ×18 runs, all +0%
   ```
+
   Guard #2 (no-progress downgrade) requires `tool_calls_made == 0`, so
   `-1` from codex/claude never triggered it. `consecutive_fails` only
   tracks hard failures, not stagnant completions. `partial_runs >= 3`
@@ -2989,7 +5383,7 @@ Stability and observability hotfix on top of v5.3.0. Ships after a multi-hour li
 
 ### Live verification (final test session)
 
-```
+```text
 63 runs across 6 parallel workers (4×minimax, 1×codex, 1×claude)
   minimax: 37 runs, +20.9% avg score delta, 0 failures
   codex:   18 runs, +24.6% avg score delta, 0 failures
@@ -3123,13 +5517,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Breaking Changes
 
 | Tool / Behavior | Before | After (v5.0) |
-|-----------------|--------|--------------|
+| ----------------- | -------- | -------------- |
 | `batch_rename_variables` | endpoint name | **Renamed** to `rename_variables` — update all callers |
 | `add_struct_field` | `insertAtOffset` (shifts subsequent fields) | `replaceAtOffset` — same call, different field layout |
 | `set_local_variable_type` | accepted undefined→undefined silently | **Rejected with error** — type must actually change |
 | Struct field names | passed through as-is | **Auto-prefixed** with Hungarian notation based on data type |
 
 ### Completeness Scoring Redesign
+
 - **Log-scaled budget system**: Every per-count deduction category now has a fixed point budget with log-scaled penalties. No single category can dominate the score. Monster functions (5,000+ variables) no longer score 0%.
 - **Tiered plate comment scoring**: Missing plate (-35pts), stub (-25pts), incomplete (-15pts), minor (-8pts), complete (0pts). Rewards quality, not just presence.
 - **Effective score only counts fixable deductions**: Structural (unfixable) deductions are fully forgiven. Functions with only structural deductions score 100% effective.
@@ -3138,17 +5533,20 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **`__thiscall` ECX auto-param**: Correctly classified as structural/unfixable. `set_function_prototype` warns when `__thiscall` `this` type can't be changed.
 
 ### Naming Convention Enforcement
+
 - **NamingConventions.java**: Centralized validation utility -- PascalCase function names, Hungarian variable prefixes, `g_` global prefixes, snake_case labels, plate comment structure.
 - **Auto-fix struct field prefixes**: `create_struct`, `add_struct_field`, `modify_struct_field` automatically apply correct Hungarian prefixes based on field type.
 - **Function name validation**: Warns on non-PascalCase, missing verb, too short. Module prefixes (`UPPERCASE_`) accepted and validated separately.
 - **`set_local_variable_type` rejects undefined-to-undefined**: No-op type changes rejected with helpful error.
 
 ### New Tools
+
 - **`/set_variables`**: Atomic type + rename in a single transaction. Sets types first, decompiles, then renames with Hungarian validation. Eliminates SSA churn.
 - **`/check_tools`**: Verify if specific tools are callable. Returns `callable`, `not_loaded`, or `not_found` with fix suggestions.
 - **`/rename_variables`**: Renamed from `/batch_rename_variables` for conciseness.
 
 ### Tool Improvements
+
 - **`batch_set_comments`**: `decompiler_comments` and `disassembly_comments` arrays now optional (default `[]`). Omitting `plate_comment` leaves existing plate untouched.
 - **`add_struct_field`**: Uses `replaceAtOffset` instead of `insertAtOffset` -- overlays undefined bytes without shifting subsequent fields. Off-by-one at struct boundary fixed.
 - **`modify_struct_field`**: Accepts `offset:N` syntax (e.g., `offset:16` or `offset:0x10`) for unnamed fields.
@@ -3157,6 +5555,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **`get_current_function` / `get_current_address`**: Now discovers CodeBrowser instances via ToolManager (was broken in FrontEnd mode). Returns JSON with program path.
 
 ### Plate Comment Validation
+
 - **Summary line check**: First non-empty line must be >20 chars.
 - **Parameter count cross-validation**: Compares Parameters section entries against function signature.
 - **Returns/return-type match**: Catches void function with non-void docs and vice versa.
@@ -3165,6 +5564,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Parameter entry quality**: Flags entries lacking type + description.
 
 ### fun-doc Automation Engine
+
 - **Codex SDK integration**: `AI_PROVIDER = "codex"` routes to OpenAI Codex Python SDK with MCP tools. Claude Code SDK also integrated.
 - **Select mode (`-s`)**: Fetches current function from CodeBrowser, builds prompt. `--depth 2` recursively collects callers/callees.
 - **Manual mode (`-m -s`)**: Single-keypress flow -- copies prompt, press any key for next function, `q` to quit.
@@ -3173,6 +5573,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Smart mode routing**: >= 100% VERIFY, >= 70% FIX, < 70% FULL. No smart promotion.
 
 ### Prompt V6 Improvements
+
 - **Score removed from prompts**: Prevents models from coasting on high scores.
 - **Consistency checklist**: Step 5 requires function name vs plate comment alignment check.
 - **Module prefix decision**: 2-signal gate (Source file, behavior domain, callee family) before applying prefix.
@@ -3185,6 +5586,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Non-ASCII sanitized**: All em dashes and arrows replaced with ASCII equivalents.
 
 ### Bridge Improvements
+
 - **All tools loaded at startup** (`--lazy` default changed to False): Fixes Claude Code/Codex not seeing dynamically loaded tools.
 - **`load_tool_group` returns tool names**: Response includes exact list of newly loaded tools.
 - **TCP fallback in `list_instances()`**: Windows environments now show the active TCP connection (PR #90).
@@ -3192,6 +5594,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Xref tools accept address directly**: `get_function_callers`/`get_function_callees` no longer require name-only lookup.
 
 ### Bug Fixes
+
 - **`effective_score > max_achievable_score`**: Fixed -- effective score capped at max achievable.
 - **`analyze_for_documentation` pre-fetch**: Was using `address` instead of `function_address` param. Fixed.
 - **CodeBrowser detection**: `get_current_function`/`get_current_address` now search running CodeBrowser instances via ToolManager.
@@ -3204,12 +5607,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Annotation-Based Endpoints & Dynamic Bridge Registration
 
 #### `@McpTool`/`@Param` Annotation Infrastructure
+
 - All ~144 service methods across 12 service classes annotated with `@McpTool` and `@Param`
 - `AnnotationScanner` discovers annotated methods via reflection and generates `EndpointDef` records
 - `/mcp/schema` endpoint returns JSON schema describing all tools, parameters, types, and categories
 - New endpoints are now a single step: annotate the service method and it's automatically discoverable
 
 #### Dynamic Bridge Tool Registration
+
 - Bridge fetches `/mcp/schema` from Ghidra HTTP server at startup and auto-registers ~170 MCP tools
 - Reduced bridge from ~8,600 lines to ~2,400 lines (72% reduction)
 - 22 complex tools with bridge-side logic (retries, local I/O, multi-call, Knowledge DB) remain as static `@mcp.tool()` functions
@@ -3220,6 +5625,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Graceful fallback: if Ghidra is not running, logs warning and starts with only static tools
 
 #### Test Suite Updates
+
 - Rewrote `test_mcp_tool_functions.py` for dynamic registration architecture
 - Tests cover: schema type mapping, default conversion, handler creation, parameter routing, static tool availability
 - Updated endpoint count assertions for static-only decorator count (15-50 range)
@@ -3240,6 +5646,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Documentation Completeness Improvements
 
 #### `analyze_function_completeness` Enhancements
+
 - Added **context-aware scoring** for compiler/runtime helper functions (e.g., CRT/SEH helpers) to reduce false penalties.
 - Added **fixable vs structural deductions** in response payload:
   - `fixable_deductions`
@@ -3255,11 +5662,13 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Updated workflow recommendations to be **classification-aware** (compact helper workflow vs full workflow).
 
 ---
+
 ## v4.2.0 - 2026-03-02
 
 ### Knowledge Database Integration + BSim + Bug Fixes
 
 #### Knowledge Database (5 new MCP tools)
+
 - **`store_function_knowledge`** -- Store documented function data (name, prototype, comments, score) to PostgreSQL knowledge DB with fire-and-forget semantics
 - **`query_knowledge_context`** -- Keyword search across documented functions using PostgreSQL `ILIKE`/`tsvector` full-text search. Returns relevant prior documentation to inform new function analysis
 - **`store_ordinal_mapping`** -- Store ordinal-to-name mappings per binary version (e.g., D2Common.dll ordinal 10375 = GetUnitPosition)
@@ -3270,6 +5679,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Schema**: 3 new tables (`ordinal_mappings`, `documented_functions`, `propagation_log`) with full-text search indexes and `updated_at` triggers
 
 #### BSim Cross-Version Matching (4 new Ghidra scripts)
+
 - **`BSimIngestProgram.java`** -- Ingest all functions from current program into BSim PostgreSQL DB. One-time per binary version.
 - **`BSimQueryAndPropagate.java`** -- Query BSim for cross-version matches of a specific function, returns JSON sorted by similarity score
 - **`BSimBulkQuery.java`** -- Bulk query all undocumented (FUN_*) functions against BSim DB for batch propagation
@@ -3277,18 +5687,22 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **3-tier matching cascade** in RE loop: exact opcode hash (fastest) -> BSim LSH similarity (medium) -> fuzzy instruction pattern (slowest)
 
 #### Bug Fixes
+
 - **Fix #44**: Enum value parsing -- Gson parses JSON integers as `Double` (0 -> 0.0), causing `Long.parseLong("0.0")` to fail silently. Replaced hand-rolled parser with `JsonHelper.parseJson()` + `Number.longValue()`. Hex strings (`0x1F`) now also accepted.
 - **Improved error messages**: Enum creation with empty/invalid values now returns descriptive errors instead of silent failures
 
 #### Dead Code Cleanup
+
 - Removed ~243KB of deprecated workflow modules superseded by the RE loop skill
 - Deleted deprecated slash commands (`auto-document.md`, `improve-cycle.md`, `fix-issues.md`, `improve.md`)
 
 #### Migration Scripts
+
 - **`scripts/apply_schema.py`** -- Apply knowledge DB schema to PostgreSQL (idempotent, handles "already exists" gracefully)
 - **`scripts/migrate_learnings.py`** -- One-time migration from flat files (learnings.md, loop_state.json, community_names.json) to knowledge DB tables
 
 #### Counts
+
 - 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 
 ---
@@ -3298,22 +5712,26 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Parallel Multi-Binary Support
 
 #### Universal `program` Parameter
+
 - **Every program-scoped MCP tool now accepts an optional `program` parameter** -- Pass `program="D2Client.dll"` to any tool to target a specific open program without calling `switch_program` first
 - **Eliminates race conditions** -- Parallel requests targeting different programs no longer contend on shared `currentProgram` state
 - **Backward compatible** -- Omitting `program` falls back to the current/default program, preserving existing workflows
 - **Full stack coverage**: Bridge helpers (5), 136 MCP tools, 130+ GUI endpoints, 130+ headless endpoints, and all 9 service classes updated
 
 #### Service Layer Changes
+
 - All service methods now accept `String programName` and resolve via `getProgramOrError(programName)`
 - Backward-compatible overloads (`method(args)` delegates to `method(args, null)`) preserve internal callers
 - Services updated: FunctionService, CommentService, DataTypeService, SymbolLabelService, XrefCallGraphService, DocumentationHashService, AnalysisService, MalwareSecurityService, ProgramScriptService
 
 #### Bridge Changes
+
 - `safe_get`, `safe_get_json`, `safe_post`, `safe_post_json`, `make_request` all accept `program=` kwarg
 - GET helpers inject `program` into query params; POST helpers append `?program=X` to URL
 - `switch_program` docstring updated: now documented as setting the default fallback, with explicit `program=` recommended for parallel workflows
 
 #### Counts
+
 - 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 
 ---
@@ -3323,12 +5741,14 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Major Release -- Service Layer Architecture Refactor
 
 #### Architecture Refactor
+
 - **Monolith decomposition**: Extracted shared business logic from `GhidraMCPPlugin.java` (16,945 lines) into 12 focused service classes under `com.xebyte.core/`
 - **Plugin reduced 69%**: `GhidraMCPPlugin.java` went from 16,945 to 5,273 lines (server lifecycle, HTTP wiring, and GUI-only endpoints remain)
 - **Headless reduced 67%**: `HeadlessEndpointHandler.java` went from 6,452 to 2,153 lines by delegating to the same shared services
 - **Zero breaking changes**: All HTTP endpoint paths, parameter names, and JSON response formats are unchanged. The MCP bridge and all clients work without modification
 
 #### New Service Classes
+
 - `ServiceUtils` -- shared static utilities (escapeJson, paginateList, resolveDataType, convertNumber)
 - `ListingService` -- listing/enumeration endpoints (list_methods, list_functions, list_classes, etc.)
 - `FunctionService` -- decompilation, rename, prototype, variable management, batch operations
@@ -3342,12 +5762,15 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - `ProgramScriptService` -- program management, scripts, memory, bookmarks, metadata
 
 #### New Feature
+
 - **Auto-analyze on open_program**: `open_program` endpoint now accepts optional `auto_analyze=true` parameter to trigger Ghidra's auto-analysis after opening a program (inspired by PR #42 from @heeen)
 
 #### Counts
+
 - 184 MCP tools, 169 GUI endpoints, 173 headless endpoints
 
 #### Design Decisions
+
 - Instance-based services with constructor injection (`ProgramProvider` + `ThreadingStrategy`)
 - GUI mode uses `GuiProgramProvider` + `SwingThreadingStrategy`; headless uses `HeadlessProgramProvider` + `DirectThreadingStrategy`
 - Services return JSON strings (same as before); `Response` sealed interface deferred to v5.0
@@ -3360,14 +5783,17 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Bug Fixes + Version Management
 
 #### Bug Fixes (Cherry-picked from PR #38)
+
 - **Fixed trailing slash in DEFAULT_GHIDRA_SERVER** -- `urljoin` path resolution was broken when the base URL ended with `/`
 - **Fixed fuzzy match JSON parsing** -- `find_similar_functions_fuzzy` and `bulk_fuzzy_match` now use `safe_get_json` instead of `safe_get`, which was splitting JSON responses on newlines and destroying structure
 - **Fixed OSGi class cache collisions for inline scripts** -- Inline scripts now use unique class names (`Mcp_<hex>`) per invocation instead of the fixed `_mcp_inline_` prefix, which caused the OSGi bundle resolver to cache stale classloaders
 
 #### Bug Fixes
+
 - **Fixed multi-window port collision (#35)** -- Opening a second CodeBrowser window no longer crashes with "Address already in use". The HTTP server is now a static singleton shared across all plugin instances, with reference counting for clean shutdown
 
 #### Completeness Checker Improvements
+
 - **New `batch_analyze_completeness` endpoint** -- Analyze multiple functions in a single call, avoiding per-function HTTP overhead. Accepts JSON array of addresses, returns all scores at once
 - **Thunk comment density fix** -- Thunk stubs are no longer penalized for low inline comment density (thunks are single JMP instructions with no code to comment)
 - **Thunk comment density recommendations** -- `generateWorkflowRecommendations` no longer suggests adding inline comments to thunk functions
@@ -3377,6 +5803,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - **Relaxed thunk plate comment validation** -- Thunks only need to identify as forwarding stubs, not include full Algorithm/Parameters/Returns sections
 
 #### Infrastructure
+
 - **Fixed ENDPOINT_COUNT** -- Corrected from 146 to 149 to match actual `createContext` registration count
 - **Centralized version in extension.properties** -- Description now uses `${project.version}` Maven filtering instead of hardcoded version string
 - **Expanded version bump workflow** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
@@ -3389,11 +5816,13 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Feature Release -- Server Control Menu + Completeness Checker Fixes
 
 #### New Features
+
 - **Tools > GhidraMCP server control menu** -- Start/stop/restart the HTTP server from Ghidra's Tools menu with status indicator
 - **Deployment automation** -- TCD auto-activation patches tool config for plugin auto-enable; AutoOpen launches project on Ghidra startup; ServerPassword auto-fills server auth dialog
 - **Batch workflow improvements** -- Strengthened dispatch prompt with explicit storage type resolution instructions; added practical note for p-prefix pointer pattern
 
 #### Bug Fixes
+
 - **Completeness checker: register-only SSA variables** -- Variables with `unique:` storage that can't be renamed/retyped via Ghidra API are now tracked as unfixable, boosting `effective_score` accordingly
 - **Completeness checker: ordinal PRE_COMMENT detection** -- Ordinals documented via `set_decompiler_comment` appear on the line above the code in decompiled output; checker now checks previous line for PRE_COMMENT
 - **Completeness checker: Hungarian notation types** -- Added `dword`/`uint` (dw), `word`/`ushort` (w), `qword`/`ulonglong` (qw), `BOOL` (f) to expected prefix mappings
@@ -3407,47 +5836,56 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Major Release Ã¢â‚¬â€ Headless Server Parity + New Tool Categories
 
 #### Ã°Å¸â€“Â¥Ã¯Â¸Â Headless Server Expansion
+
 - **Full headless parity**: Ported 50+ endpoints from GUI plugin to headless server
 - All analysis, batch operation, and documentation endpoints now available without Ghidra GUI
 - Script execution (`run_ghidra_script`, `run_script_inline`) works headlessly via `GhidraScriptUtil`
 - New `exitServer()` endpoint for graceful headless shutdown
 
 #### Ã°Å¸â€œÂ Project Lifecycle (New Category)
+
 - `create_project` Ã¢â‚¬â€ create a new Ghidra project programmatically
 - `delete_project` Ã¢â‚¬â€ delete a project by path
 - `list_projects` Ã¢â‚¬â€ enumerate Ghidra projects in a directory
 - `open_project` / `close_project` Ã¢â‚¬â€ now exposed as MCP tools
 
 #### Ã°Å¸â€”â€šÃ¯Â¸Â Project Organization (New Category)
+
 - `create_folder` Ã¢â‚¬â€ create folders in project tree
 - `move_file` / `move_folder` Ã¢â‚¬â€ reorganize project contents
 - `delete_file` Ã¢â‚¬â€ remove domain files from project
 
 #### Ã°Å¸â€â€” Server Connection (New Category)
+
 - `connect_server` / `disconnect_server` Ã¢â‚¬â€ manage Ghidra Server connections
 - `server_status` Ã¢â‚¬â€ check server connectivity
 - `list_repositories` / `create_repository` Ã¢â‚¬â€ repository management
 
 #### Ã°Å¸â€œÅ’ Version Control (New Category)
+
 - `checkout_file` / `checkin_file` Ã¢â‚¬â€ file version control operations
 - `undo_checkout` / `add_to_version_control` Ã¢â‚¬â€ checkout management
 
 #### Ã°Å¸â€œÅ“ Version History (New Category)
+
 - `get_version_history` Ã¢â‚¬â€ full version history for a file
 - `get_checkouts` Ã¢â‚¬â€ active checkout status
 - `get_specific_version` Ã¢â‚¬â€ open a specific historical version
 
 #### Ã°Å¸â€˜Â¤ Admin (New Category)
+
 - `terminate_checkout` Ã¢â‚¬â€ admin checkout termination
 - `list_server_users` Ã¢â‚¬â€ enumerate server users
 - `set_user_permissions` Ã¢â‚¬â€ manage user access levels
 
 #### Ã¢Å¡â„¢Ã¯Â¸Â Analysis Control (New Category)
+
 - `list_analyzers` Ã¢â‚¬â€ enumerate available Ghidra analyzers
 - `configure_analyzer` Ã¢â‚¬â€ enable/disable and configure analyzers
 - `run_analysis` Ã¢â‚¬â€ trigger analysis programmatically
 
 #### Ã°Å¸â€Â§ Infrastructure
+
 - **Version bump workflow**: Single-command version bump across all 7 project files
 - **`tests/unit/`**: New unit test suite Ã¢â‚¬â€ endpoint catalog consistency, MCP tool functions, response schemas
 - **`.markdownlintrc`**: Markdown lint config for CI quality gate
@@ -3455,6 +5893,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Tool count: 179 MCP tools (up from 110), 147 GUI endpoints, 172 headless endpoints
 
 #### Ã°Å¸â€Å’ GUI Plugin Additions
+
 - `/get_function_count` Ã¢â‚¬â€ quick function count without full listing
 - `/search_strings` Ã¢â‚¬â€ regex/substring search over defined strings, returns JSON
 - `/list_analyzers` Ã¢â‚¬â€ enumerate all analyzers with enabled/disabled state
@@ -3468,6 +5907,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 ### Patch Release - Ghidra 12.0.3 Support, Pagination for Large Functions
 
 #### Ã°Å¸Å¡â‚¬ Ghidra 12.0.3 Support (PR #29)
+
 - **Full compatibility** with Ghidra 12.0.3 (released Feb 11, 2026)
 - Updated `pom.xml` target version
 - Updated Docker build configuration
@@ -3476,6 +5916,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Fixes issue #14 for users on latest Ghidra
 
 #### Ã°Å¸â€œâ€ž Pagination for Large Functions (PR #30)
+
 - **New `offset` and `limit` parameters** for `decompile_function()` and `disassemble_function()`
 - Prevents LLM context overflow when working with large functions
 - Pagination metadata header shows total lines and next offset
@@ -3483,6 +5924,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - Fixes issue #7
 
 **Example usage:**
+
 ```python
 # Get first 100 lines
 code = decompile_function(address='0x401000', offset=0, limit=100)
@@ -3492,6 +5934,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ```
 
 **Response includes metadata:**
+
 ```c
 /* PAGINATION: lines 1-100 of 523 (use offset=100 for next chunk) */
 ```
@@ -3503,22 +5946,26 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Patch Release - CI Fixes, Documentation, Setup Workflow Improvements
 
 #### Ã°Å¸â€Â§ CI/Build Fixes
+
 - **Fixed CI workflow**: Ghidra JARs now properly installed to Maven repository instead of just copied to lib/ (PR #23)
 - **Proper Maven dependency management**: Works correctly with pom.xml changes from v2.0.0
 - **Version as single source of truth**: `ghidra.version` now uses Maven filtering from pom.xml (PR #20)
 - **Endpoint count updated**: Correctly reports 144 endpoints
 
 #### Ã°Å¸â€œÂ Documentation
+
 - **New troubleshooting section**: Comprehensive guide for common setup issues (PR #22)
 - **Verification steps**: Added curl commands to verify server is working
 - **Better error guidance**: Covers 500 errors, 404s, missing menus, and installation issues
 
 #### Ã°Å¸â€“Â¥Ã¯Â¸Â Setup Workflow
+
 - **Fixed version sorting bug**: Now uses semantic version sorting instead of string sorting (PR #21)
 - **Correct Ghidra detection**: Properly selects `ghidra_12.0.2_PUBLIC` over `ghidra_12.0_PUBLIC`
 - Fixes issue #19
 
 #### Ã°Å¸ÂÂ³ Docker Integration
+
 - Added as submodule to [re-universe](https://github.com/bethington/re-universe) platform
 - Enables AI-assisted analysis alongside BSim similarity matching
 
@@ -3529,46 +5976,55 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Major Release - Security, Ghidra 12.0.2, Enhanced Documentation
 
 #### Ã°Å¸â€â€™ Security
+
 - **Localhost binding**: HTTP server now binds to `127.0.0.1` instead of `0.0.0.0` in both GUI plugin and headless server Ã¢â‚¬â€ prevents accidental network exposure on shared networks
 - Addresses the same concern as [LaurieWired/GhidraMCP#125](https://github.com/LaurieWired/GhidraMCP/issues/125)
 
 #### Ã¢Å¡â„¢Ã¯Â¸Â Configurable Decompile Timeout
+
 - New optional `timeout` parameter on `/decompile_function` endpoint
 - Defaults to 60s Ã¢â‚¬â€ no behavior change for existing callers
 - Allows longer timeouts for complex functions (e.g., `?timeout=300`)
 
 #### Ã°Å¸ÂÂ·Ã¯Â¸Â Label Deletion Endpoints
+
 - **New `delete_label` tool**: Delete individual labels at specified addresses
 - **New `batch_delete_labels` tool**: Efficiently delete multiple labels in a single atomic operation
 - Essential for cleaning up orphan labels after applying array types to pointer tables
 
 #### Ã°Å¸â€Â§ Environment Configuration
+
 - New `.env.template` with `GHIDRA_PATH` and other environment-specific settings
 - Deploy script reads `.env` file Ã¢â‚¬â€ no more hardcoded paths
 - Auto-detection of Ghidra installation from common paths
 - Python bridge respects `GHIDRA_SERVER_URL` environment variable
 
 #### Ã°Å¸Å¡â‚¬ Ghidra 12.0.2 Support
+
 - Updated all dependencies and paths for Ghidra 12.0.2
 - Updated library dependency documentation (14 required JARs)
 
 #### Ã°Å¸â€ºÂ Ã¯Â¸Â Tool Count
+
 - **Total MCP Tools**: 110 fully implemented
 - **Java REST Endpoints**: 133 (includes internal endpoints)
 - **New tools added**: 2 (delete_label, batch_delete_labels)
 
 #### Ã°Å¸â€œÅ¡ Documentation
+
 - Complete README rewrite with full tool listing organized by category
 - Added architecture overview, library dependency table, and project structure
 - Reorganized API documentation by category
 - Added comprehensive contributing guidelines
 
 #### Ã°Å¸Â§Âª Testing
+
 - New unit tests for bridge utilities (`test_bridge_utils.py`)
 - New unit tests for MCP tools (`test_mcp_tools.py`)
 - Updated CI workflow to latest GitHub Actions versions
 
 #### Ã°Å¸Â§Â¹ Cleanup
+
 - Removed superseded files: `cross_version_matcher.py`, `cross_version_verifier.py` (replaced by hash index system in v1.9.4)
 - Removed stale data files: `hash_matches_*.json`, `string_anchors.json`, `docs/KNOWN_ORDINALS.md`
 - Refactored workflow engine (`continuous_improvement.py`, `ghidra_manager.py`)
@@ -3580,6 +6036,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Function Hash Index Release
 
 #### Ã°Å¸â€â€” Cross-Binary Documentation Propagation
+
 - **Function Hash Index System**: Hash-based matching of identical functions across different binaries
 - **New Java Endpoints**:
   - `GET /get_function_hash` - Compute SHA-256 hash of normalized function opcodes
@@ -3596,6 +6053,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `propagate_documentation` - Apply docs to all matching instances
 
 #### Ã°Å¸Â§Â® Hash Normalization Algorithm
+
 - Normalizes opcodes for position-independent matching across different base addresses
 - **Internal jumps**: `REL+offset` (relative to function start)
 - **External calls**: `CALL_EXT` placeholder
@@ -3605,11 +6063,13 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Registers**: Preserved (part of algorithm logic)
 
 #### Ã¢Å“â€¦ Verified Cross-Version Matching
+
 - Tested D2Client.dll 1.07 Ã¢â€ â€™ 1.08: **1,313 undocumented functions** match documented functions
 - Successfully propagated `ConcatenatePathAndWriteFile` documentation across versions
 - Identical functions produce matching hashes despite different base addresses
 
 #### Ã°Å¸â€ºÂ  Tool Count
+
 - **Total MCP Tools**: 118 (112 implemented + 6 ROADMAP v2.0)
 - **New tools added**: 7 (4 Java endpoints + 3 Python index management tools)
 
@@ -3620,12 +6080,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Documentation & Workflow Enhancement Release
 
 #### Ã°Å¸â€œÅ¡ Documentation Organization
+
 - **Organized scattered markdown files**: Moved release files to proper `docs/releases/` structure
 - **Created comprehensive navigation**: Added `docs/README.md` with complete directory structure
 - **Enhanced release documentation**: Added `docs/releases/README.md` with version index
 - **Streamlined project structure**: Moved administrative docs to `docs/project-management/`
 
 #### Ã°Å¸â€Â§ Hungarian Notation Improvements
+
 - **Enhanced pointer type coverage**: Added comprehensive double pointer types (`void **` Ã¢â€ â€™ `pp`, `char **` Ã¢â€ â€™ `pplpsz`)
 - **Added const pointer support**: New rules for `const char *` Ã¢â€ â€™ `lpcsz`, `const void *` Ã¢â€ â€™ `pc`
 - **Windows SDK integration**: Added mappings for `LPVOID`, `LPCSTR`, `LPWSTR`, `PVOID`
@@ -3633,12 +6095,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Array vs pointer clarity**: Distinguished stack arrays from pointer parameters
 
 #### Ã°Å¸Å½Â¯ Variable Renaming Workflow
+
 - **Comprehensive variable identification**: Mandated examining both decompiled and assembly views
 - **Eliminated pre-filtering**: Attempt renaming ALL variables regardless of name patterns
 - **Enhanced failure handling**: Use `variables_renamed` count as sole reliability indicator
 - **Improved documentation**: Better comment examples for non-renameable variables
 
 #### Ã°Å¸â€ºÂ  Build & Development
+
 - **Fixed Ghidra script issues**: Resolved class name mismatches and deprecated API usage
 - **Improved workflow efficiency**: Streamlined function documentation processes
 - **Enhanced type mapping**: More precise Hungarian notation type-to-prefix mapping
@@ -3654,6 +6118,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸Å½Â¯ Major Improvements
 
 **Documentation Organization:**
+
 - Ã¢Å“â€¦ Created comprehensive `PROJECT_STRUCTURE.md` documenting entire project layout
 - Ã¢Å“â€¦ Consolidated `DOCUMENTATION_INDEX.md` merging duplicate indexes
 - Ã¢Å“â€¦ Enhanced `scripts/README.md` with categorization and workflows
@@ -3661,6 +6126,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Organized 40+ root-level files into clear categories
 
 **Project Structure:**
+
 - Ã¢Å“â€¦ Categorized all files by purpose (core, build, data, docs, scripts, tools)
 - Ã¢Å“â€¦ Created visual directory trees with emoji icons for clarity
 - Ã¢Å“â€¦ Defined clear guidelines for adding new files
@@ -3668,6 +6134,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Prepared 3-phase reorganization plan for future improvements
 
 **Standards & Conventions:**
+
 - Ã¢Å“â€¦ Established markdown file naming best practices (kebab-case)
 - Ã¢Å“â€¦ Defined special file naming rules (README.md, CHANGELOG.md, etc.)
 - Ã¢Å“â€¦ Created quick reference guides and checklists
@@ -3675,6 +6142,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ Set up migration strategy for existing files
 
 **Release Preparation:**
+
 - Ã¢Å“â€¦ Created comprehensive release checklist (`RELEASE_CHECKLIST_v1.9.2.md`)
 - Ã¢Å“â€¦ Verified version consistency across project (pom.xml 1.9.2)
 - Ã¢Å“â€¦ Updated all documentation references
@@ -3684,7 +6152,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸â€œÅ¡ New Documentation Files
 
 | File | Purpose | Lines |
-|------|---------|-------|
+| ------ | --------- | ------- |
 | `PROJECT_STRUCTURE.md` | Complete project organization guide | 450+ |
 | `DOCUMENTATION_INDEX.md` | Consolidated master index | 300+ |
 | `ORGANIZATION_SUMMARY.md` | Documentation of organization work | 350+ |
@@ -3712,6 +6180,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 #### Ã°Å¸â€œÅ  Organization Achievements
 
 **Before November 2025:**
+
 - 50+ files cluttered in root directory
 - 2 separate documentation indexes (duplicate)
 - Unclear file categorization
@@ -3719,6 +6188,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Difficult navigation and discovery
 
 **After November 2025:**
+
 - 40 organized root files with clear categories
 - 1 consolidated master documentation index
 - Complete project structure documentation
@@ -3743,6 +6213,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ### Bug Fixes & Improvements - Read-Only Tools Testing
 
 **Critical Fixes:**
+
 - Ã¢Å“â€¦ **Fixed silent failures in `get_xrefs_to` and `get_xrefs_from`**
   - Previously returned empty output when no xrefs found
   - Now returns descriptive message: "No references found to/from address: 0x..."
@@ -3761,6 +6232,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Affects: Java plugin batchDecompileXrefSources() method (lines 7362-7411)
 
 **Quality Improvements:**
+
 - Ã¢Å“â€¦ **Improved `list_strings` filtering**
   - Added minimum length filter (4+ characters)
   - Added printable ratio requirement (80% printable ASCII)
@@ -3776,6 +6248,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Affects: Java plugin listDataTypes() and getDataTypeName() methods (lines 4683-4769)
 
 ### Testing
+
 - Systematically tested all **53 read-only MCP tools** against D2Client.dll
 - **100% success rate** across 6 categories:
   - Metadata & Connection (3 tools)
@@ -3786,6 +6259,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Advanced Analysis (9 tools)
 
 ### Impact
+
 - More robust error handling with descriptive messages instead of silent failures
 - Completion of previously stubbed implementations
 - Better string detection quality (fewer false positives)
@@ -3797,17 +6271,20 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.3 - 2025-10-26
 
 ### Removed Tools - API Cleanup
+
 - Ã¢ÂÅ’ **Removed 3 redundant/non-functional MCP tools** (108 Ã¢â€ â€™ 105 tools)
   - `analyze_function_complexity` - Never implemented, returned placeholder JSON only
   - `analyze_data_types` - Superseded by comprehensive `analyze_data_region` tool
   - `auto_create_struct_from_memory` - Low-quality automated output, better workflow exists
 
 ### Rationale
+
 - **analyze_function_complexity**: Marked "not yet implemented" for multiple versions, no demand
 - **analyze_data_types**: Basic 18-line implementation completely replaced by `analyze_data_region` (200+ lines, comprehensive batch operation with xref mapping, boundary detection, stride analysis)
 - **auto_create_struct_from_memory**: Naive field inference produced generic field_0, field_4 names without context; better workflow is `analyze_data_region` Ã¢â€ â€™ manual `create_struct` with meaningful names
 
 ### Impact
+
 - Cleaner API surface with less confusion
 - Removed dead code from both Python bridge and Java plugin
 - No breaking changes for active users (tools were redundant or non-functional)
@@ -3818,6 +6295,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.2 - 2025-10-26
 
 ### New External Location Management Tools
+
 - Ã¢Å“â€¦ **Three New MCP Tools** - External location management for ordinal import fixing
   - `list_external_locations()` - List all external locations (imports, ordinal imports)
   - `get_external_location()` - Get details about specific external location
@@ -3825,6 +6303,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Enables mass fixing of broken ordinal-based imports when DLL functions change
 
 ### New Documentation
+
 - Ã¢Å“â€¦ **`EXTERNAL_LOCATION_TOOLS.md`** - Complete API reference for external location tools
   - Full tool signatures and parameters
   - Use cases and examples
@@ -3837,6 +6316,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Performance tips for large binaries
 
 ### Implementation Details
+
 - Added `listExternalLocations()` method to Java plugin (lines 10479-10509)
 - Added `getExternalLocationDetails()` method to Java plugin (lines 10511-10562)
 - Added `renameExternalLocation()` method to Java plugin (lines 10567-10626)
@@ -3851,6 +6331,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.1 - 2025-10-25
 
 ### Documentation Reorganization
+
 - Ã¢Å“â€¦ **Project Structure Overhaul** - Cleaned and reorganized entire documentation
   - Consolidated prompts: 12 files Ã¢â€ â€™ 8 focused workflow files
   - Created `docs/examples/` with punit/ and diablo2/ subdirectories
@@ -3860,18 +6341,21 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Removed ~70 obsolete files (old reports, duplicates, summaries)
 
 ### New Calling Convention
+
 - Ã¢Å“â€¦ **__d2edicall Convention** - Diablo II EDI-based context passing
   - Documented in `docs/conventions/D2CALL_CONVENTION_REFERENCE.md`
   - Applied to BuildNearbyRoomsList function
   - Installed in x86win.cspec
 
 ### Bug Fixes
+
 - Ã¢Å“â€¦ **Fixed DocumentFunctionWithClaude.java** - Windows compatibility
   - Resolved "claude: CreateProcess error=2"
   - Now uses full path: `%APPDATA%\npm\claude.cmd`
   - Changed keybinding from Ctrl+Shift+D to Ctrl+Shift+P
 
 ### New Files & Tools
+
 - Ã¢Å“â€¦ **ghidra_scripts/** - Example Ghidra scripts
   - `DocumentFunctionWithClaude.java` - AI-assisted function documentation
   - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
@@ -3880,12 +6364,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ **hybrid function processor workflow** - Automated analysis workflows
 
 ### Enhanced Documentation
+
 - Ã¢Å“â€¦ **examples/punit/** - Complete UnitAny structure case study (8 files)
 - Ã¢Å“â€¦ **examples/diablo2/** - Diablo II structure references (2 files)
 - Ã¢Å“â€¦ **conventions/** - Calling convention documentation (5 files)
 - Ã¢Å“â€¦ **guides/** - Structure discovery methodology (4 files)
 
 ### Cleanup
+
 - Ã¢ÂÅ’ Removed obsolete implementation/completion reports
 - Ã¢ÂÅ’ Removed duplicate function documentation workflows
 - Ã¢ÂÅ’ Removed old D2-specific installation guides
@@ -3900,6 +6386,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.8.0 - 2025-10-16
 
 ### Major Features
+
 - Ã¢Å“â€¦ **6 New Structure Field Analysis Tools** - Comprehensive struct field reverse engineering
   - `analyze_struct_field_usage` - Analyze field access patterns across functions
   - `get_field_access_context` - Get assembly/decompilation context for specific field offsets
@@ -3909,6 +6396,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `get_assembly_context` - Get assembly instructions with context for xref sources
 
 ### Documentation Suite
+
 - Ã¢Å“â€¦ **6 Comprehensive Reverse Engineering Guides** (in `docs/guides/`)
   - CALL_RETURN_OVERRIDE_CLEANUP.md - Flow override debugging
   - EBP_REGISTER_REUSE_SOLUTIONS.md - Register reuse pattern analysis
@@ -3924,6 +6412,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - OPTIMIZED_FUNCTION_DOCUMENTATION.md - Enhanced workflow
 
 ### Utility Scripts
+
 - Ã¢Å“â€¦ **9 Reverse Engineering Scripts** (in `scripts/`)
   - ClearCallReturnOverrides.java - Clear orphaned flow overrides
   - b_extract_data_with_xrefs.py - Bulk data extraction
@@ -3933,6 +6422,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - data extraction and function-processing helpers - automation utilities used during that release cycle
 
 ### Project Organization
+
 - Ã¢Å“â€¦ **Restructured Documentation**
   - Release notes Ã¢â€ â€™ `docs/releases/v1.7.x/`
   - Code reviews Ã¢â€ â€™ `docs/code-reviews/`
@@ -3940,6 +6430,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - Guides consolidated in `docs/guides/`
 
 ### Changed Files
+
 - `bridge_mcp_ghidra.py` (+585 lines) - 6 new MCP tools, enhanced field analysis
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` (+188 lines) - Struct analysis endpoints
 - `pom.xml` (Version 1.7.3 Ã¢â€ â€™ 1.8.0)
@@ -3952,18 +6443,22 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.3 - 2025-10-13
 
 ### Critical Bug Fix
+
 - Ã¢Å“â€¦ **Fixed disassemble_bytes transaction commit** - Added missing `success = true` flag assignment before transaction commit, ensuring disassembled instructions are properly persisted to Ghidra database
 
 ### Impact
+
 - **High** - All `disassemble_bytes` operations now correctly save changes
 - Resolves issue where API reported success but changes were rolled back
 
 ### Testing
+
 - Ã¢Å“â€¦ Verified with test case at address 0x6fb4ca14 (21 bytes)
 - Ã¢Å“â€¦ Transaction commits successfully and persists across server restarts
 - Ã¢Å“â€¦ Complete verification documented in `DISASSEMBLE_BYTES_VERIFICATION.md`
 
 ### Changed Files
+
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` (Line 9716: Added `success = true`)
 - `pom.xml` (Version 1.7.2 Ã¢â€ â€™ 1.7.3)
 - `src/main/resources/extension.properties` (Version 1.7.2 Ã¢â€ â€™ 1.7.3)
@@ -3975,9 +6470,11 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.2 - 2025-10-12
 
 ### Critical Bug Fix
+
 - Ã¢Å“â€¦ **Fixed disassemble_bytes connection abort** - Added explicit response flushing and enhanced error logging to prevent HTTP connection abort errors
 
 ### Documentation
+
 - Ã¢Å“â€¦ Comprehensive code review documented in `CODE_REVIEW_2025-10-13.md`
 - Ã¢Å“â€¦ Overall rating: 4/5 (Very Good) - Production-ready with minor improvements identified
 
@@ -3988,12 +6485,14 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.7.0 - 2025-10-11
 
 ### Major Features
+
 - Ã¢Å“â€¦ **Variable storage control** - `set_variable_storage` endpoint for fixing register reuse issues
 - Ã¢Å“â€¦ **Ghidra script automation** - `run_script` and `list_scripts` endpoints
 - Ã¢Å“â€¦ **Forced decompilation** - `force_decompile` endpoint for cache clearing
 - Ã¢Å“â€¦ **Flow override control** - `clear_instruction_flow_override` and `set_function_no_return` endpoints
 
 ### Capabilities
+
 - **Register reuse fixes** - Resolve EBP and other register conflicts
 - **Automated analysis** - Execute Python/Java Ghidra scripts programmatically
 - **Flow analysis control** - Fix incorrect CALL_TERMINATOR overrides
@@ -4005,6 +6504,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.6.0 - 2025-10-10
 
 ### New Features
+
 - Ã¢Å“â€¦ **7 New MCP Tools**: Validation, batch operations, and comprehensive analysis
   - `validate_function_prototype` - Pre-flight validation for function prototypes
   - `validate_data_type_exists` - Check if types exist before using them
@@ -4015,6 +6515,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `search_functions_enhanced` - Advanced search with filtering, regex, sorting
 
 ### Documentation
+
 - Ã¢Å“â€¦ **Reorganized structure**: Created `docs/guides/`, `docs/releases/v1.6.0/`
 - Ã¢Å“â€¦ **Renamed**: `RELEASE_NOTES.md` Ã¢â€ â€™ `CHANGELOG.md`
 - Ã¢Å“â€¦ **Moved utility scripts** to `tools/` directory
@@ -4022,11 +6523,13 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - Ã¢Å“â€¦ **New prompt**: `FUNCTION_DOCUMENTATION_WORKFLOW.md`
 
 ### Performance
+
 - **93% API call reduction** for complete function documentation
 - **Atomic transactions** with rollback support
 - **Pre-flight validation** prevents errors before execution
 
 ### Quality
+
 - **Implementation verification**: 99/108 Python tools (91.7%) have Java endpoints
 - **100% documentation coverage**: All 108 tools documented
 - **Professional structure**: Industry-standard organization
@@ -4038,20 +6541,24 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 ## v1.5.1 - 2025-01-10
 
 ### Critical Bug Fixes
+
 - Ã¢Å“â€¦ **Fixed batch_set_comments JSON parsing error** - Eliminated ClassCastException that caused 90% of batch operation failures
 - Ã¢Å“â€¦ **Added missing AtomicInteger import** - Resolved compilation issue
 
 ### New Features
+
 - Ã¢Å“â€¦ **batch_create_labels endpoint** - Create multiple labels in single atomic transaction
 - Ã¢Å“â€¦ **Enhanced JSON parsing** - Support for nested objects and arrays in batch operations
 - Ã¢Å“â€¦ **ROADMAP v2.0 documentation** - All 10 placeholder tools clearly marked with implementation plans
 
 ### Performance Improvements
+
 - Ã¢Å“â€¦ **91% reduction in API calls** - Function documentation workflow: 57 calls Ã¢â€ â€™ 5 calls
 - Ã¢Å“â€¦ **Atomic transactions** - All-or-nothing semantics for batch operations
 - Ã¢Å“â€¦ **Eliminated user interruption issues** - Batch operations prevent hook triggers
 
 ### Documentation Enhancements
+
 - Ã¢Å“â€¦ **Improved rename_data documentation** - Clear explanation of "defined data" requirement
 - Ã¢Å“â€¦ **Comprehensive ROADMAP** - Transparent status for all placeholder tools
 - Ã¢Å“â€¦ **Organized documentation structure** - New docs/ subdirectories for better navigation

@@ -10,22 +10,53 @@ from pathlib import Path
 
 REQUIRED_JAVA_MAJOR = 21
 
+MAVEN_NOT_FOUND_MESSAGE = (
+    "Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path."
+)
 
-def ensure_maven_java_supported(maven_command: Path) -> bool:
-    completed = subprocess.run(
-        [str(maven_command), "-version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+
+class MavenNotFoundError(FileNotFoundError):
+    """Maven is not installed.
+
+    Subclasses ``FileNotFoundError`` so every existing handler keeps catching
+    it; the distinct type lets ``tools.setup``'s entry point tell "no Maven"
+    apart from a missing jar or launcher and report it as a refusal instead of
+    a traceback.
+    """
+
+
+def detect_maven_java_major(maven_command: Path) -> int | None:
+    """Return the Java major version Maven runs on, or None when unreadable.
+
+    None means "could not tell" -- Maven refused to start, or its ``-version``
+    banner carried no ``Java version:`` line. Callers treat that as "no
+    objection" rather than as a failure, which is what the bool wrapper below
+    has always done.
+    """
+    try:
+        completed = subprocess.run(
+            [str(maven_command), "-version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
     output = f"{completed.stdout}\n{completed.stderr}"
     match = re.search(r"(?im)^Java version:\s*(?:1\.)?(\d+)", output)
-    if not match or int(match.group(1)) >= REQUIRED_JAVA_MAJOR:
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def ensure_maven_java_supported(maven_command: Path) -> bool:
+    java_major = detect_maven_java_major(maven_command)
+    if java_major is None or java_major >= REQUIRED_JAVA_MAJOR:
         return True
 
     print(
         f"Java {REQUIRED_JAVA_MAJOR}+ is required to build ghidra-mcp; "
-        f"Maven is running on Java {match.group(1)}.",
+        f"Maven is running on Java {java_major}.",
         file=sys.stderr,
     )
     print(
@@ -159,14 +190,26 @@ def candidate_maven_commands() -> list[Path]:
     return unique_candidates
 
 
-def find_maven_command() -> Path:
+def locate_maven_command() -> Path | None:
+    """Return the Maven executable, or None when Maven is not installed.
+
+    Non-raising counterpart to :func:`find_maven_command`. Commands that only
+    REPORT on Maven -- ``tools.setup preflight`` -- use this, so an absent Maven
+    is a line in the report rather than an abort. Commands that actually shell
+    out to ``mvn`` keep calling :func:`find_maven_command` and its
+    ``FileNotFoundError``.
+    """
     for candidate in candidate_maven_commands():
         if candidate.is_file():
             return candidate
+    return None
 
-    raise FileNotFoundError(
-        "Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path."
-    )
+
+def find_maven_command() -> Path:
+    maven_command = locate_maven_command()
+    if maven_command is None:
+        raise MavenNotFoundError(MAVEN_NOT_FOUND_MESSAGE)
+    return maven_command
 
 
 def run_maven(repo_root: Path, goals: list[str], dry_run: bool = False) -> int:

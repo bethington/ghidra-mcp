@@ -93,7 +93,7 @@ def endpoint_available(http_client, require_server_and_program):
 @pytest.fixture
 def two_addresses(http_client, require_server_and_program):
     """Return two distinct, mapped function-entry addresses from the program."""
-    resp = http_client.get("/list_functions", params={"limit": 50})
+    resp = http_client.get("/find_functions", params={"limit": 50})
     if resp.status_code != 200:
         pytest.skip("Cannot list functions")
     addrs = re.findall(r"at\s+(?:0x)?([0-9a-fA-F]+)", resp.text)

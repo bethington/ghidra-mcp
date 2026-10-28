@@ -1,0 +1,60 @@
+{
+  "count": 5,
+  "items": [
+    {
+      "end": "100001ff",
+      "executable": false,
+      "initialized": true,
+      "name": "Headers",
+      "readable": true,
+      "size": 512,
+      "start": "10000000",
+      "writable": false
+    },
+    {
+      "end": "100013ff",
+      "executable": true,
+      "initialized": true,
+      "name": ".text",
+      "readable": true,
+      "size": 1024,
+      "start": "10001000",
+      "writable": false
+    },
+    {
+      "end": "10002fff",
+      "executable": false,
+      "initialized": true,
+      "name": ".rdata",
+      "readable": true,
+      "size": 4096,
+      "start": "10002000",
+      "writable": false
+    },
+    {
+      "end": "100031ff",
+      "executable": false,
+      "initialized": true,
+      "name": ".data",
+      "readable": true,
+      "size": 512,
+      "start": "10003000",
+      "writable": true
+    },
+    {
+      "end": "ffdfffff",
+      "executable": false,
+      "initialized": true,
+      "name": "tdb",
+      "readable": true,
+      "size": 4096,
+      "start": "ffdff000",
+      "writable": true
+    }
+  ],
+  "kind": "segments",
+  "limit": 100,
+  "offset": 0,
+  "program": "Benchmark.dll",
+  "total": 5
+}

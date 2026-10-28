@@ -14,13 +14,23 @@
 #
 # The push branch MUST be this repo's DEFAULT branch, currently `dev`.
 # scorecard-action validates this itself and hard-fails with
-# "validating options: only default branch is supported" on anything
-# else -- it is not a warning and not skippable. The default moved from
-# `main` to `dev` between 2026-08-03 and 2026-08-10, and this trigger
-# was left on `main`, so from that moment every push to main started a
-# run that could only fail: 3 consecutive failures, while the scheduled
-# runs (which follow the default branch automatically) kept passing.
-# If the default branch ever moves again, this line moves with it.
+# "validating options: only the default branch main is supported" on
+# anything else -- it is not a warning and not skippable.
+#
+# This line has now been wrong in both directions. The default moved
+# `main` -> `dev` between 2026-08-03 and 2026-08-10 while this trigger
+# still said `main`: 3 consecutive failures on pushes to main. It was
+# changed to `dev`, the default later moved back to `main`, and every
+# push to `dev` then started a run that could only fail -- 13 seconds
+# each, and every one of the 8 most recent scorecard runs was one.
+# Meanwhile the scheduled runs, which follow the default branch
+# automatically, passed throughout, so the badge stayed green and the
+# failures looked like noise.
+#
+# `tests/unit/test_ci_workflow_triggers.py` now pins this against
+# DEFAULT_BRANCH, and cross-checks that constant against git's own
+# `origin/HEAD` wherever that is resolvable. If the default branch moves
+# again, that test is what says so.
 name: Scorecard supply-chain security
 
 on:
@@ -54,7 +64,7 @@ jobs:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc  # v2.4.4
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e  # v2.5.0
         with:
           results_file: results.sarif
           results_format: sarif
@@ -67,7 +77,7 @@ jobs:
       # Actions run page (the SARIF upload to the Security tab below
       # doesn't preserve the full payload).
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: SARIF file
           path: results.sarif
@@ -76,6 +86,6 @@ jobs:
       # Upload to GitHub's code-scanning so findings show up in the
       # repository's Security tab alongside Dependabot / CodeQL.
       - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee  # v4.39.0
         with:
           sarif_file: results.sarif

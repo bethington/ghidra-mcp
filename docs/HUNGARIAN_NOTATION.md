@@ -5,7 +5,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Type Normalization
 
 | Windows SDK | Ghidra Builtin |
-|-------------|----------------|
+| ------------- | ---------------- |
 | UINT, DWORD | uint |
 | USHORT, WORD | ushort |
 | BYTE | byte |
@@ -17,7 +17,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Primitive Types
 
 | Type | Prefix | Example |
-|------|--------|---------|
+| ------ | -------- | --------- |
 | byte | b/by | byFlags |
 | char | c/ch | chInput |
 | bool | f | fEnabled |
@@ -37,7 +37,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Single Pointers
 
 | Type | Prefix | Example |
-|------|--------|---------|
+| ------ | -------- | --------- |
 | void * | p | pData |
 | byte * | pb | pbBuffer |
 | ushort * | pw | pwLength |
@@ -49,12 +49,12 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 | char * (local) | sz | szBuffer |
 | wchar_t * (param) | lpwsz | lpwszUserName |
 | wchar_t * (local) | wsz | wszPath |
-| struct * | p+Name | pUnitAny |
+| struct * | p+Name | pEntity |
 
 ## Double Pointers
 
 | Type | Prefix | Example |
-|------|--------|---------|
+| ------ | -------- | --------- |
 | void ** | pp | ppData |
 | byte ** | ppb | ppbBuffers |
 | uint ** | ppdw | ppdwFlags |
@@ -65,7 +65,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Const Pointers
 
 | Type | Prefix | Example |
-|------|--------|---------|
+| ------ | -------- | --------- |
 | const char * (param) | lpcsz | lpcszName |
 | const char * (local) | csz | cszLabel |
 | const void * | pc | pcData |
@@ -74,7 +74,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Arrays (Stack)
 
 | Type | Prefix | Example |
-|------|--------|---------|
+| ------ | -------- | --------- |
 | byte[N] | ab | abEncryptionKey |
 | ushort[N] | aw | awLookupTable |
 | uint[N] | ad | adHashBuckets |
@@ -85,6 +85,7 @@ Apply Hungarian notation prefixes matching the actual Ghidra data type. Normaliz
 ## Globals
 
 All globals require `g_` prefix:
+
 - `g_dwProcessId` (uint)
 - `g_szConfigPath` (string)
 - `g_pMainWindow` (pointer)
@@ -93,12 +94,12 @@ All globals require `g_` prefix:
 ## Special Types
 
 - Function pointers: `pfn` prefix for callbacks (`pfnCallback`), PascalCase for direct calls
-- Structures (by value): camelCase without prefix (`unitAny`)
+- Structures (by value): camelCase without prefix (`entity`)
 
 ## Undefined Type Resolution
 
 | Undefined | Resolve To |
-|-----------|------------|
+| ----------- | ------------ |
 | undefined1 | byte |
 | undefined2 | ushort/short |
 | undefined4 | uint/int/float/pointer |

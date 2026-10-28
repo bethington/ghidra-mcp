@@ -27,9 +27,11 @@ README = PROJECT_ROOT / "README.md"
 BEGIN_MARKER = "<!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->"
 END_MARKER = "<!-- END GENERATED API REFERENCE -->"
 
-# Catalog category -> (README heading, blurb). Order here is presentation order;
-# categories missing from this map are appended alphabetically with a generic
-# heading so new catalog categories can never be silently dropped.
+# Tool group -> (README heading, blurb). The catalog's `category` IS the tool group
+# the bridge lazy-loads by (see load_tool_group), so these headings name real,
+# loadable groups. Order here is presentation order; groups missing from this map
+# are appended alphabetically with a generic heading so a new group can never be
+# silently dropped.
 CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
     "program": ("Program & Session Management", ""),
     "project": ("Project Organization", ""),
@@ -38,25 +40,24 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
         "Available on the standalone headless server (`GhidraMCPHeadlessServer`).",
     ),
     "listing": ("Listing & Enumeration", ""),
-    "getter": ("Context & Lookups", ""),
-    "search": ("Search", ""),
-    "decompile": ("Decompilation & Disassembly", ""),
-    "function": ("Function Tags, Variables & Attributes", ""),
-    "xref": ("Cross-References", ""),
+    "getter": ("Current GUI Context", ""),
+    "function": ("Functions: Decompile, Rename, Prototypes & Variables", ""),
+    "symbol": ("Symbols, Labels & Globals", ""),
+    "xref": ("Cross-References & Call Graphs", ""),
     "datatype": ("Data Types & Structures", ""),
-    "rename": ("Renaming & Labels", ""),
-    "comment": ("Comments & Bookmarks", ""),
+    "comment": ("Comments", ""),
     "analysis": ("Analysis", ""),
+    "malware": ("Malware & Anti-Analysis", ""),
     "documentation": ("Cross-Binary Documentation & Archive", ""),
-    "utility": ("Utility & Documentation Transfer", ""),
+    "utility": ("Health, Schema & Tool Control", ""),
     "emulation": ("Emulation", ""),
-    "script": ("Scripting", ""),
     "server": ("Ghidra Server & Version Control", ""),
     "debugger": (
-        "Debugger (Ghidra TraceRmi — GUI only)",
-        "On Windows hosts where the bridge's WinDbg debugger proxy is active"
-        " (`GHIDRA_DEBUGGER_URL`), colliding names get a `_2` suffix"
-        " (e.g. `debugger_status_2`).",
+        "Debugger (Ghidra TraceRmi)",
+        "When the bridge's opt-in WinDbg debugger proxies are enabled"
+        " (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a TraceRmi tool"
+        " below that shares a proxy's name gets a `_2` suffix"
+        " (e.g. `debugger_status_2`), so both stay reachable.",
     ),
     "system": ("System", ""),
 }
@@ -87,11 +88,29 @@ def _first_sentence(description: str) -> str:
     return sentence.rstrip(".")
 
 
+#: Suffix marking a tool that only one of the two HTTP servers registers.
+#: Keyed by the catalog's `servers` array; `["gui", "headless"]` gets nothing,
+#: because 212 of 253 tools are on both and marking those would be noise.
+SERVER_MARKERS = {
+    ("gui",): " **(GUI only)**",
+    ("headless",): " **(headless only)**",
+}
+
+
+def _server_marker(endpoint: dict) -> str:
+    return SERVER_MARKERS.get(tuple(endpoint.get("servers", ())), "")
+
+
+def user_visible_endpoints(endpoints: list[dict]) -> list[dict]:
+    """Agent-facing inventory: internal HTTP routes stay in the catalog but are not tools."""
+    return [e for e in endpoints if not e.get("internal")]
+
+
 def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
     """Render the generated portion of the README API Reference section."""
     catalog = json.loads(endpoints_json.read_text(encoding="utf-8"))
-    endpoints = catalog["endpoints"]
-    total = catalog["total_endpoints"]
+    endpoints = user_visible_endpoints(catalog["endpoints"])
+    total = len(endpoints)
 
     by_category: dict[str, list[dict]] = {}
     for endpoint in endpoints:
@@ -99,6 +118,11 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
 
     ordered = [cat for cat in CATEGORY_SECTIONS if cat in by_category]
     ordered += sorted(set(by_category) - set(CATEGORY_SECTIONS))
+
+    scopes = [tuple(e.get("servers", ())) for e in endpoints]
+    both = sum(1 for s in scopes if s == ("gui", "headless"))
+    gui_only = sum(1 for s in scopes if s == ("gui",))
+    headless_only = sum(1 for s in scopes if s == ("headless",))
 
     try:
         sys.path.insert(0, str(PROJECT_ROOT / "python"))
@@ -115,6 +139,12 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
         "`python -m tools.gen_readme_api_reference --write`; the live schema at "
         "`/mcp/schema` is authoritative at runtime. Usage patterns: "
         "[docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).",
+        "",
+        f"{both} of these are served by both the GUI plugin and the standalone "
+        f"headless server. The rest are marked **(GUI only)** ({gui_only}) or "
+        f"**(headless only)** ({headless_only}) — calling one against the other "
+        "server returns a 404, not an error message. See "
+        "`python -m tools.audit_server_scope` for how the split is derived.",
     ]
 
     for category in ordered:
@@ -126,7 +156,8 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
             lines += [blurb, ""]
         for endpoint in sorted(by_category[category], key=lambda e: _tool_name(e["path"])):
             lines.append(
-                f"- `{_tool_name(endpoint['path'])}` - {_first_sentence(endpoint['description'])}"
+                f"- `{_tool_name(endpoint['path'])}` - "
+                f"{_first_sentence(endpoint['description'])}{_server_marker(endpoint)}"
             )
 
     lines += [
@@ -135,8 +166,9 @@ def render_api_reference(endpoints_json: Path = ENDPOINTS_JSON) -> str:
         "",
         "Defined in the Python bridge itself (instance discovery, tool-group "
         "management); always available even before a Ghidra connection. The "
-        "bridge also proxies 22 `debugger_*` WinDbg tools when "
-        "`GHIDRA_DEBUGGER_URL` points at the standalone debugger server.",
+        "bridge can also proxy 22 `debugger_*` WinDbg tools to an external "
+        "debugger server; they are off by default and register only when "
+        "`GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.",
         "",
     ]
     for name in static_names:

@@ -15,6 +15,81 @@ from .config import (
 )
 
 
+class GhidraToolError(Exception):
+    """A tool call that failed, so FastMCP can mark the result ``isError``.
+
+    Every failure the bridge or the server can report arrives as a normal HTTP
+    200 body — ``Response.Err`` renders ``{"error": ...}``, and dispatch builds
+    the same shape for transport failures, non-200 statuses and "not connected".
+    Returning that string as a successful tool result made a failure
+    indistinguishable from success at the protocol level: clients and agent
+    loops that branch on ``isError`` saw every call succeed, and the model had
+    to notice the word "error" inside the JSON. Raising is how FastMCP is told
+    otherwise.
+    """
+
+
+# How much of a failed call's console output to quote when it gave no other reason.
+_FAILURE_OUTPUT_TAIL = 1500
+
+
+def failure_message(text: str) -> str | None:
+    """Return the error message if this response body reports a failure.
+
+    Recognises the three shapes this server uses. Two of them come back through
+    ``Response.ok``, since a rejected write or a failed program load is reported
+    as a well-formed payload rather than an ``Err``:
+
+    * ``{"error": "..."}``            — ``Response.Err`` and the bridge's own failures
+    * ``{"success": false, ...}``     — e.g. /open_program diagnostics
+    * ``{"status": "rejected", ...}`` — e.g. a plate comment refused by convention
+
+    A top-level list, plain text, or an ``error`` nested inside a per-item entry
+    (bulk ``/get_functions`` reports a function it cannot find that way) is not a
+    call failure and must stay a success.
+    """
+    stripped = text.strip() if text else ""
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    error = payload.get("error")
+    failed = (isinstance(error, str) and error.strip()) or payload.get("success") is False \
+        or payload.get("status") == "rejected"
+    if not failed:
+        return None
+    # A rejection carries a short code in `error` (``name_quality``) and the reason in
+    # `message` and `suggestion`; reporting the code alone left the caller guessing why.
+    parts = []
+    for key in ("error", "message", "suggestion"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip() and value.strip() not in parts:
+            parts.append(value.strip())
+    if parts:
+        return " — ".join(parts)
+    # No reason field: the explanation, if any, is in the output (a failed script once
+    # reached the agent as a bare "the server reported failure" with its NPE in here).
+    output = payload.get("console_output")
+    if isinstance(output, str) and output.strip():
+        tail = output.strip()[-_FAILURE_OUTPUT_TAIL:]
+        return "the server reported failure; end of its output:\n" + tail
+    status = payload.get("status")
+    return status if isinstance(status, str) and status.strip() else "the server reported failure"
+
+
+def raise_on_failure(text: str) -> str:
+    """Pass a successful body through; raise ``GhidraToolError`` on a failed one."""
+    message = failure_message(text)
+    if message is not None:
+        raise GhidraToolError(message)
+    return text
+
+
 def get_timeout(endpoint: str, payload: dict | None = None) -> int:
     """Get timeout for an endpoint, with dynamic scaling for batch ops."""
     name = endpoint.strip("/").split("/")[-1]
@@ -176,9 +251,12 @@ def _try_reconnect(
     with state._tool_registry_lock:
         promoted = state.maybe_promote_connection_snapshot(base, candidate)
         if promoted is not None:
+            # The same project came back (a Ghidra restart): keep every group this session
+            # had loaded, not only the defaults. Dropping them turned the next call to a
+            # load_tool_group()-ed tool into "Unknown tool" in the middle of a task.
             registry.register_tools_from_schema(
                 schema,
-                groups=None if not state._lazy_mode else state._default_groups,
+                groups=None if not state._lazy_mode else state._default_groups | state._loaded_groups,
             )
             state.notify_tools_changed_from_worker()
             target = promoted.active_socket or promoted.active_tcp

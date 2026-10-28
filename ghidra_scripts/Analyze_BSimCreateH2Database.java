@@ -2,13 +2,13 @@
 //
 // Creates a new H2 file-based BSim database for local similarity analysis. Works headlessly from MCP without any GUI prompts or dialogs.
 //
-// Usage: Args: [0]=database file path (no .mv.db extension), [1]=template name (default: medium_32), [2]=display name.
+// Usage: Args: [0]=database file path (no .mv.db extension; default: ~/ghidra-mcp-bsim/bsim_ghidra_mcp), [1]=template name (default: medium_32), [2]=display name (default: GhidraMCP_BSim).
 // Output: Creates H2 database file at the specified path.
 //
 // @author Ben Ethington
-// @category Diablo 2.Analysis
+// @category GhidraMCP.Analysis
 // @description Create an H2 file-based BSim database without GUI dialogs
-// @menupath Diablo 2.Analysis.BSim Create H2 Database
+// @menupath GhidraMCP.Analysis.BSim Create H2 Database
 
 import java.io.File;
 import java.io.IOException;
@@ -31,9 +31,9 @@ public class Analyze_BSimCreateH2Database extends GhidraScript {
         String[] args = getScriptArgs();
 
         // Parse args
-        String dbPath = "C:/tmp/bsim_diablo2";
+        String dbPath = System.getProperty("user.home") + "/ghidra-mcp-bsim/bsim_ghidra_mcp";
         String template = "medium_32";
-        String dbName = "Diablo2_BSim";
+        String dbName = "GhidraMCP_BSim";
 
         if (args != null && args.length > 0 && !args[0].isEmpty()) {
             dbPath = args[0].trim();
@@ -85,7 +85,7 @@ public class Analyze_BSimCreateH2Database extends GhidraScript {
                 return;
             }
 
-            // Add a "version" category so we can tag executables by game version
+            // Add a "version" category so we can tag executables by product version
             InstallCategoryRequest catReq = new InstallCategoryRequest();
             catReq.type_name = "Version";
             catReq.execute(h2Database);
