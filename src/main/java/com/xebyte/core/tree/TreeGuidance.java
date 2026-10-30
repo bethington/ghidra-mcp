@@ -90,8 +90,9 @@ public final class TreeGuidance {
             sb.append("\n**Peripheral addresses may not appear as hex.** When the code block is ")
                     .append("marked writable (firmware loaders often do), the decompiler treats every ")
                     .append("literal-pool load as a variable: `iVar2 = DAT_08016e58;` where the pool ")
-                    .append("word holds `0x40020000`. Mark flash read-only with `set_memory_block` and ")
-                    .append("resweep; the loads then fold into constants or the labels at their ")
+                    .append("word holds `0x40020000`. Mark flash read-only with `set_memory_block`: the ")
+                    .append("tree re-decompiles the functions reading it (above 2000 it turns stale; ")
+                    .append("resweep then), and the loads fold into constants or the labels at their ")
                     .append("targets (measured on one firmware: 1123 pool reads became 4). A register ")
                     .append("reached as base + offset still prints as the base plus `0xc0c`; its own ")
                     .append("address is on the block's `// refs:` line.\n");

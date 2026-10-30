@@ -142,15 +142,23 @@ routed through the server's threading strategy, not filesystem-only.
   file. Measured: a callee used 72 times updated everywhere in 1.4 s.
 - **Its status is honest.** `clean`, `spliced` (kept current since the sweep), `stale`
   (with the reason) and `in_sync`; `close_program(save=false)` marks it stale and the next
-  open reconciles the discarded edits out. A memory-map change (such as
-  `/set_memory_block`) marks it stale, because only a resweep fixes that.
+  open reconciles the discarded edits out.
+- **It follows the memory map.** No fingerprint covers the map, so a full reconcile
+  compares it, address by address, with the map the tree was decompiled against
+  (`index/memory-map.txt`). It re-decompiles the functions that reference what changed:
+  every reference into a block that moved, appeared or went away, and the data references
+  into one whose permissions or initialisation changed (`/set_memory_block`). Renaming,
+  splitting or joining a block costs nothing. A new image base (`/set_image_base`) re-keys
+  every function, and the same pass replaces each block under its new address. Only a
+  change that reaches more than 2000 functions, or a tree written before the map was kept,
+  still marks the tree stale for a resweep.
 - **It survives a restart.** Stamps compare the program's saved time and a per-open
   session epoch, not the modification counter that restarts at every open; trees are
   re-adopted and reconciled when their program first opens, matched by `program_url`
   so two projects holding `/fw.bin` never share one.
 - **It follows a new revision.** A checkout of a newer version reopens the program; a
-  reopen on a different saved state reconciles in full, and a different memory map marks
-  the tree stale. The input fingerprint now covers locals, the types of data a function
+  reopen on a different saved state reconciles in full, following a different memory map
+  too. The input fingerprint now covers locals, the types of data a function
   reads and the members of the types it reaches, so a retype that renames nothing is
   found too.
 - **Exclusions** keep library code out: `tag:` (function tags, FID), `partition:` (a

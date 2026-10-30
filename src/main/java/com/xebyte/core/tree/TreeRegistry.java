@@ -203,7 +203,7 @@ public final class TreeRegistry {
             decompTree.setSavedAtModification(program.isChanged() ? null : program.getModificationNumber());
             DecompTree.Session seen = decompTree.session();
             if (seen != null && !seen.epoch().equals(com.xebyte.core.ProgramRevision.epoch(program))) {
-                checkProgramReplaced(decompTree, program, "reopened");
+                checkProgramReplaced(decompTree, program);
                 if (!seen.sameSavedState(program)) {
                     // Another revision (a checkout of a newer version closes and reopens the
                     // program), or a file changed while nothing observed it. No event says
@@ -228,15 +228,13 @@ public final class TreeRegistry {
 
     /**
      * The program was replaced wholesale: reopened, or restored in place (undo/redo, a server
-     * update of an open checkout). The reconcile that follows re-checks every block, but no
-     * fingerprint covers the memory map, so a different one leaves the tree stale until a
-     * resweep.
+     * update of an open checkout). On a different memory map, a full reconcile re-decompiles
+     * the blocks that reference what changed in it; no fingerprint covers the map.
      */
-    public void checkProgramReplaced(DecompTree decompTree, Program program, String how) {
+    public void checkProgramReplaced(DecompTree decompTree, Program program) {
         DecompTree.Session seen = decompTree.session();
         if (seen != null && !seen.memoryMap().equals(DecompTree.Session.memoryMapOf(program))) {
-            markStale(decompTree.id(), "the program " + how + " with a different memory map; every "
-                    + "function may decompile differently, so resweep (decompile_tree_run action=start)");
+            dirtyQueue.markNeedsReconcile(decompTree.id());
         }
     }
 
@@ -255,30 +253,6 @@ public final class TreeRegistry {
             noteClosing(id, program);
             detachObserver(id);
         }
-    }
-
-    /**
-     * The tree is known to diverge from the program in a way only a resweep fixes. Called
-     * on the event thread: progress changes now, STATUS.md is written on the tree
-     * executor.
-     */
-    public void markStale(String treeId, String reason) {
-        DecompTree decompTree = byId(treeId);
-        if (decompTree == null) {
-            return;
-        }
-        SweepProgress stale = decompTree.progress()
-                .withPhase(SweepProgress.Phase.STALE)
-                .withLastError(reason);
-        decompTree.setProgress(stale);
-        enqueue(() -> {
-            try {
-                decompTree.publish(stale, "stale");
-            } catch (IOException e) {
-                Msg.warn(this, "DecompTree " + treeId + ": could not mark STATUS.md stale: "
-                        + e.getMessage());
-            }
-        });
     }
 
     /** The program was saved at {@code modification}: that is what a reopen will show. */

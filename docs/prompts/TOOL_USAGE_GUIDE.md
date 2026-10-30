@@ -664,7 +664,13 @@ If the program reopens on a different saved state (another `file_version` or `sa
 than the tree was built from, a full reconcile re-checks every block. Each block's input
 fingerprint covers what such a change can move without renaming anything: locals, the types
 of the data the function reads, and the members of every struct, union and enum it reaches.
-A different memory map marks the tree `stale`, because only a resweep follows that.
+No fingerprint covers the memory map. The full reconcile therefore compares it, address by
+address, with the map the tree was decompiled against (`index/memory-map.txt`). It then
+re-decompiles the functions that reference what changed: every reference into a block that
+moved, appeared or went away, and the data references into one whose permissions changed. A
+new image base re-keys every function, and the same pass moves each block to its new address.
+The tree turns `stale` only when the change reaches more than 2000 functions, as making a
+whole firmware's flash read-only does; resweep then.
 
 **Every route ends at the same tree.** A tree that is `in_sync` is byte for byte what a fresh
 sweep would write at that point, apart from the `dts` stamps, the status files and
@@ -768,7 +774,9 @@ searching the files.
    marked writable, which firmware loaders often do: the decompiler then treats each
    literal-pool load as a variable (`iVar2 = DAT_08016e58;`, the word holding
    `0x40020000`), so grepping the address finds nothing. Mark flash read-only first:
-   `set_memory_block(block="ram", write=false)`, then resweep. Measured on a 339-function
+   `set_memory_block(block="ram", write=false)`. The tree re-decompiles the functions
+   reading it, or turns `stale` and asks for a resweep when that is most of the program,
+   which with literal pools in flash it usually is. Measured on a 339-function
    firmware: pool reads went from 1123 to 4, and the bases printed as constants or the
    labels at their targets (`(uint *)&GPIOC_CFGR`). A register reached as base + offset
    still prints as the base plus the offset; its own address is on the block's `// refs:`
