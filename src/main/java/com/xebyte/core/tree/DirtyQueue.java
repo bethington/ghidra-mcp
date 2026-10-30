@@ -319,7 +319,7 @@ public final class DirtyQueue {
     }
 
     private static boolean isAnalyzing(Program program) {
-        if (program == null) {
+        if (program == null || !AutoAnalysisManager.hasAutoAnalysisManager(program)) {
             return false;
         }
         try {

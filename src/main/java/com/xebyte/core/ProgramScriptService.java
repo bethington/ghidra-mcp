@@ -2011,8 +2011,8 @@ if (map instanceof ObjectPropertyMap) {
             boolean analyzed = false;
             boolean shouldAskToAnalyze = false;
             try {
-                AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(prog);
-                analyzing = mgr.isAnalyzing();
+                analyzing = AutoAnalysisManager.hasAutoAnalysisManager(prog)
+                        && AutoAnalysisManager.getAnalysisManager(prog).isAnalyzing();
                 analyzed = ghidra.program.util.GhidraProgramUtilities.isAnalyzed(prog);
                 shouldAskToAnalyze = ghidra.program.util.GhidraProgramUtilities.shouldAskToAnalyze(prog);
             } catch (Exception e) {
