@@ -84,6 +84,13 @@ public final class TreeStatusMd {
     }
 
     public static void write(DecompTree decompTree, String state) throws IOException {
+        // STATUS.md records the map as a hash; the map itself lets an open after a restart
+        // compare it with the program's block by block.
+        DecompTree.Session session = decompTree.session();
+        if (session != null && !session.memoryMap().equals(readMemoryMap(decompTree.root().path()))) {
+            decompTree.root().writeFile(Path.of(TreeLayout.memoryMapTxt()),
+                    session.memoryMap().replace(";", ";\n"));
+        }
         decompTree.root().writeFile(Path.of(TreeLayout.statusMd()), render(decompTree, state));
     }
 
@@ -91,8 +98,11 @@ public final class TreeStatusMd {
         return value != null ? value.toString() : "";
     }
 
-    /** STATUS.md's {@code key: value} lines; a blank value reads as absent. */
-    public record StatusFile(Map<String, String> fields) {
+    /**
+     * STATUS.md's {@code key: value} lines; a blank value reads as absent. {@code memoryMap} is
+     * the map the tree was decompiled against, when its file matches STATUS.md's hash.
+     */
+    public record StatusFile(Map<String, String> fields, String memoryMap) {
         public String state() {
             return fields.get("state");
         }
@@ -139,6 +149,23 @@ public final class TreeStatusMd {
                 // unreadable reads as absent
             }
         }
-        return new StatusFile(fields);
+        String memoryMap = readMemoryMap(root);
+        if (memoryMap != null && !DecompTree.Session.memoryMapHash(memoryMap).equals(fields.get("memory_map"))) {
+            memoryMap = null;
+        }
+        return new StatusFile(fields, memoryMap);
+    }
+
+    /** {@link TreeLayout#memoryMapTxt}'s map, or null when there is none to read. */
+    private static String readMemoryMap(Path root) {
+        Path mapPath = root.resolve(TreeLayout.memoryMapTxt());
+        if (!Files.isRegularFile(mapPath)) {
+            return null;
+        }
+        try {
+            return Files.readString(mapPath, StandardCharsets.UTF_8).replace("\n", "");
+        } catch (IOException e) {
+            return null;
+        }
     }
 }

@@ -787,10 +787,15 @@ public class DecompTreeService {
                             : "previous sweep did not finish (STATUS.md state=" + state + ")"));
         }
         String sweptMemoryMap = statusFile.fields().get("memory_map");
-        if (!stale && sweptMemoryMap != null && !sweptMemoryMap.equals(
-                DecompTree.Session.memoryMapHash(DecompTree.Session.memoryMapOf(program)))) {
-            // Another revision, or an edit made while no tree watched: a full reconcile
-            // re-checks every block's inputs, but none of them covers the memory map.
+        boolean mapChanged = !stale && sweptMemoryMap != null && !sweptMemoryMap.equals(
+                DecompTree.Session.memoryMapHash(DecompTree.Session.memoryMapOf(program)));
+        if (mapChanged && statusFile.memoryMap() != null) {
+            // Another revision, or an edit made while no tree watched: the full reconcile
+            // queued below re-decompiles the blocks referencing what changed in the map.
+            decompTree.noteSession(program, statusFile.memoryMap());
+        } else if (mapChanged) {
+            // Only the hash survived (a tree written before the map was kept beside it): no
+            // telling what changed, and no fingerprint covers the memory map.
             stale = true;
             decompTree.setProgress(decompTree.progress()
                     .withPhase(SweepProgress.Phase.STALE)

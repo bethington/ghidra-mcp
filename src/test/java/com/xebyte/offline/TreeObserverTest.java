@@ -292,16 +292,25 @@ public class TreeObserverTest {
 
     /**
      * Marking flash read-only turns every literal-pool load into a constant, in functions
-     * no record names and without changing a fingerprint: only a resweep fixes the tree.
+     * no record names and without changing a fingerprint: the full pass compares the map
+     * with the one the tree was decompiled against.
      */
     @Test
-    public void aMemoryMapChangeMakesTheDecompTreeStale() {
+    public void aMemoryMapChangeAsksForAFullReconcile() {
         Address start = addr("08005000");
         ProgramChangeRecord rec = new ProgramChangeRecord(
                 ProgramEvent.MEMORY_BLOCK_CHANGED, start, start, null, null, null);
         TreeObserver.Hint hint = TreeObserver.translate(event(rec), program());
-        assertTrue(hint.staleReason(), hint.staleReason().contains("resweep"));
+        assertTrue(hint.needsReconcile());
         assertTrue(hint.addresses().isEmpty());
+    }
+
+    /** A new image base re-keys every function, and Ghidra sends no RESTORED with it. */
+    @Test
+    public void aNewImageBaseAsksForAFullReconcile() {
+        ProgramChangeRecord rec = new ProgramChangeRecord(
+                ProgramEvent.IMAGE_BASE_CHANGED, null, null, null, addr("00400000"), addr("10000000"));
+        assertTrue(TreeObserver.translate(event(rec), program()).needsReconcile());
     }
 
     // -------------------------------------------------------------------------

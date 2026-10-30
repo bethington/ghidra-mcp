@@ -49,10 +49,15 @@ public final class DecompTree {
     public record Session(String epoch, long savedTime, Integer fileVersion, boolean unsavedEdits,
             String memoryMap) {
         public static Session of(ghidra.program.model.listing.Program program) {
+            return of(program, memoryMapOf(program));
+        }
+
+        /** The program as it is now, decompiled against {@code memoryMap}. */
+        public static Session of(ghidra.program.model.listing.Program program, String memoryMap) {
             return new Session(com.xebyte.core.ProgramRevision.epoch(program),
                     com.xebyte.core.ProgramRevision.savedTime(program),
                     com.xebyte.core.ProgramRevision.fileVersion(program),
-                    program.isChanged(), memoryMapOf(program));
+                    program.isChanged(), memoryMap);
         }
 
         /** The saved program another open of it shows, unless this one held unsaved edits. */
@@ -91,6 +96,14 @@ public final class DecompTree {
     /** Record the program state the progress just written describes. */
     public void noteSession(ghidra.program.model.listing.Program program) {
         this.session = Session.of(program);
+    }
+
+    /**
+     * Record the program state, with the blocks decompiled against {@code memoryMap} rather
+     * than the live map: a pass that did not follow a change of the map leaves it to the next.
+     */
+    public void noteSession(ghidra.program.model.listing.Program program, String memoryMap) {
+        this.session = Session.of(program, memoryMap);
     }
 
     private volatile String programUrl;

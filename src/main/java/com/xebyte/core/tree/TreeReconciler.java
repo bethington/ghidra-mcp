@@ -126,6 +126,12 @@ public final class TreeReconciler {
         Set<String> outOfScope = addresses == null
                 ? outOfScope(decompTree, indexByHex, programByHex, evaluator, meta)
                 : Set.of();
+        // No fingerprint covers the memory map: a full pass re-decompiles the blocks that
+        // reference what changed in it since the tree was decompiled.
+        DecompTree.Session seen = decompTree.session();
+        MemoryMapChange.Affected mapChange = addresses == null && seen != null
+                ? MemoryMapChange.since(seen.memoryMap(), program, plan.replace)
+                : MemoryMapChange.Affected.NONE;
 
         Accumulators acc = new Accumulators();
         decompTree.publish(decompTree.progress().withLastError(null), "dirty");
@@ -161,7 +167,7 @@ public final class TreeReconciler {
                     }
                     String liveIfp = InputFingerprint.of(func);
                     liveIfps.put(hex, liveIfp);
-                    if (!needsRedecompile(row.ifp(), liveIfp)) {
+                    if (!needsRedecompile(row.ifp(), liveIfp) && !mapChange.keys().contains(hex)) {
                         acc.unchanged.add(hex);
                     } else {
                         replaceNow.add(hex);
@@ -282,17 +288,24 @@ public final class TreeReconciler {
         if (addresses == null && decompTree.recoverOnReattach()) {
             // The full pass after a stale close re-diffed every block against the program
             // as it reopened: the divergence that made it stale is gone, unless the memory
-            // map moved too, which only a resweep follows.
+            // map changed past what this pass could follow.
             decompTree.setRecoverOnReattach(false);
-            DecompTree.Session seen = decompTree.session();
-            if (seen == null || seen.memoryMap().equals(DecompTree.Session.memoryMapOf(program))) {
+            if (mapChange.unresolved() == null) {
                 after = after
                         .withPhase(after.sweptAtModification() != null
                                 ? SweepProgress.Phase.COMPLETE : SweepProgress.Phase.IDLE)
                         .withLastError(null);
             }
         }
-        decompTree.noteSession(program);
+        if (mapChange.unresolved() != null) {
+            after = after.withPhase(SweepProgress.Phase.STALE).withLastError(mapChange.unresolved());
+        }
+        // Only a full pass that followed the map's change brings the tree onto the live map.
+        if (seen == null || (addresses == null && mapChange.unresolved() == null)) {
+            decompTree.noteSession(program);
+        } else {
+            decompTree.noteSession(program, seen.memoryMap());
+        }
         decompTree.publish(after, TreeStatusMd.settledState(after));
 
         return ReconcileResult.of(

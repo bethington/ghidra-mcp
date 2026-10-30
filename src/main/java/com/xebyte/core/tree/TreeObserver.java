@@ -67,7 +67,7 @@ public final class TreeObserver implements DomainObjectListener {
         if (ev.contains(DomainObjectEvent.RESTORED) && program != null) {
             DecompTree decompTree = TreeRegistry.getInstance().byId(treeId);
             if (decompTree != null) {
-                TreeRegistry.getInstance().checkProgramReplaced(decompTree, program, "was restored");
+                TreeRegistry.getInstance().checkProgramReplaced(decompTree, program);
             }
         }
         if (ev.contains(DomainObjectEvent.SAVED) && program != null) {
@@ -75,9 +75,6 @@ public final class TreeObserver implements DomainObjectListener {
         }
 
         Hint hint = translate(ev, program);
-        if (hint.staleReason() != null) {
-            TreeRegistry.getInstance().markStale(treeId, hint.staleReason());
-        }
         if (!hint.introducedNames().isEmpty()) {
             TreeRegistry.getInstance().noteIntroducedNames(treeId, hint.introducedNames());
         }
@@ -112,16 +109,19 @@ public final class TreeObserver implements DomainObjectListener {
 
         FunctionManager fm = program != null ? program.getFunctionManager() : null;
 
-        // A memory-map change (a block made read-only, mapped or removed) changes how the
-        // decompiler treats every load from that range, in functions no record names and
-        // without changing any input fingerprint: only a resweep brings the tree back.
+        // A memory-map change (a block made read-only, moved or removed, the image base
+        // moved) changes how functions referencing it decompile without changing their
+        // fingerprints, and a move re-keys every function in its range. The full pass
+        // compares the map with the one the tree was decompiled against. Ghidra announces
+        // most of these with RESTORED as well; a permissions change and a new image base
+        // come alone.
         for (DomainObjectChangeRecord rec : ev) {
             var type = rec == null ? null : rec.getEventType();
             if (type == ProgramEvent.MEMORY_BLOCK_CHANGED || type == ProgramEvent.MEMORY_BLOCK_ADDED
                     || type == ProgramEvent.MEMORY_BLOCK_REMOVED || type == ProgramEvent.MEMORY_BLOCK_MOVED
-                    || type == ProgramEvent.MEMORY_BLOCK_SPLIT || type == ProgramEvent.MEMORY_BLOCKS_JOINED) {
-                return Hint.stale("the memory map changed; every function may decompile "
-                        + "differently, so resweep (decompile_tree_run action=start)");
+                    || type == ProgramEvent.MEMORY_BLOCK_SPLIT || type == ProgramEvent.MEMORY_BLOCKS_JOINED
+                    || type == ProgramEvent.IMAGE_BASE_CHANGED) {
+                return Hint.fullReconcile();
             }
         }
 
@@ -382,17 +382,7 @@ public final class TreeObserver implements DomainObjectListener {
      * the names they were renamed to, which a discarded session would leave behind.
      */
     public record Hint(Set<String> addresses, boolean needsReconcile, Set<String> retiredNames,
-            Set<String> introducedNames, String staleReason) {
-
-        public Hint(Set<String> addresses, boolean needsReconcile, Set<String> retiredNames,
-                Set<String> introducedNames) {
-            this(addresses, needsReconcile, retiredNames, introducedNames, null);
-        }
-
-        /** Nothing a reconcile can fix: the tree needs a resweep. */
-        static Hint stale(String reason) {
-            return new Hint(Set.of(), false, Set.of(), Set.of(), reason);
-        }
+            Set<String> introducedNames) {
 
         public Hint {
             addresses = addresses == null ? Set.of() : Set.copyOf(addresses);

@@ -138,6 +138,11 @@ public final class TreeLayout {
         return "index/by-address.tsv";
     }
 
+    /** The memory map the tree was decompiled against, one block per line. */
+    public static String memoryMapTxt() {
+        return "index/memory-map.txt";
+    }
+
     public static String partitionsJson() {
         return "index/partitions.json";
     }
