@@ -82,6 +82,11 @@ public final class ProgramSaves {
         if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
             return;
         }
+        // No manager means nothing is analysing. getAnalysisManager would create one, with
+        // every analyzer, for a program nobody asked to analyse.
+        if (!AutoAnalysisManager.hasAutoAnalysisManager(program)) {
+            return;
+        }
         IN_ANALYSIS_WAIT.set(Boolean.TRUE);
         try {
             AutoAnalysisManager.getAnalysisManager(program).waitForAnalysis(null, TaskMonitor.DUMMY);

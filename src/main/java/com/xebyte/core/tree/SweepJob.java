@@ -408,6 +408,9 @@ public final class SweepJob implements Runnable {
     }
 
     private boolean waitForAnalysisIfNeeded() {
+        if (!AutoAnalysisManager.hasAutoAnalysisManager(program)) {
+            return true; // nothing is analysing; asking would create a manager
+        }
         AutoAnalysisManager mgr;
         try {
             mgr = AutoAnalysisManager.getAnalysisManager(program);

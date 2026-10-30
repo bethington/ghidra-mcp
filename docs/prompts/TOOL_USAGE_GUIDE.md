@@ -367,6 +367,12 @@ set_program_option(group, name, value, type="", program="")
 remove_program_option(group, name, program="")
 ```
 
+Before re-enabling an analyzer that is off, read its `description`
+(`list_analyzers`, echoed by `configure_analyzer`) and the program options
+(`get_program_options`, e.g. the `Mcs51Keil.StockReplacements` group). An
+extension may have disabled a stock analyzer on purpose and replaced it with its
+own; turning the stock one back on undoes that.
+
 `set_program_option` infers the type from an existing option when `type` is
 omitted, accepts `string|int|long|double|float|boolean`, and creates custom
 options on demand — which makes it a durable place to record project-level

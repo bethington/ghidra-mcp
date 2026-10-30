@@ -106,6 +106,12 @@ dependencies {
 // classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
 test {
     jvmArgs '-Dnet.bytebuddy.experimental=true'
+    // AnalyzerDescriptionsGhidraTest runs ClassSearcher.search, after which every
+    // AutoAnalysisManager in this JVM instantiates all analyzers (the x86 function-start
+    // pattern searchers alone are several MB each), and the real-Ghidra tier leaves dozens
+    // of programs open. Gradle's default worker heap ran out; Maven's default (a quarter
+    // of RAM) did not.
+    maxHeapSize = '2g'
     // GhidraScriptsCompileGhidraTest compiles ghidra_scripts/, which is not a
     // source set, so without this a script-only change left :test UP-TO-DATE
     // and a broken script reported BUILD SUCCESSFUL.
