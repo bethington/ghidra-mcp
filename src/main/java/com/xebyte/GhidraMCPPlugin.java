@@ -14,6 +14,7 @@ import ghidra.util.Msg;
 import ghidra.trace.model.Trace;
 
 import ghidra.framework.options.Options;
+import ghidra.framework.options.ToolOptions;
 
 import docking.action.DockingAction;
 import docking.action.MenuData;
@@ -53,7 +54,7 @@ import java.util.concurrent.TimeUnit;
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 216 endpoints for reverse engineering automation. " +
+                  "Provides 214 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -141,6 +142,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.programProvider = new FrontEndProgramProvider(tool, this);
         this.threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
         this.services = com.xebyte.core.CoreServices.build(programProvider, threadingStrategy);
+        com.xebyte.core.SecurityConfig.getInstance().useSettings(services.settings());
+        NamingPolicy.getInstance().useSettings(services.settings());
         this.listingService = services.listing();
         this.commentService = services.comment();
         this.symbolLabelService = services.symbolLabel();
@@ -162,11 +165,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // GhidraMCPAuthInitializer implements ModuleInitializer, but that ExtensionPoint
         // is only reliable for Ghidra's own built-in modules — user extensions may not be
         // discovered by ClassSearcher in time. Call run() explicitly here as a guaranteed
-        // fallback; it has an idempotency guard so double-invocation is safe.
-        if (!com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
-            new com.xebyte.core.GhidraMCPAuthInitializer().run();
-        }
-        if (com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
+        // fallback; registering again only refreshes the same authenticator.
+        if (com.xebyte.core.ServerCredentials.registerFromSettings()) {
             Msg.info(this, "GhidraMCP: Server authenticator registered — auto-login active");
         } else {
             Msg.info(this, "GhidraMCP: No server credentials configured — GUI auth will be used");
@@ -191,6 +191,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "does not match the built-in heuristic; function/global convention warnings are still returned. " +
             "Takes effect when the MCP server starts or restarts.");
         migrateLegacyNamingOption(options);
+        if (options instanceof ToolOptions toolOptions) {
+            toolOptions.addOptionsChangeListener((opt, name, oldValue, newValue) -> {
+                if (STRICT_NAMING_ENFORCEMENT_OPTION.equals(name)) {
+                    onStrictNamingOptionChanged(opt);
+                }
+            });
+        }
         refreshNamingPolicyFromOptions();
 
         // One server, both transports. Each is attempted independently inside
@@ -245,51 +252,30 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     private void refreshNamingPolicyFromOptions() {
-        Options options = tool.getOptions(OPTION_CATEGORY_NAME);
-        boolean strict = options.getBoolean(STRICT_NAMING_ENFORCEMENT_OPTION,
-            NamingPolicy.defaultStrictNamingEnforcement());
-
-        // v5.11.2: load .ghidra-mcp/conventions.json from the active
-        // project root before applying the Tool Option boolean override.
-        // Order matters: the JSON sets all sections (including mode), then
-        // the GUI toggle overrides JUST the mode bit. That keeps the GUI
-        // checkbox as the user's most-recent intent without forcing them
-        // to also delete the JSON file.
-        java.nio.file.Path projectDir = resolveProjectRootDir();
-        com.xebyte.core.ConventionConfigLoader.LoadResult loadResult =
-                NamingPolicy.getInstance().refreshFromProjectRoot(projectDir);
-        if (loadResult.loaded()) {
-            Msg.info(this, "Loaded convention config from " + loadResult.resolvedFrom());
-        } else if (loadResult.error() != null) {
-            Msg.warn(this, "Convention config not loaded: " + loadResult.error()
-                    + " — using built-in defaults");
-        }
-        for (String warning : loadResult.warnings()) {
-            Msg.warn(this, "Convention config: " + warning);
-        }
-
-        // Apply the Tool Option toggle on top. setStrictNamingEnforcement()
-        // preserves all other config sections — only the mode flips.
-        NamingPolicy.getInstance().setStrictNamingEnforcement(strict, "tool_options");
-        Msg.info(this, "GhidraMCP strict naming enforcement: " + strict);
+        syncStrictNamingCheckboxFromSettings();
     }
 
-    /** Best-effort resolution of the active Ghidra project directory.
-     * Returns null if no project is currently open. */
-    private java.nio.file.Path resolveProjectRootDir() {
-        try {
-            Project project = tool.getProject();
-            if (project == null) return null;
-            ghidra.framework.model.ProjectLocator locator = project.getProjectLocator();
-            if (locator == null) return null;
-            java.io.File dir = locator.getProjectDir();
-            return dir != null ? dir.toPath() : null;
-        } catch (Exception e) {
-            // Any reflection / API surprise here is non-fatal — fall back
-            // to defaults. The active config is still usable, just without
-            // the per-project overrides.
-            return null;
+    private void syncStrictNamingCheckboxFromSettings() {
+        Object mode = services.settings().value("naming.mode", null);
+        com.xebyte.core.ConventionConfig.Mode resolved = com.xebyte.core.ConventionConfig.Mode.parse(
+            String.valueOf(mode), com.xebyte.core.ConventionConfig.Mode.ENFORCE);
+        Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+        options.setBoolean(STRICT_NAMING_ENFORCEMENT_OPTION,
+            resolved == com.xebyte.core.ConventionConfig.Mode.ENFORCE);
+    }
+
+    private void onStrictNamingOptionChanged(Options options) {
+        boolean strict = options.getBoolean(STRICT_NAMING_ENFORCEMENT_OPTION,
+            NamingPolicy.defaultStrictNamingEnforcement());
+        String raw = strict ? "enforce" : "warn";
+        // Setting the checkbox from the resolved mode fires this listener too; writing then
+        // would pin the current mode at local scope and shadow later project changes.
+        if (strict == "enforce".equals(String.valueOf(services.settings().value("naming.mode", null)))) {
+            return;
         }
+        services.settings().writeAsOperator("naming.mode",
+            com.xebyte.core.settings.Scope.LOCAL, raw, null);
+        Msg.info(this, "GhidraMCP naming mode: " + raw);
     }
 
     private void migrateLegacyNamingOption(Options options) {

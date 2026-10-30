@@ -1,5 +1,6 @@
 package com.xebyte.offline;
 
+import com.xebyte.core.ConventionConfig;
 import com.xebyte.core.NamingPolicy;
 import junit.framework.TestCase;
 
@@ -14,20 +15,25 @@ public class NamingPolicyTest extends TestCase {
 
     public void testGlobalSettingCanBeUpdatedAndRestored() {
         NamingPolicy policy = NamingPolicy.getInstance();
-        boolean originalValue = policy.isStrictNamingEnforcement();
+        ConventionConfig originalConfig = policy.getConfig();
         String originalSource = policy.getSource();
 
         try {
-            policy.setStrictNamingEnforcement(false, "test");
+            policy.setConfig(new ConventionConfig(
+                ConventionConfig.Mode.WARN,
+                ConventionConfig.FunctionNamingRules.defaults(),
+                ConventionConfig.HungarianRules.defaults(),
+                ConventionConfig.GlobalNamingRules.defaults(),
+                ConventionConfig.PlateCommentRules.defaults()), "test");
             assertFalse(policy.isStrictNamingEnforcement());
             assertFalse(policy.shouldAutoFixStructFieldPrefixes());
             assertEquals("test", policy.getSource());
 
-            policy.setStrictNamingEnforcement(true, "test");
+            policy.setConfig(ConventionConfig.defaults(), "test");
             assertTrue(policy.isStrictNamingEnforcement());
             assertTrue(policy.shouldAutoFixStructFieldPrefixes());
         } finally {
-            policy.setStrictNamingEnforcement(originalValue, originalSource);
+            policy.setConfig(originalConfig, originalSource);
         }
     }
 }

@@ -362,7 +362,7 @@ jobs:
     - name: Replay the read-only integration tier against the fake
       # The same file that needs a live Ghidra on :8089, run with no Ghidra at
       # all. The plugin boots the fake on an ephemeral port, points
-      # GHIDRA_MCP_URL at it, skips the documented gaps, and fails the run if
+      # GHIDRA_MCP_BRIDGE_SERVER_URL at it, skips the documented gaps, and fails the run if
       # the observed contract violations differ from the committed baseline in
       # EITHER direction.
       run: |

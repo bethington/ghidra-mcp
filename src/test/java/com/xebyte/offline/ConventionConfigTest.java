@@ -1,14 +1,10 @@
 package com.xebyte.offline;
 
 import com.xebyte.core.ConventionConfig;
-import com.xebyte.core.ConventionConfigLoader;
 import com.xebyte.core.NamingConventions;
 import com.xebyte.core.NamingPolicy;
 import junit.framework.TestCase;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,7 +17,7 @@ import java.util.Set;
  * <ol>
  *   <li>Defaults reproduce the pre-v5.11.2 hardcoded behavior — no project
  *       config file means no behavior change.</li>
- *   <li>The JSON loader correctly translates each section's knobs into
+ *   <li>Settings-backed configs translate each section's knobs into
  *       runtime behavior (verbs add/remove, weak-noun overrides, plate
  *       comment toggle, global-prefix toggle, etc).</li>
  *   <li>The per-call {@code strict_mode} override is thread-local and
@@ -65,151 +61,6 @@ public class ConventionConfigTest extends TestCase {
                 List.of("Algorithm", "Parameters", "Returns"),
                 cfg.plateComments().requiredSections()
         );
-    }
-
-    public void testLoaderReturnsDefaultsWhenFileMissing() throws IOException {
-        Path tmp = Files.createTempDirectory("ghidra-mcp-test");
-        try {
-            ConventionConfigLoader.LoadResult result =
-                    ConventionConfigLoader.loadFromProjectRoot(tmp);
-            assertTrue(result.usedDefaults());
-            assertNull(result.error());
-            assertEquals(ConventionConfig.Mode.ENFORCE, result.config().getMode());
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
-    }
-
-    public void testLoaderHandlesNullProjectRoot() {
-        ConventionConfigLoader.LoadResult result =
-                ConventionConfigLoader.loadFromProjectRoot(null);
-        assertTrue(result.usedDefaults());
-        assertNull(result.error());
-    }
-
-    // ---------- JSON parsing ----------
-
-    public void testParseStrictModeOff() {
-        String json = "{\"strict_mode\": \"off\"}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertEquals(ConventionConfig.Mode.OFF, result.config().getMode());
-    }
-
-    public void testParseStrictModeWarn() {
-        String json = "{\"strict_mode\": \"warn\"}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertEquals(ConventionConfig.Mode.WARN, result.config().getMode());
-    }
-
-    public void testParseUnknownStrictModeFallsBackToEnforce() {
-        String json = "{\"strict_mode\": \"gibberish\"}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertEquals(ConventionConfig.Mode.ENFORCE, result.config().getMode());
-    }
-
-    public void testParseMalformedJsonFallsThroughToDefaults() {
-        // JsonHelper.parseJson swallows Gson exceptions and returns an
-        // empty map — project convention is "broken config = defaults"
-        // rather than crashing the plugin start. Pin that behavior here
-        // so a future tightening doesn't silently regress the UX.
-        String json = "{this is not json";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertEquals(ConventionConfig.Mode.ENFORCE, result.config().getMode());
-        assertEquals(8, result.config().functionNaming().minLength());
-    }
-
-    public void testParseFunctionNamingAddsAndRemovesVerbs() {
-        String json = "{\"function_naming\": {"
-                + " \"verbs_add\": [\"Sniff\", \"Inject\"],"
-                + " \"verbs_remove\": [\"Process\"],"
-                + " \"min_length\": 12,"
-                + " \"verb_tier_overrides\": {\"Process\": 1, \"Render\": 3},"
-                + " \"weak_nouns_add\": [\"Foo\"],"
-                + " \"weak_nouns_remove\": [\"Data\"]"
-                + "}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        ConventionConfig.FunctionNamingRules fn = result.config().functionNaming();
-        assertEquals(12, fn.minLength());
-        assertTrue(fn.verbsAdd().contains("Sniff"));
-        assertTrue(fn.verbsAdd().contains("Inject"));
-        assertTrue(fn.verbsRemove().contains("Process"));
-        assertEquals(Integer.valueOf(1), fn.verbTierOverrides().get("Process"));
-        assertEquals(Integer.valueOf(3), fn.verbTierOverrides().get("Render"));
-        assertTrue(fn.weakNounsAdd().contains("Foo"));
-        assertTrue(fn.weakNounsRemove().contains("Data"));
-    }
-
-    public void testParseOutOfRangeTierOverrideEmitsWarningAndDropsEntry() {
-        String json = "{\"function_naming\": {"
-                + " \"verb_tier_overrides\": {\"Sniff\": 7, \"Inject\": 2}"
-                + "}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        ConventionConfig.FunctionNamingRules fn = result.config().functionNaming();
-        // Out-of-range tier dropped; warning surfaced.
-        assertNull(fn.verbTierOverrides().get("Sniff"));
-        assertEquals(Integer.valueOf(2), fn.verbTierOverrides().get("Inject"));
-        assertFalse(result.warnings().isEmpty());
-    }
-
-    public void testParsePlateCommentSectionsAreCustomizable() {
-        String json = "{\"plate_comments\": {"
-                + " \"validate\": true,"
-                + " \"required_sections\": [\"Purpose\", \"InputOutput\"],"
-                + " \"min_first_line_words\": 6"
-                + "}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        ConventionConfig.PlateCommentRules pc = result.config().plateComments();
-        assertTrue(pc.validate());
-        assertEquals(List.of("Purpose", "InputOutput"), pc.requiredSections());
-        assertEquals(6, pc.minFirstLineWords());
-    }
-
-    public void testParsePlateCommentValidationCanBeDisabled() {
-        String json = "{\"plate_comments\": {\"validate\": false}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertFalse(result.config().plateComments().validate());
-    }
-
-    public void testParseGlobalNamingCanWaiveGPrefix() {
-        String json = "{\"global_naming\": {\"require_g_prefix\": false}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertFalse(result.config().globalNaming().requireGPrefix());
-    }
-
-    public void testParseHungarianAutoFixCanBeDisabled() {
-        String json = "{\"hungarian\": {\"auto_fix_struct_fields\": false}}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        assertFalse(result.config().hungarian().autoFixStructFields());
-    }
-
-    public void testParseEmptyObjectGivesAllDefaults() {
-        String json = "{}";
-        ConventionConfigLoader.LoadResult result = ConventionConfigLoader.parse(json, null);
-        ConventionConfig cfg = result.config();
-        assertEquals(ConventionConfig.Mode.ENFORCE, cfg.getMode());
-        assertEquals(8, cfg.functionNaming().minLength());
-        assertTrue(cfg.plateComments().validate());
-    }
-
-    // ---------- File loading ----------
-
-    public void testLoadFromProjectRootReadsConventionsJson() throws IOException {
-        Path projectRoot = Files.createTempDirectory("ghidra-mcp-test");
-        Path configDir = projectRoot.resolve(".ghidra-mcp");
-        Files.createDirectories(configDir);
-        Path configFile = configDir.resolve("conventions.json");
-        Files.writeString(configFile, "{\"strict_mode\": \"off\"}");
-        try {
-            ConventionConfigLoader.LoadResult result =
-                    ConventionConfigLoader.loadFromProjectRoot(projectRoot);
-            assertTrue(result.loaded());
-            assertEquals(ConventionConfig.Mode.OFF, result.config().getMode());
-            assertEquals(configFile, result.resolvedFrom());
-        } finally {
-            Files.deleteIfExists(configFile);
-            Files.deleteIfExists(configDir);
-            Files.deleteIfExists(projectRoot);
-        }
     }
 
     // ---------- NamingConventions consults the active config ----------

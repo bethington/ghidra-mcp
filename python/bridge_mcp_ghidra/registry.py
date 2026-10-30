@@ -11,6 +11,7 @@ from pydantic import Field
 from mcp.types import ToolAnnotations
 
 from . import dispatch
+from . import settings
 from . import state
 from . import transport
 from .config import (
@@ -171,7 +172,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                     {
                         "error": (
                             f"Missing required program selector(s): {names} "
-                            "(GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS is set). "
+                            "(tools.require_program is on). "
                             "Pass each explicitly to target the intended open program(s)."
                         )
                     }
@@ -572,15 +573,20 @@ def _fetch_and_register_schema(
     """Fetch /mcp/schema from connected instance and register tools.
 
     Args:
-        load_all: If True, register all tools. If False, only default groups.
+        load_all: If True, register all tools. If False, the groups the project's tool
+            settings name (tools.autoload, plus tools.last_loaded if restored).
 
     Returns: count of registered tools.
     """
-    if not load_all:
-        load_all = not state._lazy_mode
     schema = _fetch_schema(connection=connection)
-    groups = None if load_all else state._default_groups
-    return register_tools_from_schema(schema, groups=groups)
+    groups = settings.connect_groups(schema, connection=connection)
+    return register_tools_from_schema(schema, groups=None if load_all else groups)
+
+
+def fetch_for_connect(connection: state.ConnectionSnapshot) -> tuple[list[dict], set[str] | None]:
+    """The schema and the groups to register for a connection (see settings.connect_groups)."""
+    schema = _fetch_schema(connection=connection)
+    return schema, settings.connect_groups(schema, connection=connection)
 
 
 def _fetch_schema(connection: state.ConnectionSnapshot | None = None) -> list[dict]:

@@ -107,13 +107,6 @@ public class FunctionService {
             boolean terminalNoReturn) {
     }
 
-    private record ForceDecompileOutcome(
-            boolean success,
-            String errorMessage,
-            String functionName,
-            String decompiledCode) {
-    }
-
     // ========================================================================
     // Decompilation methods
     // ========================================================================
@@ -220,99 +213,6 @@ public class FunctionService {
         Msg.error(this, "Could not decompile function after " + maxRetries + " attempts: " + func.getName());
         return null;
     }
-
-    /**
-     * Force a fresh decompilation of a function (flushing cached results).
-     */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
-    public Response forceDecompile(
-            @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") Function func,
-            @Param(value = "program", defaultValue = "") Program program,
-            @Param(value = "variant", defaultValue = "",
-                   description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.") String variant) {
-
-        // The same check get_functions runs, and like it this fires only on a variant
-        // the caller named that the program contradicts. This endpoint is reached for
-        // when ordinary decompile output looks wrong, which is the moment a caller is
-        // most likely to be staring at wrong-variant C and treating it as a stale-cache
-        // problem -- so a mismatch here is worth catching more than anywhere else.
-        Response variantReject = ServiceUtils.variantGate(program, variant);
-        if (variantReject != null) return variantReject;
-
-
-        ForceDecompileOutcome outcome;
-        try {
-            outcome = threadingStrategy.executeRead(() -> {
-                try {
-                    // Create new decompiler interface
-                    DecompInterface decompiler = ServiceUtils.createConfiguredDecompiler(program);
-
-                    try {
-                        // Flush cached results to force fresh decompilation
-                        decompiler.flushCache();
-                        DecompileResults results = decompiler.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-
-                        if (results == null || !results.decompileCompleted()) {
-                            String errorMsg = results != null ? results.getErrorMessage() : "Unknown error";
-                            String message = "Decompilation did not complete for function " + func.getName();
-                            if (errorMsg != null && !errorMsg.isEmpty()) {
-                                message += ". Reason: " + errorMsg;
-                            }
-                            return new ForceDecompileOutcome(false, message, null, null);
-                        }
-
-                        // Check if decompiled function is null (can happen even when decompileCompleted returns true)
-                        if (results.getDecompiledFunction() == null) {
-                            return new ForceDecompileOutcome(false,
-                                    "Decompiler completed but returned null decompiled function for "
-                                    + func.getName() + ". This can happen with functions that have: "
-                                    + "invalid control flow or unreachable code; large NOP sleds or padding; "
-                                    + "external calls to unknown addresses; stack frame issues. "
-                                    + "Consider using disassemble_function() instead for this function.",
-                                    null, null);
-                        }
-
-                        Msg.info(this, "Forced decompilation for function: " + func.getName());
-                        return new ForceDecompileOutcome(true, null, func.getName(),
-                                results.getDecompiledFunction().getC());
-
-                    } finally {
-                        decompiler.dispose();
-                    }
-
-                } catch (Throwable e) {
-                    String msg = ServiceUtils.failureMessage(e);
-                    Msg.error(this, "Error forcing decompilation", e);
-                    return new ForceDecompileOutcome(false, msg, null, null);
-                }
-            });
-        } catch (Throwable e) {
-            String msg = ServiceUtils.failureMessage(e);
-            Msg.error(this, "Force decompile failed", e);
-            outcome = new ForceDecompileOutcome(false, "Write failed: " + msg, null, null);
-        }
-
-        if (!outcome.success()) {
-            return Response.err(outcome.errorMessage() != null ? outcome.errorMessage() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("address", func.getEntryPoint().toString(false));
-        out.put("name", outcome.functionName());
-        // The dialect that produced the code travels with it. Pseudocode with no
-        // record of the variant that decoded it cannot be audited after the fact,
-        // which is how a VLE-as-classic-PowerPC mistake survives review.
-        ServiceUtils.putLanguageSelection(out, program);
-        out.put("decompiled", outcome.decompiledCode());
-        return Response.ok(out);
-    }
-
-
 
     // ========================================================================
     // Disassembly
@@ -1562,7 +1462,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 return (alreadyInClass ? "Confirmed " : "Moved ") + func.getName()
                         + (alreadyInClass ? " in class " : " into class ") + className
                         + "; 'this' types as " + resolvedName
-                        + " (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.";
+                        + " (auto-storage). Read get_functions(fields=decompiled_code) to see it.";
             });
             return Response.success(text);
         } catch (Refusal r) {

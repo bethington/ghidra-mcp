@@ -628,27 +628,32 @@ public class NamingConventionsTest extends TestCase {
 
     public void testStructFieldPolicyAutoFixesWhenStrictNamingEnabled() {
         NamingPolicy policy = NamingPolicy.getInstance();
-        boolean originalValue = policy.isStrictNamingEnforcement();
+        com.xebyte.core.ConventionConfig originalConfig = policy.getConfig();
         String originalSource = policy.getSource();
 
         try {
-            policy.setStrictNamingEnforcement(true, "test");
+            policy.setConfig(com.xebyte.core.ConventionConfig.defaults(), "test");
             assertEquals("dwItem_count",
                     NamingConventions.applyStructFieldNamingPolicy("item_count", "uint"));
             assertEquals("pNext_item",
                     NamingConventions.applyStructFieldNamingPolicy("next_item", "void *"));
         } finally {
-            policy.setStrictNamingEnforcement(originalValue, originalSource);
+            policy.setConfig(originalConfig, originalSource);
         }
     }
 
     public void testStructFieldPolicyPreservesNamesWhenStrictNamingDisabled() {
         NamingPolicy policy = NamingPolicy.getInstance();
-        boolean originalValue = policy.isStrictNamingEnforcement();
+        com.xebyte.core.ConventionConfig originalConfig = policy.getConfig();
         String originalSource = policy.getSource();
 
         try {
-            policy.setStrictNamingEnforcement(false, "test");
+            policy.setConfig(new com.xebyte.core.ConventionConfig(
+                com.xebyte.core.ConventionConfig.Mode.WARN,
+                com.xebyte.core.ConventionConfig.FunctionNamingRules.defaults(),
+                com.xebyte.core.ConventionConfig.HungarianRules.defaults(),
+                com.xebyte.core.ConventionConfig.GlobalNamingRules.defaults(),
+                com.xebyte.core.ConventionConfig.PlateCommentRules.defaults()), "test");
             assertEquals("item_count",
                     NamingConventions.applyStructFieldNamingPolicy("item_count", "uint"));
             assertEquals("next_item",
@@ -656,7 +661,7 @@ public class NamingConventionsTest extends TestCase {
             assertEquals("is_enabled",
                     NamingConventions.applyStructFieldNamingPolicy("is_enabled", "bool"));
         } finally {
-            policy.setStrictNamingEnforcement(originalValue, originalSource);
+            policy.setConfig(originalConfig, originalSource);
         }
     }
 

@@ -150,8 +150,7 @@ the fun-doc 5-DLL corpus. Needs two programs open in one instance.
   keys shared, the other two derivable); `list_methods` → `find_functions` (it
   returns bare strings — a response-contract violation — and is `find_functions`
   minus every filter); the three `get_current_{address,function,selection}` → one
-  `get_current_location`; `force_decompile` → a `refresh` param on
-  `decompile_function`; `get_xrefs_from` gaining `addresses=` for symmetry with
+  `get_current_location`; `get_xrefs_from` gaining `addresses=` for symmetry with
   `get_xrefs_to`.
 * **Function sub-resources**, e.g. `ghidra://function/{p}/{addr}/disassembly`,
   `/pcode`, `/fingerprint`, `/callers`. Verified feasible: FastMCP's matcher is

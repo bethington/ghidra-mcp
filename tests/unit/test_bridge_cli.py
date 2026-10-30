@@ -15,7 +15,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from bridge_mcp_ghidra import cli, state  # noqa: E402
+from bridge_mcp_ghidra.keys import env_name  # noqa: E402
 from bridge_mcp_ghidra.server import mcp  # noqa: E402
+
+_INBOUND_TOKEN_ENV = env_name("bridge.inbound_token")
 from mcp.server.transport_security import TransportSecurityMiddleware  # noqa: E402
 
 
@@ -51,7 +54,7 @@ class _CliHarness(unittest.TestCase):
             patch.object(cli, "_build_http_app"),
         ]
         # os.environ is patched unconditionally (patch.dict restores the whole
-        # mapping on stop) so a test that does not name GHIDRA_MCP_LAZY can
+        # mapping on stop) so a test that does not name GHIDRA_MCP_BRIDGE_LAZY can
         # clear it below. That var now feeds the lazy default, so a developer
         # who happens to export it would otherwise flip the assertions of every
         # test that says nothing about it.
@@ -62,10 +65,10 @@ class _CliHarness(unittest.TestCase):
         started = []
         for p in patches:
             started.append(p.start())
-        if "GHIDRA_MCP_LAZY" not in effective_env:
-            os.environ.pop("GHIDRA_MCP_LAZY", None)
-        if "GHIDRA_MCP_PROJECT" not in effective_env:
-            os.environ.pop("GHIDRA_MCP_PROJECT", None)
+        if "GHIDRA_MCP_BRIDGE_LAZY" not in effective_env:
+            os.environ.pop("GHIDRA_MCP_BRIDGE_LAZY", None)
+        if "GHIDRA_MCP_BRIDGE_PROJECT" not in effective_env:
+            os.environ.pop("GHIDRA_MCP_BRIDGE_PROJECT", None)
         try:
             cli.main()
             return {
@@ -91,20 +94,20 @@ class TestCliArguments(_CliHarness):
         self.assertTrue(state._lazy_mode)
 
     def test_project_flag_overrides_environment(self):
-        mocks = self.run_main("--project", "Chosen", env={"GHIDRA_MCP_PROJECT": "Other"})
+        mocks = self.run_main("--project", "Chosen", env={"GHIDRA_MCP_BRIDGE_PROJECT": "Other"})
         mocks["auto_connect"].assert_called_once_with(project="Chosen")
 
     def test_project_environment_fallback(self):
-        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " Chosen "})
+        mocks = self.run_main(env={"GHIDRA_MCP_BRIDGE_PROJECT": " Chosen "})
         mocks["auto_connect"].assert_called_once_with(project="Chosen")
 
     def test_empty_project_environment_is_unset(self):
-        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " "})
+        mocks = self.run_main(env={"GHIDRA_MCP_BRIDGE_PROJECT": " "})
         mocks["auto_connect"].assert_called_once_with(project=None)
 
     def test_blank_project_flag_is_rejected(self):
         with self.assertRaises(SystemExit):
-            self.run_main("--project", " ", env={"GHIDRA_MCP_PROJECT": "Other"})
+            self.run_main("--project", " ", env={"GHIDRA_MCP_BRIDGE_PROJECT": "Other"})
 
     def test_project_is_passed_to_background_retry(self):
         mocks = self.run_main("--project", "Chosen", connected=False)
@@ -129,35 +132,42 @@ class TestCliArguments(_CliHarness):
         # The second half of the #440 escape hatch. A Docker ENTRYPOINT, a uvx
         # one-liner or a registry-installed server entry may give the user no
         # way to add a flag, and an escape hatch you cannot reach is not one.
-        self.run_main(env={"GHIDRA_MCP_LAZY": "0"})
+        self.run_main(env={"GHIDRA_MCP_BRIDGE_LAZY": "0"})
         self.assertFalse(state._lazy_mode)
 
     def test_env_var_accepts_word_forms(self):
         for value in ("false", "FALSE", "no", "off"):
             with self.subTest(value=value):
-                self.run_main(env={"GHIDRA_MCP_LAZY": value})
+                self.run_main(env={"GHIDRA_MCP_BRIDGE_LAZY": value})
                 self.assertFalse(state._lazy_mode)
         for value in ("1", "true", "yes", "on"):
             with self.subTest(value=value):
-                self.run_main(env={"GHIDRA_MCP_LAZY": value})
+                self.run_main(env={"GHIDRA_MCP_BRIDGE_LAZY": value})
                 self.assertTrue(state._lazy_mode)
 
     def test_explicit_flag_beats_env_var(self):
         # Both directions: whoever typed the flag meant it.
-        self.run_main("--no-lazy", env={"GHIDRA_MCP_LAZY": "1"})
+        self.run_main("--no-lazy", env={"GHIDRA_MCP_BRIDGE_LAZY": "1"})
         self.assertFalse(state._lazy_mode)
-        self.run_main("--lazy", env={"GHIDRA_MCP_LAZY": "0"})
+        self.run_main("--lazy", env={"GHIDRA_MCP_BRIDGE_LAZY": "0"})
         self.assertTrue(state._lazy_mode)
 
     def test_unparseable_env_var_keeps_the_default(self):
         # Guessing here silently picks one of the two client families this
         # setting exists to keep working, so an unknown value is ignored.
-        self.run_main(env={"GHIDRA_MCP_LAZY": "maybe"})
+        self.run_main(env={"GHIDRA_MCP_BRIDGE_LAZY": "maybe"})
         self.assertTrue(state._lazy_mode)
 
     def test_default_groups_parsed_and_stripped(self):
-        self.run_main("--default-groups", " function , datatype ,")
-        self.assertEqual(state._default_groups, {"function", "datatype"})
+        from bridge_mcp_ghidra import settings
+
+        try:
+            self.run_main("--default-groups", " function , datatype ,")
+            # the flag is this session's tools.autoload; a plain list replaces the project's
+            self.assertEqual(settings.resolve("tools.autoload", {"tools.autoload": ["listing"]}),
+                             ["function", "datatype"])
+        finally:
+            settings.SESSION.pop("tools.autoload", None)
 
     def test_transport_and_port_applied(self):
         mocks = self.run_main("--transport", "streamable-http", "--mcp-port", "9905")
@@ -198,7 +208,7 @@ class TestCliRebindProtection(_CliHarness):
         self.run_main(
             "--mcp-host",
             "127.0.0.1",
-            env={"GHIDRA_MCP_ALLOWED_HOSTS": "host.containers.internal"},
+            env={"GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS": "host.containers.internal"},
         )
         sec = mcp.settings.transport_security
         guard = TransportSecurityMiddleware(sec)
@@ -227,7 +237,7 @@ class TestCliRebindProtection(_CliHarness):
     def test_wildcard_bind_extra_hosts_from_env(self):
         self.run_main(
             "--mcp-host", "0.0.0.0",
-            env={"GHIDRA_MCP_ALLOWED_HOSTS": "re-lab.internal, bench01"},
+            env={"GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS": "re-lab.internal, bench01"},
         )
         sec = mcp.settings.transport_security
         self.assertIn("re-lab.internal:*", sec.allowed_hosts)
@@ -236,7 +246,7 @@ class TestCliRebindProtection(_CliHarness):
     def test_wildcard_bind_explicit_optout_disables_protection(self):
         self.run_main(
             "--mcp-host", "0.0.0.0",
-            env={"GHIDRA_MCP_DISABLE_REBIND_PROTECTION": "1"},
+            env={"GHIDRA_MCP_BRIDGE_REBIND_PROTECTION": "false"},
         )
         sec = mcp.settings.transport_security
         self.assertFalse(sec.enable_dns_rebinding_protection)
@@ -284,7 +294,7 @@ class TestCorsOriginRegex(unittest.TestCase):
         from unittest.mock import patch as _patch
 
         with _patch.dict(
-            "os.environ", {"GHIDRA_MCP_ALLOWED_HOSTS": "re-lab.internal, bench01"}
+            "os.environ", {"GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS": "re-lab.internal, bench01"}
         ):
             self.assertTrue(self._match("127.0.0.1", "http://re-lab.internal:6274"))
             self.assertTrue(self._match("127.0.0.1", "https://bench01"))
@@ -696,7 +706,7 @@ class TestInboundBearerToken(unittest.TestCase):
 
         from starlette.testclient import TestClient
 
-        with patch.dict(os.environ, {cli._INBOUND_TOKEN_ENV: token} if token else {}):
+        with patch.dict(os.environ, {_INBOUND_TOKEN_ENV: token} if token else {}):
             app = cli._build_http_app("streamable-http", "127.0.0.1")
         return TestClient(app, base_url="http://localhost:8000")
 
@@ -704,7 +714,7 @@ class TestInboundBearerToken(unittest.TestCase):
         import os
 
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop(cli._INBOUND_TOKEN_ENV, None)
+            os.environ.pop(_INBOUND_TOKEN_ENV, None)
             app = cli._build_http_app("streamable-http", "127.0.0.1")
         guards = [m for m in app.user_middleware if m.cls is cli.BearerTokenGuard]
         self.assertEqual(guards, [])
@@ -761,7 +771,7 @@ class TestNonLoopbackBindWarnsWithoutToken(_CliHarness):
         with self.assertLogs(cli.logger, level="INFO") as logs:
             self.run_main(
                 "--transport", "streamable-http", "--mcp-host", "0.0.0.0",
-                env={cli._INBOUND_TOKEN_ENV: "tok"},
+                env={_INBOUND_TOKEN_ENV: "tok"},
             )
         self.assertFalse(any("NO inbound authentication" in m for m in logs.output))
 
@@ -892,12 +902,12 @@ class TestRequestGatesAgree(unittest.TestCase):
         self.assertFalse(self._cors_allows("ghidra.example.com", "http://evil.attacker.test"))
 
     def test_allowed_hosts_env_widens_both_gates_together(self):
-        """GHIDRA_MCP_ALLOWED_HOSTS is the operator's escape hatch.
+        """GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS is the operator's escape hatch.
 
         Widening one gate and not the other leaves the client just as
         rejected, only at a different layer.
         """
-        with patch.dict("os.environ", {"GHIDRA_MCP_ALLOWED_HOSTS": "re-lab.internal"}):
+        with patch.dict("os.environ", {"GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS": "re-lab.internal"}):
             validator = self._validator("192.168.1.50")
             self.assertTrue(self._cors_allows("192.168.1.50", "https://re-lab.internal"))
             self.assertTrue(validator._validate_origin("https://re-lab.internal"))

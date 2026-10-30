@@ -629,7 +629,7 @@ def test_install_ghidra_dependencies_still_hard_fails_without_maven(
 
 def test_resolve_mcp_url_uses_env_url(tmp_path: Path):
     (tmp_path / ".env").write_text(
-        "GHIDRA_MCP_URL=http://127.0.0.1:9999\n", encoding="utf-8"
+        "GHIDRA_MCP_BRIDGE_SERVER_URL=http://127.0.0.1:9999\n", encoding="utf-8"
     )
 
     assert resolve_mcp_url(tmp_path) == "http://127.0.0.1:9999"
@@ -637,7 +637,7 @@ def test_resolve_mcp_url_uses_env_url(tmp_path: Path):
 
 def test_resolve_mcp_url_builds_from_bind_and_port(tmp_path: Path):
     (tmp_path / ".env").write_text(
-        "GHIDRA_MCP_BIND_ADDRESS=0.0.0.0\nGHIDRA_MCP_PORT=8090\n",
+        "GHIDRA_MCP_SERVER_BIND_ADDRESS=0.0.0.0\nGHIDRA_MCP_PORT=8090\n",
         encoding="utf-8",
     )
 

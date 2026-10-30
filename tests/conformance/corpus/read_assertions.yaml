@@ -168,29 +168,29 @@ tool_cases:
 
   # Bare-name resolution: this returned a false negative before the audit's
   # BUG-1 fix, for every natural input an LLM would use.
-  - tool: validate_data_type
+  - tool: find_data_types
     name: curated_bare_int
     tier: read
     snapshot: false
-    args: { type_name: "int" }
+    args: { name: "int" }
     assert:
-      json_equals: { exists: true, size: 4 }
+      json_equals: { total: 1 }
 
-  - tool: validate_data_type
+  - tool: find_data_types
     name: curated_bare_pointer
     tier: read
     snapshot: false
-    args: { type_name: "char *" }
+    args: { name: "char *" }
     assert:
-      json_equals: { exists: true }
+      json_equals: { total: 1 }
 
-  - tool: validate_data_type
+  - tool: find_data_types
     name: curated_nonexistent
     tier: read
     snapshot: false
-    args: { type_name: "NoSuchTypeConformanceProbe" }
+    args: { name: "NoSuchTypeConformanceProbe" }
     assert:
-      json_equals: { exists: false }
+      json_equals: { total: 0 }
 
   # ---- symbols and xrefs ---------------------------------------------------
   - tool: list_program_items

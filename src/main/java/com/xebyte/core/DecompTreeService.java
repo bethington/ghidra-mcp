@@ -68,9 +68,12 @@ public class DecompTreeService {
     private static final String POLL_PATH = "/decompile_tree_status";
 
     private final ProgramProvider programProvider;
+    private final SettingsService settings;
 
-    public DecompTreeService(ProgramProvider programProvider, ThreadingStrategy threading) {
+    public DecompTreeService(ProgramProvider programProvider, ThreadingStrategy threading,
+            SettingsService settings) {
         this.programProvider = programProvider;
+        this.settings = settings;
         // Auto-reconcile needs to re-resolve a Program (the observer must never
         // hold one). Only FrontEndProgramProvider registered a lookup, so
         // outside the GUI the dirty queue collected addresses and silently
@@ -177,52 +180,53 @@ public class DecompTreeService {
                        + "java.io.tmpdir/ghidra-mcp-tree/.")
             String root,
             @Param(value = "strategies", source = ParamSource.BODY, defaultValue = "",
-                   description = "Comma-separated partition strategies. Empty = full cascade.")
+                   description = "Comma-separated partition strategies. Empty = full cascade. "
+                       + "Omit for the tree.strategies setting.")
             String strategies,
-            @Param(value = "band_size", source = ParamSource.BODY, defaultValue = "20",
-                   description = "Address-band width when bands apply.")
-            int bandSize,
-            @Param(value = "max_file_bytes", source = ParamSource.BODY, defaultValue = "32768",
+            @Param(value = "band_size", source = ParamSource.BODY, defaultValue = "",
+                   description = "Address-band width when bands apply. "
+                       + "Omit for the tree.band_size setting.")
+            Integer bandSize,
+            @Param(value = "max_file_bytes", source = ParamSource.BODY, defaultValue = "",
                    description = "Read-budget bytes per .c file inside a compartment "
-                       + "(floored at 4096). Changing this repartitions file paths.")
-            int maxFileBytes,
+                       + "(floored at 4096). Changing this repartitions file paths. "
+                       + "Omit for the tree.max_file_bytes setting.")
+            Integer maxFileBytes,
             @Param(value = "exclusions", source = ParamSource.BODY, defaultValue = "",
-                   description = "CSV of tag:/partition:/range: exclusion specs.")
+                   description = "CSV of tag:/partition:/range: exclusion specs. "
+                       + "Omit for the tree.exclusions setting.")
             String exclusions,
             @Param(value = "include_only", source = ParamSource.BODY, defaultValue = "",
-                   description = "CSV of tag:/partition:/range: include-only specs.")
+                   description = "CSV of tag:/partition:/range: include-only specs. "
+                       + "Omit for the tree.include_only setting.")
             String includeOnly,
-            @Param(value = "throttle_percent", source = ParamSource.BODY, defaultValue = "10",
-                   description = "Interactive yield 0..90 after each decompiled function.")
-            int throttlePercent,
-            @Param(value = "disassemble_missing", source = ParamSource.BODY, defaultValue = "false",
-                   description = "Off by default. When true, the next sweep disassembles at "
-                       + "function entries that have no instruction yet (typical for PE "
-                       + ".pdata imports) and may reflow stub bodies — a program write, "
-                       + "not filesystem-only.")
-            boolean disassembleMissing) {
+            @Param(value = "throttle_percent", source = ParamSource.BODY, defaultValue = "",
+                   description = "Interactive yield 0..90 after each decompiled function. "
+                       + "Omit for the tree.throttle_percent setting.")
+            Integer throttlePercent,
+            @Param(value = "decompile_timeout_seconds", source = ParamSource.BODY, defaultValue = "",
+                   description = "Per-function decompile budget during the sweep. "
+                       + "Omit for the tree.decompile_timeout_seconds setting.")
+            Integer decompileTimeoutSeconds,
+            @Param(value = "analysis_wait_seconds", source = ParamSource.BODY, defaultValue = "",
+                   description = "Cap on waiting for auto-analysis before partitioning. "
+                       + "Omit for the tree.analysis_wait_seconds setting.")
+            Integer analysisWaitSeconds,
+            @Param(value = "disassemble_missing", source = ParamSource.BODY, defaultValue = "",
+                   description = "When true, the next sweep disassembles at function entries "
+                       + "that have no instruction yet (typical for PE .pdata imports) and may "
+                       + "reflow stub bodies: a program write, not filesystem-only. "
+                       + "Omit for the tree.disassemble_missing setting.")
+            Boolean disassembleMissing) {
 
-        List<ExclusionRule> exclRules;
-        List<ExclusionRule> includeRules;
-        List<String> strategyList;
+        TreeConfig requested;
         try {
-            exclRules = parseRuleCsv(exclusions);
-            includeRules = parseRuleCsv(includeOnly);
-            strategyList = ServiceUtils.csvTokens(strategies);
+            requested = buildCreateConfig(program, root, strategies, bandSize, maxFileBytes,
+                    exclusions, includeOnly, throttlePercent, decompileTimeoutSeconds,
+                    analysisWaitSeconds, disassembleMissing);
         } catch (IllegalArgumentException e) {
             return ServiceUtils.fail(e);
         }
-
-        TreeConfig requested = TreeConfig.builder()
-                .rootPath(blankToNull(root))
-                .enabledStrategies(strategyList)
-                .bandSize(bandSize)
-                .maxFileBytes(maxFileBytes)
-                .exclusions(exclRules)
-                .includeOnly(includeRules)
-                .throttlePercent(throttlePercent)
-                .disassembleMissing(disassembleMissing)
-                .build();
 
         try {
             ExclusionEvaluator.validateRanges(program, requested);
@@ -1366,6 +1370,80 @@ public class DecompTreeService {
             }
         }
         return !oldP.equals(newP);
+    }
+
+    private TreeConfig buildCreateConfig(
+            Program program,
+            String root,
+            String strategies,
+            Integer bandSize,
+            Integer maxFileBytes,
+            String exclusions,
+            String includeOnly,
+            Integer throttlePercent,
+            Integer decompileTimeoutSeconds,
+            Integer analysisWaitSeconds,
+            Boolean disassembleMissing) {
+        List<String> strategyList = strategies != null && !strategies.isBlank()
+                ? ServiceUtils.csvTokens(strategies)
+                : listSetting("tree.strategies", program);
+        List<ExclusionRule> exclRules = exclusions != null && !exclusions.isBlank()
+                ? parseRuleCsv(exclusions)
+                : rulesFromListSetting("tree.exclusions", program);
+        List<ExclusionRule> includeRules = includeOnly != null && !includeOnly.isBlank()
+                ? parseRuleCsv(includeOnly)
+                : rulesFromListSetting("tree.include_only", program);
+        TreeConfig.Builder b = TreeConfig.builder()
+                .rootPath(blankToNull(root))
+                .enabledStrategies(strategyList)
+                .exclusions(exclRules)
+                .includeOnly(includeRules)
+                .bandSize(bandSize != null ? bandSize : intSetting("tree.band_size", program))
+                .maxFileBytes(maxFileBytes != null
+                        ? maxFileBytes : intSetting("tree.max_file_bytes", program))
+                .throttlePercent(throttlePercent != null
+                        ? throttlePercent : intSetting("tree.throttle_percent", program))
+                .decompileTimeoutSeconds(decompileTimeoutSeconds != null
+                        ? decompileTimeoutSeconds
+                        : intSetting("tree.decompile_timeout_seconds", program))
+                .analysisWaitSeconds(analysisWaitSeconds != null
+                        ? analysisWaitSeconds
+                        : intSetting("tree.analysis_wait_seconds", program))
+                .disassembleMissing(disassembleMissing != null
+                        ? disassembleMissing
+                        : boolSetting("tree.disassemble_missing", program));
+        return b.build();
+    }
+
+    private int intSetting(String key, Program program) {
+        Object v = settings.value(key, program);
+        return v instanceof Number n ? n.intValue() : 0;
+    }
+
+    private boolean boolSetting(String key, Program program) {
+        return Boolean.TRUE.equals(settings.value(key, program));
+    }
+
+    private List<String> listSetting(String key, Program program) {
+        Object v = settings.value(key, program);
+        if (v instanceof List<?> list) {
+            List<String> out = new ArrayList<>(list.size());
+            for (Object o : list) {
+                if (o != null) {
+                    out.add(o.toString());
+                }
+            }
+            return out;
+        }
+        return List.of();
+    }
+
+    private List<ExclusionRule> rulesFromListSetting(String key, Program program) {
+        List<ExclusionRule> rules = new ArrayList<>();
+        for (String spec : listSetting(key, program)) {
+            rules.add(ExclusionRule.parse(spec));
+        }
+        return rules;
     }
 
     private static List<ExclusionRule> parseRuleCsv(String csv) {

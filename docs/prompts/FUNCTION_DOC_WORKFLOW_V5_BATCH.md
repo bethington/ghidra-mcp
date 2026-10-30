@@ -88,7 +88,7 @@ Task(
 
 These issues come up repeatedly when running V5 at scale:
 
-- **`get_functions(fields=parameters,locals)` returns empty after prototype changes**: Register-only variables lose Ghidra symbols. Call `force_decompile` first to refresh, then retry. Even if still empty, `rename_variables` works by matching names from decompiled output.
+- **`get_functions(fields=parameters,locals)` returns empty after prototype changes**: Register-only variables lose Ghidra symbols. Retrying does not help (every call decompiles fresh). Even when empty, `rename_variables` works by matching names from decompiled output.
 - **`set_variable_type` "No HighVariable found"**: Common for stack arrays (e.g., `ushort[6]`) and decompiler-inferred composites. Skip on first failure — note in plate comment Special Cases. Do not retry.
 - **Storage still `undefined4` despite resolved display type**: The decompiler shows `int`/`dword`/`FILE*` but storage remains `undefined4`. Explicitly calling `set_variable_type` with the same type resolves it. Critical for reaching 100%.
 - **Unfixable deductions** (do not retry or flag for manual review):

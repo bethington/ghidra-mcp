@@ -1,18 +1,17 @@
 """Debugger proxy tools — forward to an external debugger server.
 
 Each tool proxies an HTTP request to an external dbgeng (WinDbg engine)
-debugger server — not part of this repo — on ``GHIDRA_DEBUGGER_URL`` (see
+debugger server — not part of this repo — on ``GHIDRA_MCP_BRIDGE_DEBUGGER_URL`` (see
 :data:`bridge_mcp_ghidra.config.DEBUGGER_URL`).
 
-The tools are OFF BY DEFAULT: they register only when ``GHIDRA_DEBUGGER_URL``
-is explicitly set or ``GHIDRA_DEBUGGER_TOOLS`` is truthy. See
+The tools are OFF BY DEFAULT: they register only when ``GHIDRA_MCP_BRIDGE_DEBUGGER_URL``
+is explicitly set or ``GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS`` is truthy. See
 :func:`_debugger_enabled`.
 """
 
 import http.client
 import inspect
 import json
-import os
 from urllib.parse import urlencode, urlparse
 
 from . import config
@@ -28,6 +27,7 @@ from .config import (
     logger,
     parse_bool,
 )
+from .keys import env_name, value as setting_value
 from .server import mcp
 from .validation import validate_server_url
 
@@ -44,11 +44,11 @@ def _debugger_enabled(
     that can only ever answer "server not running" clutters every client's
     tool list, so the tools are OFF BY DEFAULT:
 
-      - ``GHIDRA_DEBUGGER_TOOLS`` set and non-blank decides outright:
+      - ``GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS`` set and non-blank decides outright:
         1/true/yes/on -> enabled, anything else (0/false/no/off) -> disabled.
-        It wins over the URL, so ``GHIDRA_DEBUGGER_TOOLS=0`` turns the tools
+        It wins over the URL, so ``GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=0`` turns the tools
         off even with a URL configured.
-      - Otherwise the tools register only when ``GHIDRA_DEBUGGER_URL`` was
+      - Otherwise the tools register only when ``GHIDRA_MCP_BRIDGE_DEBUGGER_URL`` was
         explicitly set in the environment AND the call path would accept it.
         The built-in default URL does not count: having a default port is not
         evidence that a server exists. A non-loopback URL does not register
@@ -56,7 +56,7 @@ def _debugger_enabled(
         (these primitives attach to processes and write memory), so it would
         advertise 22 tools that every call rejects. To reach a debugger on
         another machine, forward its port to loopback and set
-        ``GHIDRA_DEBUGGER_TOOLS=1``.
+        ``GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1``.
 
     The host platform plays no part: being on Windows says nothing about
     whether a debugger server is running.
@@ -66,7 +66,7 @@ def _debugger_enabled(
     separately by _debugger_request().
     """
     if override is None:
-        override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
+        override = setting_value("bridge.debugger_tools")
     if override is not None and override.strip():
         # Non-blank override decides outright; blank falls through to the URL rule.
         return parse_bool(override, default=False)
@@ -74,9 +74,9 @@ def _debugger_enabled(
         return False
     if not validate_server_url(url):
         logger.warning(
-            "GHIDRA_DEBUGGER_URL=%s is not a loopback http://host:port URL; the debugger "
+            "GHIDRA_MCP_BRIDGE_DEBUGGER_URL=%s is not a loopback http://host:port URL; the debugger "
             "proxy refuses those, so its tools are not registered. Forward the port to "
-            "127.0.0.1 and point GHIDRA_DEBUGGER_URL there, or set GHIDRA_DEBUGGER_TOOLS=1.",
+            "127.0.0.1 and point GHIDRA_MCP_BRIDGE_DEBUGGER_URL there, or set GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1.",
             url,
         )
         return False
@@ -127,13 +127,13 @@ def _debugger_request(
     """Send a request to the debugger server. Returns JSON string."""
     # The debugger server exposes powerful primitives (attach, read/write
     # memory, breakpoints). Refuse to proxy to a non-loopback URL even though
-    # GHIDRA_DEBUGGER_URL is operator-set — mirrors the Ghidra TCP URL policy
+    # GHIDRA_MCP_BRIDGE_DEBUGGER_URL is operator-set — mirrors the Ghidra TCP URL policy
     # and stops a stray/hostile env value from redirecting debugger traffic.
     if not validate_server_url(DEBUGGER_URL):
         return json.dumps(
             {
                 "error": f"Refusing to use non-loopback debugger URL: {DEBUGGER_URL}. "
-                "GHIDRA_DEBUGGER_URL must be http://<127.0.0.1|localhost|::1>:<port>."
+                f"{env_name('bridge.debugger_url')} must be http://<127.0.0.1|localhost|::1>:<port>."
             }
         )
     parsed = urlparse(DEBUGGER_URL)
@@ -169,7 +169,7 @@ def _debugger_request(
         return json.dumps(
             {
                 "error": f"Debugger server not running at {DEBUGGER_URL}. "
-                "Start your external debugger server, or point GHIDRA_DEBUGGER_URL "
+                "Start your external debugger server, or point GHIDRA_MCP_BRIDGE_DEBUGGER_URL "
                 "at the address it listens on."
             }
         )

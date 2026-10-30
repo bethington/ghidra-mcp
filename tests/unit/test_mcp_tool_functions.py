@@ -23,11 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 def setUpModule():
     """Force strict mode off for tests that don't manage it explicitly.
 
-    The bridge reads GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS at import (via
-    bridge_mcp_ghidra.state._init_require_selectors()). If the variable happens
-    to be set in the surrounding shell or CI, that import would flip
-    state._require_selectors=True and leak into tests that assume the default
-    off state (i.e. every test outside TestProgramRequired). Clamp the module
+    The bridge sets state._require_selectors from tools.require_program, which a
+    GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM in the surrounding shell or CI can turn on;
+    that would leak into tests that assume the default off state (i.e. every
+    test outside TestProgramRequired). Clamp the module
     state here so the suite is deterministic regardless of the environment;
     TestProgramRequired manages its own state via setUp/tearDown.
     """
@@ -368,7 +367,7 @@ class TestToolRegistrationRoundTrip(unittest.TestCase):
 
 
 class TestProgramRequired(unittest.TestCase):
-    """GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS: refuse calls missing a program selector."""
+    """tools.require_program: refuse calls missing a program selector."""
 
     def setUp(self):
         import bridge_mcp_ghidra as bridge
@@ -400,7 +399,7 @@ class TestProgramRequired(unittest.TestCase):
         data = json.loads(result)
         self.assertIn("error", data)
         self.assertIn("program=", data["error"])
-        self.assertIn("GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS", data["error"])
+        self.assertIn("tools.require_program", data["error"])
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_allows_explicit_program(self, mock_get):
@@ -545,30 +544,29 @@ class TestProgramRequired(unittest.TestCase):
         self.assertIn("program_a=", data["error"])
         self.assertIn("program_b=", data["error"])
 
-    def test_init_value_1_enables_strict_mode(self):
-        for val in ("1", " 1 "):  # only "1" (surrounding whitespace tolerated)
-            self.bridge.state._require_selectors = False
-            with patch.dict("os.environ", {"GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS": val}):
-                # assertLogs captures the enable-time INFO line (keeping it out
-                # of test output) and doubles as an assertion that it fires.
-                with self.assertLogs("bridge_mcp_ghidra", level="INFO"):
-                    self.bridge.state._init_require_selectors()
-            self.assertTrue(self.bridge.state._require_selectors, f"{val!r} should enable strict mode")
+    def test_session_env_enables_strict_mode_over_the_projects_setting(self):
+        from bridge_mcp_ghidra import settings
 
-    def test_init_non_1_values_leave_strict_mode_off(self):
-        # Only "1" enables; other spellings (true/yes/on) and falsy values don't.
-        for val in ("true", "yes", "on", "TRUE", "0", "2", "", "anything"):
-            self.bridge.state._require_selectors = True
-            with patch.dict("os.environ", {"GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS": val}):
-                self.bridge.state._init_require_selectors()
-            self.assertFalse(self.bridge.state._require_selectors, f"{val!r} should not enable strict mode")
+        for val in ("1", "true", " yes ", "ON"):
+            with patch.dict("os.environ", {"GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM": val}):
+                self.assertTrue(settings.resolve("tools.require_program", {"tools.require_program": False}))
+        with patch.dict("os.environ", {"GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM": "0"}):
+            self.assertFalse(settings.resolve("tools.require_program", {"tools.require_program": True}))
 
-    def test_init_unset_env_leaves_strict_mode_off(self):
-        self.bridge.state._require_selectors = True
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS"}
+    def test_without_a_session_value_the_projects_setting_stands(self):
+        from bridge_mcp_ghidra import settings
+
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM"}
         with patch.dict("os.environ", env, clear=True):
-            self.bridge.state._init_require_selectors()
-        self.assertFalse(self.bridge.state._require_selectors)
+            self.assertTrue(settings.resolve("tools.require_program", {"tools.require_program": True}))
+            self.assertFalse(settings.resolve("tools.require_program", {}))
+
+    def test_an_unparseable_session_value_is_ignored(self):
+        from bridge_mcp_ghidra import settings
+
+        with patch.dict("os.environ", {"GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM": "sometimes"}):
+            with self.assertLogs("bridge_mcp_ghidra", level="WARNING"):
+                self.assertFalse(settings.resolve("tools.require_program", {}))
 
 
 class TestParamDescriptionsReachSchema(unittest.TestCase):

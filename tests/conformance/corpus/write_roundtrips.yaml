@@ -224,13 +224,13 @@ tool_cases:
     assert:
       no_error: true
 
-  - tool: validate_data_type
+  - tool: find_data_types
     name: readback_struct_deleted
     tier: write
     snapshot: false
-    args: { type_name: "ConformanceProbeStruct" }
+    args: { name: "ConformanceProbeStruct" }
     assert:
-      json_equals: { exists: false }
+      json_equals: { total: 0 }
 
   # ---- bookmarks -----------------------------------------------------------
   - tool: set_bookmark

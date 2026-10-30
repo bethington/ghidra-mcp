@@ -269,12 +269,13 @@ class TestDataTypes:
         response = http_client.get("/get_valid_data_types")
         assert response.status_code == 200
 
-    def test_validate_data_type_existence_only(self, http_client):
-        """Validate a common data type exists."""
+    def test_find_data_types_resolves_a_builtin_by_name(self, http_client):
+        """A built-in resolves by name the way apply_data_type would."""
         response = http_client.get(
-            "/validate_data_type", params={"type_name": "int"}
+            "/find_data_types", params={"name": "int"}
         )
         assert response.status_code == 200
+        assert response.json()["total"] == 1
 
     def test_get_type_size(self, http_client):
         """Get size of a data type."""

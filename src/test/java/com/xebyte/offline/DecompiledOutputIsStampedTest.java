@@ -85,8 +85,7 @@ public class DecompiledOutputIsStampedTest extends TestCase {
         "AnalysisService#computeFunctionCompleteness", Role.INTERNAL,
         "DataTypeService#analyzeStructFieldUsageAt", Role.INTERNAL,
         "FunctionFacts#build", Role.EMITS,
-        "FunctionFacts#collectCallContext", Role.FEEDS_FACTS_BUILD,
-        "FunctionService#forceDecompile", Role.EMITS));
+        "FunctionFacts#collectCallContext", Role.FEEDS_FACTS_BUILD));
 
     /** Where decompiler C comes from: the whole function, or its token markup. */
     private static final Pattern PRODUCES_C = Pattern.compile(

@@ -112,6 +112,11 @@
       "node_id": "tests/integration/test_readonly_endpoints.py::TestFindTypeUsers::test_known_type_returns_functions_and_timed_out",
       "cause": "recording_gap",
       "reason": "asserts /find_type_users returns functions[] and timed_out for a resolvable type. No conformance snapshot exists; the fake synthesizes a body without those fields. Re-record against a live server to unblock."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestDataTypes::test_find_data_types_resolves_a_builtin_by_name",
+      "cause": "recording_gap",
+      "reason": "asserts find_data_types(name=int) resolves exactly one type; there is no recorded /find_data_types response at all, so the fake can only serve its synthesized placeholder. Record one (tests/conformance/README.md) to bring it offline."
     }
   ]
 }

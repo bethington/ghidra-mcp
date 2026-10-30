@@ -412,9 +412,8 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.static_tools, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.static_tools, "setting_value", return_value=""),
         ):
-            mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
 
@@ -437,9 +436,8 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.static_tools, "setting_value", return_value=""),
         ):
-            mock_os.getenv.return_value = None
 
             result = asyncio.run(bridge.connect_instance("wanted"))
 
@@ -492,9 +490,8 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.static_tools, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.static_tools, "setting_value", return_value=""),
         ):
-            mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
 
@@ -528,9 +525,8 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.static_tools, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.static_tools, "setting_value", return_value=""),
         ):
-            mock_os.getenv.return_value = None
             bridge.state._full_schema = []
             bridge.state._loaded_groups.clear()
 
@@ -2021,8 +2017,8 @@ class TestDebuggerEnabled(unittest.TestCase):
 
     The proxies forward to an external dbgeng debugger server that is not part
     of this repo, so they register only when the operator asks for them:
-    GHIDRA_DEBUGGER_URL explicitly set, or GHIDRA_DEBUGGER_TOOLS truthy.
-    GHIDRA_DEBUGGER_TOOLS, when non-blank, decides outright. The host platform
+    GHIDRA_MCP_BRIDGE_DEBUGGER_URL explicitly set, or GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS truthy.
+    GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS, when non-blank, decides outright. The host platform
     plays no part -- being on Windows is not evidence a debugger server runs.
     """
 
@@ -2084,7 +2080,7 @@ class TestDebuggerEnabled(unittest.TestCase):
                 self.assertFalse(_debugger_enabled(url_explicit=True, override=value))
 
     def test_blank_tools_flag_is_ignored(self):
-        """An empty/whitespace GHIDRA_DEBUGGER_TOOLS falls back to the URL rule."""
+        """An empty/whitespace GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS falls back to the URL rule."""
         from bridge_mcp_ghidra import _debugger_enabled
 
         self.assertFalse(_debugger_enabled(url_explicit=False, override=""))
@@ -2093,9 +2089,9 @@ class TestDebuggerEnabled(unittest.TestCase):
     def test_reads_tools_flag_from_environment(self):
         from bridge_mcp_ghidra import _debugger_enabled
 
-        with patch.dict(os.environ, {"GHIDRA_DEBUGGER_TOOLS": "1"}):
+        with patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS": "1"}):
             self.assertTrue(_debugger_enabled(url_explicit=False))
-        with patch.dict(os.environ, {"GHIDRA_DEBUGGER_TOOLS": "0"}):
+        with patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS": "0"}):
             self.assertFalse(_debugger_enabled(url_explicit=True))
 
 
@@ -2107,7 +2103,7 @@ def _bridge_in_subprocess(env_overrides: dict) -> dict:
     """
     import subprocess
 
-    env = {k: v for k, v in os.environ.items() if k not in {"GHIDRA_DEBUGGER_URL", "GHIDRA_DEBUGGER_TOOLS"}}
+    env = {k: v for k, v in os.environ.items() if k not in {"GHIDRA_MCP_BRIDGE_DEBUGGER_URL", "GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS"}}
     env.update(env_overrides)
     python_dir = str(Path(__file__).resolve().parent.parent.parent / "python")
     env["PYTHONPATH"] = python_dir + os.pathsep + env.get("PYTHONPATH", "")
@@ -2224,7 +2220,7 @@ class TestDebuggerToolRegistration(unittest.TestCase):
         self.assertEqual(report["in_static"], [])
 
     def test_explicit_url_registers_all_22(self):
-        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_URL": "http://127.0.0.1:9123"})
+        report = _bridge_in_subprocess({"GHIDRA_MCP_BRIDGE_DEBUGGER_URL": "http://127.0.0.1:9123"})
         self.assertTrue(report["active"])
         self.assertEqual(len(report["registered"]), 22)
         self.assertEqual(len(report["in_static"]), 22)
@@ -2234,21 +2230,21 @@ class TestDebuggerToolRegistration(unittest.TestCase):
         self.assertEqual(report["unannotated"], [])
 
     def test_tools_flag_registers_with_default_url(self):
-        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_TOOLS": "1"})
+        report = _bridge_in_subprocess({"GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS": "1"})
         self.assertTrue(report["active"])
         self.assertEqual(len(report["registered"]), 22)
         self.assertEqual(report["url"], "http://127.0.0.1:8099")
 
     def test_tools_flag_zero_overrides_explicit_url(self):
         report = _bridge_in_subprocess(
-            {"GHIDRA_DEBUGGER_URL": "http://127.0.0.1:9123", "GHIDRA_DEBUGGER_TOOLS": "0"}
+            {"GHIDRA_MCP_BRIDGE_DEBUGGER_URL": "http://127.0.0.1:9123", "GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS": "0"}
         )
         self.assertFalse(report["active"])
         self.assertEqual(report["registered"], [])
 
     def test_blank_url_counts_as_unset(self):
-        """`GHIDRA_DEBUGGER_URL=` (present but empty) must not switch the tools on."""
-        report = _bridge_in_subprocess({"GHIDRA_DEBUGGER_URL": "  "})
+        """`GHIDRA_MCP_BRIDGE_DEBUGGER_URL=` (present but empty) must not switch the tools on."""
+        report = _bridge_in_subprocess({"GHIDRA_MCP_BRIDGE_DEBUGGER_URL": "  "})
         self.assertFalse(report["active"])
         self.assertEqual(report["url"], "http://127.0.0.1:8099")
 

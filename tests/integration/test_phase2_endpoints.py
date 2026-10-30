@@ -9,7 +9,6 @@ Tests for the 11 Phase 2 endpoints:
 - get_bulk_xrefs
 - list_globals
 - rename_symbol
-- force_decompile
 - get_entry_points
 - list_calling_conventions
 - find_next_undefined_function
@@ -291,46 +290,6 @@ class TestGlobalVariables:
         # Should return error since global doesn't exist
         if response.status_code == 200:
             assert "error" in response.text.lower() or "success" in response.text.lower()
-
-
-class TestForceDecompile:
-    """Test force decompilation endpoint."""
-
-    @pytest.mark.requires_program
-    def test_force_decompile_by_address(self, http_client, sample_address):
-        """Test force decompiling by address."""
-        # There is one declared selector, `address`, in both GUI and headless
-        # builds -- FunctionService declares it once, with no alias. Sent as
-        # `function_address` it was dropped, the endpoint answered
-        # {"error": "Function address is required"} with status 200, and
-        # `len(text) > 0` was satisfied by that error. The "alternate param
-        # name for headless" retry never ran, because the failure was never a
-        # 400. This test has never decompiled anything.
-        response = http_client.get("/force_decompile", params={
-            "address": sample_address
-        })
-        assert response.status_code == 200
-        body = response.json()
-        assert not body.get("error"), response.text
-        assert body["address"].lstrip("0x").lower() == sample_address.lstrip(
-            "0x"
-        ).lower(), response.text
-        assert body["decompiled"].strip(), response.text
-        # The dialect travels with the code on every response, so a transcript
-        # of pseudocode can be audited after the fact.
-        assert body.get("language_id"), response.text
-
-    @pytest.mark.requires_program
-    def test_force_decompile_invalid_address(self, http_client):
-        """Test force decompile with invalid address."""
-        response = http_client.get("/force_decompile", params={
-            "address": "0xDEADBEEF"
-        })
-        assert response.status_code == 200
-        # The old call could not tell a bad address from a missing one: both
-        # produced a 200 with an error body, and the four-way status
-        # assertion accepted 200 unconditionally.
-        assert "error" in response.json(), response.text
 
 
 class TestEntryPoints:

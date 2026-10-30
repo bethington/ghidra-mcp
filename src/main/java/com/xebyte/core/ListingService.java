@@ -12,6 +12,7 @@ import ghidra.program.model.symbol.*;
 import java.util.*;
 import java.util.Comparator;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * Service for listing and enumeration endpoints.
@@ -493,7 +494,10 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/list_strings", description = "List defined strings of at least min_length mostly "
+            + "printable characters, optionally narrowed by a substring (filter) and/or a case-insensitive "
+            + "regex (pattern). Each entry has address, value and length; `total` counts every match before "
+            + "paging. Replaces search_strings.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listDefinedStrings(
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
@@ -503,8 +507,25 @@ public class ListingService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
+            @Param(value = "filter", defaultValue = "",
+                   description = "Case-insensitive substring the string must contain; omit for none.") String filter,
+            @Param(value = "pattern", defaultValue = "",
+                   description = "Case-insensitive Java regex the string must match somewhere (find, not "
+                               + "full match); omit for none. Combines with filter.") String pattern,
+            @Param(value = "min_length", defaultValue = "4",
+                   description = "Ignore strings shorter than this many characters of decoded text (not "
+                               + "bytes on disk). Default 4 drops one- to three-character fragments.") int minLength,
             @Param(value = "program", defaultValue = "") Program program) {
+        Pattern regex = null;
+        if (pattern != null && !pattern.isEmpty()) {
+            try {
+                regex = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);
+            } catch (PatternSyntaxException e) {
+                return Response.err("Invalid pattern: " + e.getDescription());
+            }
+        }
+        String needle = filter == null ? "" : filter.toLowerCase();
+
         List<Map<String, Object>> strings = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
 
@@ -514,11 +535,11 @@ public class ListingService {
             if (data != null && ServiceUtils.isStringData(data)) {
                 String value = data.getValue() != null ? data.getValue().toString() : "";
 
-                if (!ServiceUtils.isQualityString(value)) {
+                if (!ServiceUtils.isQualityString(value, minLength)) {
                     continue;
                 }
 
-                if (filter == null || value.toLowerCase().contains(filter.toLowerCase())) {
+                if (value.toLowerCase().contains(needle) && (regex == null || regex.matcher(value).find())) {
                     Map<String, Object> entry = new LinkedHashMap<>();
                     entry.put("address", data.getAddress().toString(false));
                     entry.put("value", value);
@@ -543,60 +564,6 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing", access = ToolAccess.READ_ONLY)
-    public Response searchStrings(
-            @Param(value = "search_term", description = "Regex search pattern") String query,
-            @Param(value = "min_length", defaultValue = "4",
-                   description = "Ignore strings shorter than this many CHARACTERS of decoded text "
-                               + "(not bytes on disk). Default 4 drops one- to three-character fragments.") int minLength,
-            @Param(value = "encoding", defaultValue = "",
-                   description = "Label echoed back in each match's `encoding` field. It does NOT filter: "
-                               + "every defined string is searched whatever you pass here, and matches that "
-                               + "carry no value report the literal string `ascii`.") String encoding,
-            @Param(value = "offset", defaultValue = "0",
-                   description = "Number of matches to skip before this page starts; 0 begins at the first "
-                               + "match. Applied after the regex and min_length filters.") int offset,
-            @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum matches returned in this page (default 100). `total` in the "
-                               + "response reports how many matched before paging. Unlike the paged list "
-                               + "endpoints, 0 here returns an EMPTY page rather than everything.") int limit,
-            @Param(value = "program", defaultValue = "") Program program) {
-        if (query == null || query.isEmpty()) return Response.err("search_term parameter is required");
-
-        Pattern pat;
-        try {
-            pat = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
-        } catch (Exception e) {
-            return Response.err("Invalid regex: " + e.getMessage());
-        }
-
-        List<Map<String, Object>> results = new ArrayList<>();
-        DataIterator dataIt = program.getListing().getDefinedData(true);
-        while (dataIt.hasNext()) {
-            Data data = dataIt.next();
-            if (data == null || !ServiceUtils.isStringData(data)) continue;
-            String value = data.getValue() != null ? data.getValue().toString() : "";
-            if (value.length() < minLength) continue;
-            if (!pat.matcher(value).find()) continue;
-            String enc = (encoding != null && !encoding.isEmpty()) ? encoding : "ascii";
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.putAll(ServiceUtils.addressToJson(data.getAddress(), program));
-            item.put("value", value);
-            item.put("encoding", enc);
-            results.add(item);
-        }
-
-        int total = results.size();
-        int from = Math.min(offset, total);
-        int to = Math.min(from + limit, total);
-
-        return Response.ok(JsonHelper.mapOf(
-                "matches", results.subList(from, to),
-                "total", total,
-                "offset", offset,
-                "limit", limit
-        ));
-    }
 
     @McpTool(path = "/list_globals", description = "List global DATA symbols. By default returns every global in the program (named + unnamed-but-xrefed undefined addresses). `filter` and `type_filter` (each: all/defined/undefined) compose orthogonally to scope the result — e.g., `filter=named, type_filter=undefined` returns the cleanup backlog (placeholders awaiting real types). `min_xrefs` (default 1) suppresses zero-xref noise when including undefined items. Code labels (branch targets, error handlers) are still excluded — they're not data globals. Each line ends with `xrefs=N` for prioritization.", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listGlobals(

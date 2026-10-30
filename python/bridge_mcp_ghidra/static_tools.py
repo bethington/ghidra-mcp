@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import threading
 import time
 from typing import Annotated
@@ -12,6 +11,8 @@ from pydantic import Field
 from . import discovery, facade
 from . import dispatch
 from . import registry
+from . import settings
+from .keys import value as setting_value
 from . import state
 from . import transport
 from .config import (
@@ -58,7 +59,7 @@ def _connect_instance_sync(project: str) -> dict:
                 connected_project=match.get("project"),
             )
             try:
-                schema = registry._fetch_schema(connection=candidate)
+                schema, groups = registry.fetch_for_connect(candidate)
             except Exception as e:
                 return {
                     "error": f"Schema fetch failed: {e}",
@@ -69,10 +70,7 @@ def _connect_instance_sync(project: str) -> dict:
             with state._tool_registry_lock:
                 result = _commit_if_live(
                     lambda: (
-                        registry.register_tools_from_schema(
-                            schema,
-                            groups=None if not state._lazy_mode else state._default_groups,
-                        ),
+                        registry.register_tools_from_schema(schema, groups=groups),
                         state.set_connection_snapshot(
                             "uds",
                             active_socket=match["socket"],
@@ -102,7 +100,7 @@ def _connect_instance_sync(project: str) -> dict:
                 "note": note,
             }
 
-    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    env_tcp = setting_value("bridge.server_url")
     if env_tcp:
         tcp_url = env_tcp
     elif matched_tcp_url:
@@ -132,7 +130,7 @@ def _connect_instance_sync(project: str) -> dict:
         connected_project=match.get("project") if match else None,
     )
     try:
-        schema = registry._fetch_schema(connection=candidate)
+        schema, groups = registry.fetch_for_connect(candidate)
     except Exception as e:
         available = [inst.get("project", "unknown") for inst in instances]
         return {
@@ -145,10 +143,7 @@ def _connect_instance_sync(project: str) -> dict:
     with state._tool_registry_lock:
         result = _commit_if_live(
             lambda: (
-                registry.register_tools_from_schema(
-                    schema,
-                    groups=None if not state._lazy_mode else state._default_groups,
-                ),
+                registry.register_tools_from_schema(schema, groups=groups),
                 state.set_connection_snapshot(
                     "tcp",
                     active_socket=None,
@@ -340,6 +335,7 @@ async def load_tool_group(
             sorted(all_groups),
             done_callback=_notify_if_changed,
         )
+        await state.run_in_worker(settings.record_loaded_groups)
         return json.dumps(
             {
                 "loaded": "all",
@@ -354,6 +350,8 @@ async def load_tool_group(
         group,
         done_callback=_notify_if_changed,
     )
+    if loaded_names:
+        await state.run_in_worker(settings.record_loaded_groups)
     if not loaded_names:
         available = sorted({td.get("category", "unknown") for td in state._full_schema})
         if group in state._loaded_groups:
@@ -411,6 +409,7 @@ async def unload_tool_group(
     )
     if removed == 0:
         return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
+    await state.run_in_worker(settings.record_loaded_groups)
     return json.dumps(
         {
             "unloaded": group,
@@ -666,12 +665,9 @@ def _auto_connect(project: str | None = None) -> bool:
             )
             logger.info(f"Auto-connecting via UDS to {inst.get('project') or 'unknown'}")
             try:
-                schema = registry._fetch_schema(connection=candidate)
+                schema, groups = registry.fetch_for_connect(candidate)
                 with state._tool_registry_lock:
-                    count = registry.register_tools_from_schema(
-                        schema,
-                        groups=None if not state._lazy_mode else state._default_groups,
-                    )
+                    count = registry.register_tools_from_schema(schema, groups=groups)
                     state.set_connection_snapshot(
                         "uds",
                         active_socket=inst["socket"],
@@ -695,12 +691,9 @@ def _auto_connect(project: str | None = None) -> bool:
                 f"{inst.get('project') or 'unknown'} (UDS unavailable on this Python)"
             )
             try:
-                schema = registry._fetch_schema(connection=candidate)
+                schema, groups = registry.fetch_for_connect(candidate)
                 with state._tool_registry_lock:
-                    count = registry.register_tools_from_schema(
-                        schema,
-                        groups=None if not state._lazy_mode else state._default_groups,
-                    )
+                    count = registry.register_tools_from_schema(schema, groups=groups)
                     state.set_connection_snapshot(
                         "tcp",
                         active_socket=None,
@@ -726,18 +719,15 @@ def _auto_connect(project: str | None = None) -> bool:
         return False
 
     # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    tcp_url = setting_value("bridge.server_url") or DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
         logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
         return False
     try:
         candidate = state.build_connection_snapshot(mode="tcp", active_tcp=tcp_url)
-        schema = registry._fetch_schema(connection=candidate)
+        schema, groups = registry.fetch_for_connect(candidate)
         with state._tool_registry_lock:
-            count = registry.register_tools_from_schema(
-                schema,
-                groups=None if not state._lazy_mode else state._default_groups,
-            )
+            count = registry.register_tools_from_schema(schema, groups=groups)
             state.set_connection_snapshot(
                 "tcp",
                 active_socket=None,

@@ -126,7 +126,7 @@ The bridge's discovery order is deliberately conservative:
    match the socket with `/mcp/instance_info` responses obtained through loopback TCP.
 3. When UDS discovery is unavailable or does not identify the target, probe the
    configured loopback TCP range and match the returned project metadata.
-4. If `GHIDRA_MCP_URL` is explicitly configured, use that URL as the TCP target and
+4. If `GHIDRA_MCP_BRIDGE_SERVER_URL` is explicitly configured, use that URL as the TCP target and
    still verify its instance metadata after connecting.
 
 This is the projectless UDS/TCP case: a socket file or an open port may prove that

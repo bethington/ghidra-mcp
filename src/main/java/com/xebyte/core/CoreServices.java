@@ -7,7 +7,7 @@ import java.util.List;
  * The services both servers expose, built once from a provider and a threading strategy.
  *
  * <p>The GUI plugin, the headless server and the offline test factory each used to
- * construct these sixteen by hand, with the same inter-service wiring
+ * construct these by hand, with the same inter-service wiring
  * ({@link DocumentationHashService#setFunctionService}, and {@link AnalysisService} and
  * {@link FunctionBundleService} sharing one {@link FunctionService}). Three copies of a
  * dependency graph drift; one does not.
@@ -36,13 +36,15 @@ public record CoreServices(
         TypeReferenceService typeReference,
         ChangeTokenService changeToken,
         PartitionService partition,
-        DecompTreeService tree) {
+        DecompTreeService tree,
+        SettingsService settings) {
 
     public static CoreServices build(ProgramProvider provider, ThreadingStrategy ts) {
         FunctionService function = new FunctionService(provider, ts);
         DocumentationHashService documentationHash =
             new DocumentationHashService(provider, ts, new BinaryComparisonService());
         documentationHash.setFunctionService(function);
+        SettingsService settings = new SettingsService(provider);
         return new CoreServices(
             new ListingService(provider, ts),
             new CommentService(provider, ts),
@@ -59,14 +61,15 @@ public record CoreServices(
             new TypeReferenceService(provider),
             new ChangeTokenService(provider),
             new PartitionService(provider),
-            new DecompTreeService(provider, ts));
+            new DecompTreeService(provider, ts, settings),
+            settings);
     }
 
     /** Every shared service, in declaration order. */
     public List<Object> all() {
         return List.of(listing, comment, symbolLabel, function, xrefCallGraph, dataType,
             documentationHash, analysis, malwareSecurity, programScript, emulation,
-            functionBundle, typeReference, changeToken, partition, tree);
+            functionBundle, typeReference, changeToken, partition, tree, settings);
     }
 
     /** The shared services plus a server's own, ready to hand to {@link AnnotationScanner}. */

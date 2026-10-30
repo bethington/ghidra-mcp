@@ -10,7 +10,6 @@ import asyncio
 import atexit
 import concurrent.futures
 import contextvars
-import os
 import threading
 import weakref
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ from functools import partial
 from contextlib import contextmanager
 
 from .config import CORE_GROUPS, MAX_CONCURRENT_GHIDRA_REQUESTS, logger, parse_bool
+from .keys import value as setting_value
 
 # --------------------------------------------------------------------------
 # Connection state
@@ -132,26 +132,12 @@ _active_request_handles: set[RequestCancelHandle] = set()
 # Strict program routing
 # --------------------------------------------------------------------------
 
-# When GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1, the bridge refuses any
-# program-scoped call that omits a program selector, so a forgotten one fails
-# loudly instead of silently running against the server's mutable "current
-# program" and hitting the wrong binary. Off by default. (Full rationale in
-# commit 6f85c5e / README.)
+# tools.require_program: refuse any program-scoped call that omits a program
+# selector, so a forgotten one fails loudly instead of silently running against
+# the server's mutable "current program" and hitting the wrong binary. Off by
+# default; settings.connect_groups() sets it from the project's settings and this
+# session's GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM. (Rationale in commit 6f85c5e / README.)
 _require_selectors: bool = False
-
-
-def _init_require_selectors() -> None:
-    """Read GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS once, at import. Set it to 1 to enable."""
-    global _require_selectors
-    _require_selectors = (os.getenv("GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS") or "").strip() == "1"
-    if _require_selectors:
-        logger.info(
-            "Strict program routing enabled (GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1); "
-            "program-scoped calls missing a program selector will be refused"
-        )
-
-
-_init_require_selectors()
 
 
 def get_connection_snapshot() -> ConnectionSnapshot:
@@ -611,7 +597,7 @@ _loaded_groups: set[str] = set()
 # (search_tools / check_tools) hand the model the exact load_tool_group(...)
 # call it needs, so discovery no longer depends on advertising everything up
 # front. Clients that still want the old behaviour pass --no-lazy, or set
-# GHIDRA_MCP_LAZY=0 where the client's config gives no way to pass argv (a
+# GHIDRA_MCP_BRIDGE_LAZY=0 where the client's config gives no way to pass argv (a
 # container ENTRYPOINT, an `uvx` invocation, a registry-installed server entry).
 _lazy_mode = True  # default: lazy (CORE_GROUPS only; --no-lazy loads all)
 _default_groups: set[str] = set(CORE_GROUPS)
@@ -623,20 +609,20 @@ _expose_mode = "full"
 
 
 def lazy_mode_from_env(default: bool = True) -> bool:
-    """Resolve lazy mode from GHIDRA_MCP_LAZY, falling back to the default.
+    """Resolve lazy mode from GHIDRA_MCP_BRIDGE_LAZY, falling back to the default.
 
     The escape hatch for a client that ignores ``tools/list_changed`` is
     ``--no-lazy``, but a CLI flag is only reachable when the caller controls
     argv. Docker ENTRYPOINTs, ``uvx`` one-liners and some MCP client configs
     do not, and telling those users "pass a flag you cannot pass" is not an
-    escape hatch. GHIDRA_MCP_LAZY=0 is the same switch by another route.
+    escape hatch. GHIDRA_MCP_BRIDGE_LAZY=0 is the same switch by another route.
 
     An unrecognised value is ignored (and warned about) rather than guessed at,
     because guessing here silently picks one of the two client families this
     setting exists to keep working.
     """
     return parse_bool(
-        (os.getenv("GHIDRA_MCP_LAZY") or ""),
+        str(setting_value("bridge.lazy") or ""),
         default=default,
         on_unknown="warn",
     )

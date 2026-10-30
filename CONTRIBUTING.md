@@ -13,7 +13,7 @@ saying so.
 - **Discussions**: [GitHub Discussions](https://github.com/bethington/ghidra-mcp/discussions)
 - **Direction and priorities**: [ROADMAP.md](ROADMAP.md)
 - **Documentation index**: [docs/README.md](docs/README.md)
-- **Tool inventory** (220 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
+- **Tool inventory** (218 endpoints, generated): [tests/endpoints.json](tests/endpoints.json)
 - **Testing tiers in depth**: [docs/TESTING.md](docs/TESTING.md)
 - **Security reports**: [SECURITY.md](SECURITY.md) — do not file these as public issues
 
@@ -330,7 +330,7 @@ mvn test                       # includes the Java integration tests
 ```
 
 The bridge and tests target `http://127.0.0.1:8089` by default; override with
-`GHIDRA_MCP_URL`. The deploy-driven release regression, its tiers, and what each
+`GHIDRA_MCP_BRIDGE_SERVER_URL`. The deploy-driven release regression, its tiers, and what each
 one mutates in your Ghidra project are documented in
 [docs/TESTING.md](docs/TESTING.md). Note that some tiers import and reset a
 benchmark binary in the active project — that is why they are opt-in.

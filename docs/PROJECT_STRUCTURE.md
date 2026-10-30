@@ -91,8 +91,8 @@ ghidra-mcp/
 
 - The standalone Python debugger server is no longer part of this repo
 - The bridge keeps 22 proxy tools that forward to an external debugger server
-  at `GHIDRA_DEBUGGER_URL`. They are off by default and register only when
-  `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`
+  at `GHIDRA_MCP_BRIDGE_DEBUGGER_URL`. They are off by default and register only when
+  `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`
 
 ### Per-project analysis data — never tracked
 

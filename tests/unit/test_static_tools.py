@@ -275,7 +275,7 @@ class TestConnectInstanceFailures(unittest.TestCase):
                 "url": "http://127.0.0.1:8091",
             }
         ]
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_BRIDGE_SERVER_URL"}
 
         with (
             isolated_bridge() as bridge,
@@ -299,14 +299,14 @@ class TestConnectInstanceFailures(unittest.TestCase):
         scan.assert_not_called()
 
     def test_refuses_non_local_url_from_env(self):
-        """GHIDRA_MCP_URL wins over discovery, so it is also the one place a
+        """GHIDRA_MCP_BRIDGE_SERVER_URL wins over discovery, so it is also the one place a
         remote/hostile URL can enter. validate_server_url must refuse it before
         any schema fetch happens."""
         with (
             isolated_bridge() as bridge,
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
             patch.object(bridge.registry, "_fetch_schema") as fetch,
-            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
+            patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_SERVER_URL": "http://evil.example.com:8089"}),
         ):
             data = json.loads(asyncio.run(bridge.connect_instance("anything")))
 
@@ -318,7 +318,7 @@ class TestConnectInstanceFailures(unittest.TestCase):
         """A failed TCP connect must leave the bridge cleanly disconnected --
         if _transport_mode stayed "tcp" every later dispatch would try to talk
         to a dead endpoint instead of reconnecting."""
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_BRIDGE_SERVER_URL"}
 
         with (
             isolated_bridge() as bridge,
@@ -852,7 +852,7 @@ class TestAutoConnect(unittest.TestCase):
         self._env = patch.dict(os.environ)
         self._env.start()
         self.addCleanup(self._env.stop)
-        os.environ.pop("GHIDRA_MCP_URL", None)
+        os.environ.pop("GHIDRA_MCP_BRIDGE_SERVER_URL", None)
         self._saved = (
             bridge.state._active_socket,
             bridge.state._active_tcp,
@@ -924,9 +924,10 @@ class TestAutoConnect(unittest.TestCase):
         bridge = self._bridge
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
-            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://127.0.0.1:9999"}),
+            patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_SERVER_URL": "http://127.0.0.1:9999"}),
             patch.object(bridge.transport, "tcp_request", return_value=('{"data":{"project":"Chosen"}}', 200)) as info,
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.settings, "fetch", return_value={}),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             self.assertTrue(bridge._auto_connect(project="Chosen"))
@@ -947,7 +948,7 @@ class TestAutoConnect(unittest.TestCase):
                 patch.object(bridge.discovery, "_iter_tcp_instances", return_value=found),
                 patch.object(bridge.registry, "_fetch_schema") as fetch,
             ):
-                os.environ.pop("GHIDRA_MCP_URL", None)
+                os.environ.pop("GHIDRA_MCP_BRIDGE_SERVER_URL", None)
                 self.assertFalse(bridge._auto_connect(project="Chosen"))
                 fetch.assert_not_called()
 
@@ -967,7 +968,7 @@ class TestAutoConnect(unittest.TestCase):
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
-            os.environ.pop("GHIDRA_MCP_URL", None)
+            os.environ.pop("GHIDRA_MCP_BRIDGE_SERVER_URL", None)
             self.assertTrue(bridge._auto_connect(project="Chosen"))
         self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:8090")
 
@@ -1069,7 +1070,7 @@ class TestAutoConnect(unittest.TestCase):
                 "_fetch_schema",
                 side_effect=RuntimeError("HTTP 500"),
             ),
-            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
+            patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_SERVER_URL": "http://evil.example.com:8089"}),
         ):
             bridge._auto_connect()
 
@@ -1091,7 +1092,7 @@ class TestAutoConnect(unittest.TestCase):
                 "url": "http://127.0.0.1:8091",
             }
         ]
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_BRIDGE_SERVER_URL"}
 
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=one),
@@ -1110,7 +1111,7 @@ class TestAutoConnect(unittest.TestCase):
 
     def test_tcp_fallback_when_no_instances_discovered(self):
         bridge = self._bridge
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_BRIDGE_SERVER_URL"}
 
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
@@ -1125,7 +1126,7 @@ class TestAutoConnect(unittest.TestCase):
 
     def test_tcp_fallback_failure_leaves_bridge_disconnected(self):
         bridge = self._bridge
-        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_URL"}
+        env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_BRIDGE_SERVER_URL"}
 
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
@@ -1147,7 +1148,7 @@ class TestAutoConnect(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
             patch.object(bridge.registry, "_fetch_schema") as fetch,
-            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://10.0.0.5:8089"}),
+            patch.dict(os.environ, {"GHIDRA_MCP_BRIDGE_SERVER_URL": "http://10.0.0.5:8089"}),
         ):
             bridge._auto_connect()
 

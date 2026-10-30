@@ -156,7 +156,8 @@ public class VersionControlService {
     @McpTool(path = "/server/connect", dryRun = false, method = "POST",
             description = "Establish the Ghidra Server connection, or report the existing one. Takes no "
                 + "parameters: the GUI's connection is its open project, and headless connects with "
-                + "GHIDRA_SERVER_HOST, GHIDRA_SERVER_PORT, GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD.",
+                + "GHIDRA_MCP_GHIDRA_SERVER_HOST, GHIDRA_MCP_GHIDRA_SERVER_PORT, "
+                + "GHIDRA_MCP_GHIDRA_SERVER_USER and GHIDRA_MCP_GHIDRA_SERVER_PASSWORD.",
             category = "server", access = ToolAccess.WRITE)
     public Response connect() {
         repositories.clear();

@@ -9,7 +9,7 @@ live instance on :8089 with a binary open.
 The plugin does three things and nothing else:
 
 1. Boots a :class:`FakeGhidraServer` on an ephemeral port and points
-   ``GHIDRA_MCP_URL`` at it, so ``tests/conftest.py`` wires the whole suite to
+   ``GHIDRA_MCP_BRIDGE_SERVER_URL`` at it, so ``tests/conftest.py`` wires the whole suite to
    the fake without a single edit to the integration files.
 2. Skips the node ids listed in ``fixtures/known_offline_gaps.json``, each with
    its recorded reason. A listed id that no longer exists is an ERROR, so the
@@ -54,8 +54,8 @@ def _load(path: Path) -> dict:
 def pytest_configure(config: pytest.Config) -> None:
     server = FakeGhidraServer(strict=False).start()
     _STATE["server"] = server
-    _STATE["previous_url"] = os.environ.get("GHIDRA_MCP_URL")
-    os.environ["GHIDRA_MCP_URL"] = server.url
+    _STATE["previous_url"] = os.environ.get("GHIDRA_MCP_BRIDGE_SERVER_URL")
+    os.environ["GHIDRA_MCP_BRIDGE_SERVER_URL"] = server.url
     # The fake answers instantly; a 30 s default only slows a genuine hang.
     _STATE["previous_timeout"] = os.environ.get("GHIDRA_MCP_TIMEOUT")
     os.environ.setdefault("GHIDRA_MCP_TIMEOUT", "15")
@@ -73,7 +73,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     if server is not None:
         server.stop()
     for env, saved in (
-        ("GHIDRA_MCP_URL", _STATE.pop("previous_url", None)),
+        ("GHIDRA_MCP_BRIDGE_SERVER_URL", _STATE.pop("previous_url", None)),
         ("GHIDRA_MCP_TIMEOUT", _STATE.pop("previous_timeout", None)),
     ):
         if saved is None:

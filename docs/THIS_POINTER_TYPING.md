@@ -29,7 +29,7 @@ POST /set_function_this_type
 {"function_address":"0x00401000","this_type":"Widget *"}
 ```
 
-The function becomes `Widget::<name>`, and `this` types as `Widget *` under auto-storage. Call `force_decompile(function=...)` to refresh output.
+The function becomes `Widget::<name>`, and `this` types as `Widget *` under auto-storage. `get_functions(fields=decompiled_code)` shows the result; every call decompiles fresh.
 
 ### Prerequisites
 

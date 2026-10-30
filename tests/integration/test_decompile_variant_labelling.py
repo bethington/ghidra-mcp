@@ -56,9 +56,9 @@ class TestDecompileVariantLabelling:
     program is not loaded under is refused -- that one is a claim worth
     contradicting.
 
-    Decompiled C reaches a caller through four endpoints: get_functions
-    (decompiled_code and call_context, single and bulk), force_decompile, and
-    the two composites. All four are covered here. Every assertion reads the
+    Decompiled C reaches a caller through three endpoints: get_functions
+    (decompiled_code and call_context, single and bulk) and the two
+    composites. All three are covered here. Every assertion reads the
     response body, never just the status code: a refusal is a structured HTTP
     200, precisely so a caller can see why.
     """
@@ -245,39 +245,10 @@ class TestDecompileVariantLabelling:
         assert data.get("error") == "variant_mismatch", data
         assert "functions" not in data, data
 
-    def test_force_decompile_follows_the_same_rules(
-        self, http_client, sample_address, program_variant, language_metadata
-    ):
-        """force_decompile is reached for when ordinary output looks wrong, which
-        is exactly when a wrong variant gets mistaken for a stale cache."""
-        response = http_client.get("/force_decompile", params={"function": sample_address})
-        assert response.status_code == 200
-        data = response.json()
-        assert data.get("decompiled"), data
-        assert data.get("variant") == language_metadata.get("variant")
-        assert data.get("language_id") == language_metadata.get("language_id")
-
-        response = http_client.get(
-            "/force_decompile",
-            params={"function": sample_address, "variant": program_variant},
-        )
-        assert response.status_code == 200
-        assert response.json().get("decompiled")
-
-        others = self._other_variants(language_metadata)
-        if others:
-            response = http_client.get(
-                "/force_decompile",
-                params={"function": sample_address, "variant": others[0]},
-            )
-            data = response.json()
-            assert data.get("error") == "variant_mismatch", data
-            assert not data.get("decompiled")
-
     def test_composites_stamp_accepted_pseudocode(
         self, http_client, sample_address, language_metadata
     ):
-        """All four C-returning endpoints label their output, not just the two
+        """All three C-returning endpoints label their output, not just the two
         obvious ones -- otherwise the identical pseudocode is reachable one tool
         over with nothing on it."""
         for path in ("/analyze_for_documentation", "/analyze_function_complete"):

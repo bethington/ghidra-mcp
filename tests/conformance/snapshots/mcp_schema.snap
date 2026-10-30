@@ -1,5 +1,5 @@
 {
-  "count": 215,
+  "count": 213,
   "tools": [
     {
       "category": "function",
@@ -2512,23 +2512,23 @@
         },
         {
           "default": "",
-          "description": "Comma-separated partition strategies. Empty = full cascade.",
+          "description": "Comma-separated partition strategies. Empty = full cascade. Omit for the tree.strategies setting.",
           "name": "strategies",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "default": "20",
-          "description": "Address-band width when bands apply.",
+          "default": "",
+          "description": "Address-band width when bands apply. Omit for the tree.band_size setting.",
           "name": "band_size",
           "required": false,
           "source": "body",
           "type": "integer"
         },
         {
-          "default": "32768",
-          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths.",
+          "default": "",
+          "description": "Read-budget bytes per .c file inside a compartment (floored at 4096). Changing this repartitions file paths. Omit for the tree.max_file_bytes setting.",
           "name": "max_file_bytes",
           "required": false,
           "source": "body",
@@ -2536,7 +2536,7 @@
         },
         {
           "default": "",
-          "description": "CSV of tag:/partition:/range: exclusion specs.",
+          "description": "CSV of tag:/partition:/range: exclusion specs. Omit for the tree.exclusions setting.",
           "name": "exclusions",
           "required": false,
           "source": "body",
@@ -2544,27 +2544,43 @@
         },
         {
           "default": "",
-          "description": "CSV of tag:/partition:/range: include-only specs.",
+          "description": "CSV of tag:/partition:/range: include-only specs. Omit for the tree.include_only setting.",
           "name": "include_only",
           "required": false,
           "source": "body",
           "type": "string"
         },
         {
-          "default": "10",
-          "description": "Interactive yield 0..90 after each decompiled function.",
+          "default": "",
+          "description": "Interactive yield 0..90 after each decompiled function. Omit for the tree.throttle_percent setting.",
           "name": "throttle_percent",
           "required": false,
           "source": "body",
           "type": "integer"
         },
         {
-          "default": "false",
-          "description": "Off by default. When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies — a program write, not filesystem-only.",
+          "default": "",
+          "description": "When true, the next sweep disassembles at function entries that have no instruction yet (typical for PE .pdata imports) and may reflow stub bodies: a program write, not filesystem-only. Omit for the tree.disassemble_missing setting.",
           "name": "disassemble_missing",
           "required": false,
           "source": "body",
           "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Per-function decompile budget during the sweep. Omit for the tree.decompile_timeout_seconds setting.",
+          "name": "decompile_timeout_seconds",
+          "required": false,
+          "source": "body",
+          "type": "integer"
+        },
+        {
+          "default": "",
+          "description": "Cap on waiting for auto-analysis before partitioning. Omit for the tree.analysis_wait_seconds setting.",
+          "name": "analysis_wait_seconds",
+          "required": false,
+          "source": "body",
+          "type": "integer"
         }
       ],
       "path": "/decompile_tree_create",
@@ -3379,7 +3395,7 @@
     {
       "category": "datatype",
       "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path). With categories=true, list the category paths instead. With no filter it lists every type.",
+      "description": "Find data types by name or path pattern, category and kind, one record per type (name, kind, category, size, path). With categories=true, list the category paths instead. With no filter it lists every type. name= resolves one type exactly as apply_data_type would (replaces validate_data_type's existence check).",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -3393,7 +3409,15 @@
         },
         {
           "default": "",
-          "description": "Case-insensitive substring of the category path (e.g. Windows, /MyTypes); omit for any category.",
+          "description": "Resolve exactly this type name the way apply_data_type does: a built-in (int, DWORD), a pointer (char *), an array (dword[4]) or a struct/enum/typedef name. Returns that one type, or none when apply_data_type would reject the name. The other filters do not apply.",
+          "name": "name",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Case-insensitive substring of the category path (e.g. Windows, /D2); omit for any category.",
           "name": "category",
           "required": false,
           "source": "query",
@@ -3802,47 +3826,6 @@
         }
       ],
       "path": "/find_undocumented_by_string",
-      "read_only": true
-    },
-    {
-      "category": "function",
-      "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
-      "description": "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.",
-          "name": "variant",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/force_decompile",
       "read_only": true
     },
     {
@@ -4534,6 +4517,32 @@
         }
       ],
       "path": "/get_property",
+      "read_only": true
+    },
+    {
+      "category": "program",
+      "description": "Every setting with its effective value, the scope it came from and the scopes that also hold one. Scopes, lowest first: default, server, project (shared with everyone using the project), local (this machine), program, session (the bridge's), call. Guardrails are set by the server operator and can only be made stricter from here; secrets show only whether they are set.",
+      "destructive": false,
+      "method": "GET",
+      "params": [
+        {
+          "default": "",
+          "description": "Only keys under this prefix, e.g. 'tools'.",
+          "name": "prefix",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Include this program's own values (the program scope).",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/get_settings",
       "read_only": true
     },
     {
@@ -5425,7 +5434,7 @@
     {
       "category": "listing",
       "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "List defined strings with optional filter",
+      "description": "List defined strings of at least min_length mostly printable characters, optionally narrowed by a substring (filter) and/or a case-insensitive regex (pattern). Each entry has address, value and length; `total` counts every match before paging. Replaces search_strings.",
       "destructive": false,
       "method": "GET",
       "params": [
@@ -5447,11 +5456,27 @@
         },
         {
           "default": "",
-          "description": "Substring filter",
+          "description": "Case-insensitive substring the string must contain; omit for none.",
           "name": "filter",
           "required": false,
           "source": "query",
           "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Case-insensitive Java regex the string must match somewhere (find, not full match); omit for none. Combines with filter.",
+          "name": "pattern",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        },
+        {
+          "default": "4",
+          "description": "Ignore strings shorter than this many characters of decoded text (not bytes on disk). Default 4 drops one- to three-character fragments.",
+          "name": "min_length",
+          "required": false,
+          "source": "query",
+          "type": "integer"
         },
         {
           "default": "",
@@ -6412,7 +6437,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "description": "Execute script with output capture and timeout. Off unless the scripts.allow guardrail allows it (see get_settings).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -6462,7 +6487,7 @@
     {
       "category": "program",
       "category_description": "Program management, script execution, memory read, bookmarks, save",
-      "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+      "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Off unless the scripts.allow guardrail allows it (see get_settings).",
       "destructive": false,
       "method": "POST",
       "params": [
@@ -6608,64 +6633,6 @@
       "read_only": true
     },
     {
-      "category": "listing",
-      "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
-      "description": "Search strings by regex pattern.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "description": "Regex search pattern",
-          "name": "search_term",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "4",
-          "description": "Ignore strings shorter than this many CHARACTERS of decoded text (not bytes on disk). Default 4 drops one- to three-character fragments.",
-          "name": "min_length",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Label echoed back in each match's `encoding` field. It does NOT filter: every defined string is searched whatever you pass here, and matches that carry no value report the literal string `ascii`.",
-          "name": "encoding",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "0",
-          "description": "Number of matches to skip before this page starts; 0 begins at the first match. Applied after the regex and min_length filters.",
-          "name": "offset",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "100",
-          "description": "Maximum matches returned in this page (default 100). `total` in the response reports how many matched before paging. Unlike the paged list endpoints, 0 here returns an EMPTY page rather than everything.",
-          "name": "limit",
-          "required": false,
-          "source": "query",
-          "type": "integer"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/search_strings",
-      "read_only": true
-    },
-    {
       "category": "server",
       "description": "Set one user's access to a repository (needs admin access). The repository's ACL is read, this one entry replaced or appended, and every other user preserved.",
       "destructive": false,
@@ -6794,7 +6761,7 @@
     },
     {
       "category": "server",
-      "description": "Establish the Ghidra Server connection, or report the existing one. Takes no parameters: the GUI's connection is its open project, and headless connects with GHIDRA_SERVER_HOST, GHIDRA_SERVER_PORT, GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD.",
+      "description": "Establish the Ghidra Server connection, or report the existing one. Takes no parameters: the GUI's connection is its open project, and headless connects with GHIDRA_MCP_GHIDRA_SERVER_HOST, GHIDRA_MCP_GHIDRA_SERVER_PORT, GHIDRA_MCP_GHIDRA_SERVER_USER and GHIDRA_MCP_GHIDRA_SERVER_PASSWORD.",
       "destructive": false,
       "method": "POST",
       "params": [],
@@ -7602,6 +7569,55 @@
       "read_only": false
     },
     {
+      "category": "program",
+      "description": "Set or unset a setting at one scope: 'project' is shared with everyone using the project (versioned with a shared one), 'local' stays on this machine, 'program' is one program's. Returns the effective value afterwards. List settings take '+x,-y' to adjust the scope below, or a plain list to replace it. Guardrails can only be made stricter; secrets cannot be set here.",
+      "destructive": false,
+      "method": "POST",
+      "params": [
+        {
+          "description": "Setting key, e.g. 'tools.autoload'.",
+          "name": "key",
+          "required": true,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "",
+          "description": "Raw value; ignored with unset=true.",
+          "name": "value",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "local",
+          "description": "project, local or program.",
+          "name": "scope",
+          "required": false,
+          "source": "body",
+          "type": "string"
+        },
+        {
+          "default": "false",
+          "description": "Remove the value at this scope instead of setting one.",
+          "name": "unset",
+          "required": false,
+          "source": "body",
+          "type": "boolean"
+        },
+        {
+          "default": "",
+          "description": "Target program for scope=program.",
+          "name": "program",
+          "required": false,
+          "source": "query",
+          "type": "string"
+        }
+      ],
+      "path": "/set_setting",
+      "read_only": false
+    },
+    {
       "category": "function",
       "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
       "description": "Set a parameter's or local's storage location to a register, register pair, or stack slot. Accepts 'EAX', 'EAX:4', 'R0:4,R2:4' or 'Stack[-0x10]:4'; size defaults to the variable's data-type length. Use this when the argument layout cannot be expressed by any calling convention. Setting a PARAMETER's storage switches the whole function to custom variable storage (reported as custom_storage_enabled). The storage is read back after the write and returned in 'storage'. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
@@ -7814,88 +7830,6 @@
       "method": "GET",
       "params": [],
       "path": "/tool/running_tools",
-      "read_only": true
-    },
-    {
-      "category": "datatype",
-      "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Validate a data type. With an address: checks applicability (memory range, alignment, conflicts) at that address. Without an address: checks only that the type exists, resolving bare names like 'int'/'DWORD'/'char *' across all categories. Replaces validate_data_type_exists.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "default": "",
-          "description": "Optional address. Omit to check type existence only; provide to validate applicability at that address (memory range/alignment/conflicts). Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).",
-          "name": "address",
-          "param_type": "address",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "description": "Data type name (bare names resolve across all categories)",
-          "name": "type_name",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/validate_data_type",
-      "read_only": true
-    },
-    {
-      "category": "datatype",
-      "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
-      "description": "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
-      "destructive": false,
-      "method": "GET",
-      "params": [
-        {
-          "aliases": [
-            "address",
-            "name",
-            "function_address",
-            "function_name"
-          ],
-          "description": "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
-          "name": "function",
-          "param_type": "function_ref",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "description": "Function prototype",
-          "name": "prototype",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "description": "Calling convention",
-          "name": "calling_convention",
-          "required": true,
-          "source": "query",
-          "type": "string"
-        },
-        {
-          "default": "",
-          "description": "Target program: its project path (/folder/name) or a name unique in the project; it is opened on first use. Omit it only when exactly one program is open.",
-          "name": "program",
-          "required": false,
-          "source": "query",
-          "type": "string"
-        }
-      ],
-      "path": "/validate_function_prototype",
       "read_only": true
     }
   ]

@@ -1,50 +1,48 @@
 package com.xebyte.core;
 
+import com.xebyte.core.settings.DotEnv;
+import com.xebyte.core.settings.ServerSettings;
+import com.xebyte.core.settings.SettingRefusedException;
+import com.xebyte.core.settings.SettingsRegistry;
+import ghidra.util.Msg;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
- * Read-once, thread-safe snapshot of security-relevant environment variables.
- *
- * v5.4.1 introduces three opt-in hardening switches. All are off by default
- * so existing localhost-only deployments see no behavior change.
+ * The server's security switches. All are off by default, so a localhost-only deployment
+ * sees no behaviour change.
  *
  * <ul>
- *   <li>{@code GHIDRA_MCP_AUTH_TOKEN} — if set, every HTTP request must
- *       carry a matching {@code Authorization: Bearer &lt;token&gt;} header.
- *       Read-only health endpoints ({@code /mcp/health}, {@code /check_connection})
- *       are always exempt. Constant-time comparison is used to resist timing
- *       attacks. When unset, no authentication is enforced (pre-v5.4.1
- *       behavior).
- *   <li>{@code GHIDRA_MCP_ALLOW_SCRIPTS} — set to {@code "1"}, {@code "true"},
- *       or {@code "yes"} (case-insensitive) to allow {@code /run_script} and
- *       {@code /run_script_inline}. These endpoints execute arbitrary Java
- *       code against the Ghidra process and are off by default in v5.4.1+.
- *       Without an explicit opt-in they return 403. Scripts endpoints were
- *       always-on before v5.4.1; the flip to default-off is a deliberate
- *       breaking change in the security release.
- *   <li>{@code GHIDRA_MCP_FILE_ROOT} — if set to a directory path, endpoints that take a
- *       real <em>filesystem</em> path canonicalize the input (via
- *       {@link #resolveWithinFileRoot(String)}) and require that the resolved path fall
- *       under this root, preventing path traversal. This applies to {@code /import_file}
- *       (and the headless import path). When unset, paths are accepted as-is (pre-v5.4.1
- *       behavior).
- *       <p>{@code /open_project} takes a filesystem path too (a {@code .gpr} or project
- *       directory), so it is contained the same way on both servers; a {@code ghidra://}
- *       URL names a server repository and is not a path. {@code /delete_file} operates
- *       on Ghidra <em>project domain</em> paths (e.g. {@code /Project/1.0/example.dll}),
- *       not filesystem paths, so file-root canonicalization does not apply to it; its
- *       containment guard is project-folder scope
- *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
- *       scope is configured.</li>
+ *   <li>{@code auth.token} (secret, server scope only: {@code GHIDRA_MCP_AUTH_TOKEN}) — if set,
+ *       every HTTP request must carry a matching {@code Authorization: Bearer &lt;token&gt;}
+ *       header; {@code /mcp/health} and {@code /check_connection} are exempt. Compared in
+ *       constant time. Read once at startup.
+ *   <li>{@code scripts.allow} (guardrail) — allows {@code /run_ghidra_script} and
+ *       {@code /run_script_inline}, which execute arbitrary Java in the Ghidra process.
+ *   <li>{@code files.root} (guardrail) — endpoints that take a real <em>filesystem</em> path
+ *       canonicalize it ({@link #resolveWithinFileRoot(String)}) and require it to fall under
+ *       this directory. {@code /open_project} is contained the same way; a {@code ghidra://}
+ *       URL names a server repository and is not a path. {@code /delete_file} takes project
+ *       <em>domain</em> paths, so its containment is {@code project.folder_scope}.
+ *   <li>{@code project.folder_scope} (guardrail) — the project folder programs must lie in to
+ *       be served or changed ({@link #isPathInProjectScope(String)}).
  * </ul>
  *
- * Also enforces a bind-hardening rule at headless startup:
- * {@link #requireAuthForNonLoopbackBind(String)} refuses to start the
- * server on a non-loopback address unless a token is configured.
+ * <p>Guardrails are settings: the server operator sets them in the server's environment, and
+ * the project's and this machine's settings can only make them stricter. They are resolved on
+ * every check, through the {@link SettingsService} a server hands {@link #useSettings}, so a
+ * tightening takes effect without a restart.
+ *
+ * <p>Also enforces a bind-hardening rule at headless startup:
+ * {@link #requireAuthForNonLoopbackBind(String)} refuses to start the server on a
+ * non-loopback address unless a token is configured.
  */
 public final class SecurityConfig {
 
@@ -77,62 +75,76 @@ public final class SecurityConfig {
     }
 
     private final byte[] tokenBytes;     // null if auth disabled
-    private final boolean scriptsAllowed;
-    private final String fileRoot;       // null if disabled
-    private final Path fileRootCanonical;
-    private volatile String projectFolderScope; // null = no enforcement (default)
+    private volatile Function<String, Object> guardrails = SecurityConfig::fromEnvironment;
+    /** The last {@code files.root} canonicalized, with the value it came from. */
+    private volatile CanonicalRoot canonicalRoot;
+
+    private record CanonicalRoot(String raw, Path path) {}
 
     private SecurityConfig() {
-        String rawToken = System.getenv("GHIDRA_MCP_AUTH_TOKEN");
-        this.tokenBytes = (rawToken != null && !rawToken.isEmpty())
-                ? rawToken.getBytes(StandardCharsets.UTF_8)
-                : null;
+        String rawToken = ServerSettings.string("auth.token");
+        this.tokenBytes = rawToken.isEmpty()
+                ? null
+                : rawToken.getBytes(StandardCharsets.UTF_8);
+    }
 
-        String rawScripts = System.getenv("GHIDRA_MCP_ALLOW_SCRIPTS");
-        this.scriptsAllowed = rawScripts != null
-                && (rawScripts.equalsIgnoreCase("1")
-                    || rawScripts.equalsIgnoreCase("true")
-                    || rawScripts.equalsIgnoreCase("yes"));
+    /** Before a server wires its settings in: server-scope settings alone. */
+    private static Object fromEnvironment(String key) {
+        return ServerSettings.value(key);
+    }
 
-        String rawRoot = System.getenv("GHIDRA_MCP_FILE_ROOT");
-        if (rawRoot != null && !rawRoot.isEmpty()) {
-            this.fileRoot = rawRoot;
-            Path p;
+    /** Resolve guardrails through {@code settings}, so project and local values apply. */
+    public void useSettings(SettingsService settings) {
+        guardrails = key -> {
             try {
-                p = new File(rawRoot).getCanonicalFile().toPath();
-            } catch (IOException e) {
-                p = Paths.get(rawRoot).toAbsolutePath().normalize();
+                return settings.value(key, null);
+            } catch (SettingRefusedException e) {
+                // An unreadable project store must not take the operator's value with it.
+                Msg.warn(SecurityConfig.class, key + ": " + e.getMessage() + "; using the server's value");
+                return fromEnvironment(key);
             }
-            this.fileRootCanonical = p;
-        } else {
-            this.fileRoot = null;
-            this.fileRootCanonical = null;
-        }
+        };
+    }
 
-        // Project-folder scope guard. When set, FrontEndProgramProvider
-        // refuses to return Programs whose DomainFile path falls outside
-        // this prefix. Default unset = no enforcement (back-compat for all
-        // general users — only opt-in via env var changes behavior).
-        // Trailing slash normalized so collision-safe `path == prefix or
-        // startsWith(prefix + "/")` matching works.
-        String rawScope = System.getenv("GHIDRA_MCP_PROJECT_FOLDER");
-        if (rawScope != null) {
-            String trimmed = rawScope.trim();
-            // Strip trailing slash unless the value is just "/"
-            if (trimmed.length() > 1 && trimmed.endsWith("/")) {
-                trimmed = trimmed.substring(0, trimmed.length() - 1);
-            }
-            this.projectFolderScope = trimmed.isEmpty() ? null : trimmed;
-        } else {
-            this.projectFolderScope = null;
-        }
+    private Object guardrail(String key) {
+        return guardrails.apply(key);
+    }
+
+    /** Environment variables renamed in 7.3.0+, mapped to their registry-derived names. */
+    private static final Map<String, String> RETIRED = Map.ofEntries(
+        Map.entry("GHIDRA_MCP_ALLOW_SCRIPTS", "GHIDRA_MCP_SCRIPTS_ALLOW"),
+        Map.entry("GHIDRA_MCP_FILE_ROOT", "GHIDRA_MCP_FILES_ROOT"),
+        Map.entry("GHIDRA_MCP_PROJECT_FOLDER", "GHIDRA_MCP_PROJECT_FOLDER_SCOPE"),
+        Map.entry("GHIDRA_MCP_BIND_ADDRESS", SettingsRegistry.DEFAULT.get("server.bind_address").envName()),
+        Map.entry("GHIDRA_MCP_MAX_CACHED_PROGRAMS", SettingsRegistry.DEFAULT.get("programs.max_cached").envName()),
+        Map.entry("GHIDRA_MCP_SHARED_PROJECT_DIR", SettingsRegistry.DEFAULT.get("project.shared_dir").envName()),
+        Map.entry("GHIDRA_SERVER_HOST", SettingsRegistry.DEFAULT.get("ghidra_server.host").envName()),
+        Map.entry("GHIDRA_SERVER_PORT", SettingsRegistry.DEFAULT.get("ghidra_server.port").envName()),
+        Map.entry("GHIDRA_SERVER_USER", SettingsRegistry.DEFAULT.get("ghidra_server.user").envName()),
+        Map.entry("GHIDRA_SERVER_PASSWORD", SettingsRegistry.DEFAULT.get("ghidra_server.password").envName()));
+
+    /**
+     * A startup refusal naming any retired variable present in the process environment or
+     * standard {@code .env} files, or {@code null}.
+     */
+    public static String retiredVariables() {
+        return retiredVariables(System.getenv(), DotEnv.loadStandard());
+    }
+
+    public static String retiredVariables(Map<String, String> processEnv, Map<String, String> dotEnv) {
+        List<String> set = RETIRED.keySet().stream()
+            .filter(name -> processEnv.containsKey(name) || dotEnv.containsKey(name))
+            .sorted()
+            .map(old -> old + " (now " + RETIRED.get(old) + ")").toList();
+        return set.isEmpty() ? null : "Retired environment variable(s) set: " + String.join(", ", set)
+            + ". Rename them; the server does not read the old names.";
     }
 
     public static SecurityConfig getInstance() {
         return INSTANCE;
     }
 
-    /** True when {@code GHIDRA_MCP_AUTH_TOKEN} is set. */
+    /** True when {@code auth.token} is set. */
     public boolean isAuthEnabled() {
         return tokenBytes != null;
     }
@@ -159,31 +171,36 @@ public final class SecurityConfig {
         return constantTimeEquals(tokenBytes, presented);
     }
 
-    /** True when {@code GHIDRA_MCP_ALLOW_SCRIPTS} opts in. */
+    /** The {@code scripts.allow} guardrail. */
     public boolean areScriptsAllowed() {
-        return scriptsAllowed;
+        return (Boolean) guardrail("scripts.allow");
     }
 
-    /** True when {@code GHIDRA_MCP_PROJECT_FOLDER} is set (any value). */
+    /** True when {@code project.folder_scope} confines programs to a folder. */
     public boolean hasProjectFolderScope() {
-        return projectFolderScope != null;
+        return getProjectFolderScope() != null;
     }
 
     /**
-     * Return the configured project-folder scope prefix (e.g.
-     * {@code "/Project/1.0"}), or {@code null} when unset (default).
-     * Trailing slash already normalized at construction.
+     * The project-folder scope prefix (e.g. {@code "/Project/1.0"}) without a trailing
+     * slash, or {@code null} when none is set.
      */
     public String getProjectFolderScope() {
-        return projectFolderScope;
+        String scope = ((String) guardrail("project.folder_scope")).trim();
+        if (scope.length() > 1 && scope.endsWith("/")) {
+            scope = scope.substring(0, scope.length() - 1);
+        }
+        return scope.isEmpty() ? null : scope;
     }
 
     /**
-     * Replace the scope read from {@code GHIDRA_MCP_PROJECT_FOLDER}. Package-private: the
-     * environment is the only way a server sets it; tests in this package set it here.
+     * Pin {@code project.folder_scope}, every other guardrail reading the environment.
+     * Package-private: settings are the only way a server sets it; tests in this package
+     * set it here.
      */
     void setProjectFolderScopeForTest(String scope) {
-        projectFolderScope = scope;
+        String value = scope == null ? "" : scope;
+        guardrails = key -> "project.folder_scope".equals(key) ? value : fromEnvironment(key);
     }
 
     /**
@@ -200,14 +217,13 @@ public final class SecurityConfig {
      *                       null returns true (unscoped equivalent)
      */
     public boolean isPathInProjectScope(String domainFilePath) {
-        return pathWithinScope(domainFilePath, projectFolderScope);
+        return pathWithinScope(domainFilePath, getProjectFolderScope());
     }
 
     /**
      * Prefix-collision-safe scope match, factored out for direct unit testing
-     * (the instance method reads {@code projectFolderScope} from the env once
-     * at construction, so the branch where a scope <em>is</em> configured is
-     * awkward to exercise otherwise).
+     * (the instance method resolves the scope from settings, so the branch where
+     * a scope <em>is</em> configured is awkward to exercise otherwise).
      *
      * <p>A null {@code scopePrefix} (no scope configured) or null
      * {@code domainFilePath} both return true — the unscoped default. The
@@ -221,33 +237,51 @@ public final class SecurityConfig {
         return domainFilePath.startsWith(scopePrefix + "/");
     }
 
-    /** True when {@code GHIDRA_MCP_FILE_ROOT} is set. */
+    /** True when {@code files.root} confines filesystem paths. */
     public boolean hasFileRoot() {
-        return fileRoot != null;
+        return getFileRoot() != null;
     }
 
+    /** The {@code files.root} directory, or {@code null} when none is set. */
     public String getFileRoot() {
-        return fileRoot;
+        String root = ((String) guardrail("files.root")).trim();
+        return root.isEmpty() ? null : root;
     }
 
     /**
-     * Canonicalize {@code userPath} and verify it falls under
-     * {@link #getFileRoot()}. When no file root is configured this returns the
-     * path as-is (pre-v5.4.1 behavior). Returns {@code null} when a root is
-     * configured and the path escapes it.
+     * Canonicalize {@code userPath} and verify it falls under {@link #getFileRoot()}. When
+     * no file root is set this returns the path as-is. Returns {@code null} when a root is
+     * set and the path escapes it.
      */
     public Path resolveWithinFileRoot(String userPath) {
         if (userPath == null) return null;
-        Path requested;
-        try {
-            requested = new File(userPath).getCanonicalFile().toPath();
-        } catch (IOException e) {
-            requested = Paths.get(userPath).toAbsolutePath().normalize();
-        }
-        if (fileRootCanonical == null) {
+        Path requested = canonical(userPath);
+        Path root = canonicalRoot();
+        if (root == null) {
             return requested;  // no allow-list configured
         }
-        return requested.startsWith(fileRootCanonical) ? requested : null;
+        return requested.startsWith(root) ? requested : null;
+    }
+
+    private Path canonicalRoot() {
+        String root = getFileRoot();
+        if (root == null) {
+            return null;
+        }
+        CanonicalRoot cached = canonicalRoot;
+        if (cached == null || !cached.raw().equals(root)) {
+            cached = new CanonicalRoot(root, canonical(root));
+            canonicalRoot = cached;
+        }
+        return cached.path();
+    }
+
+    private static Path canonical(String path) {
+        try {
+            return new File(path).getCanonicalFile().toPath();
+        } catch (IOException e) {
+            return Paths.get(path).toAbsolutePath().normalize();
+        }
     }
 
     /**

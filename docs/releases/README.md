@@ -11,8 +11,8 @@ For the release preparation runbook, see
 
 ### Unreleased
 
-The catalog stands at **220 tools** — 216 served by the GUI plugin, 201 by the headless
-server, 197 by both:
+The catalog stands at **218 tools** — 214 served by the GUI plugin, 199 by the headless
+server, 195 by both:
 
 - **Decompiler symbols and stack locals** from @sagasm (#550):
   `get_functions(fields=decompiler_symbols)` reads SSA/register storage, and
@@ -30,6 +30,12 @@ server, 197 by both:
   decompile.
 - **`find_type_users`** lists the functions whose decompilation uses a type or one
   field of it.
+- **Settings:** `get_settings` and `set_setting` read and write one registry of
+  scoped settings (server, project, local, program, session).
+- **Checks and `force_decompile` fold into the calls they stood in for.** `validate_function_prototype` is
+  `set_function_prototype(dry_run=true)`, `validate_data_type` is `apply_data_type(dry_run=true)`
+  or `find_data_types(name=...)`, `search_strings` is `list_strings(pattern=...)`, and
+  `force_decompile` is `get_functions(fields=decompiled_code)`.
 
 ### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
@@ -98,7 +104,7 @@ The bridge itself now follows the protocol more closely (#553): failures come
 back with `isError` set, every tool declares `readOnlyHint` / `destructiveHint`,
 long calls send progress notifications, a bare `OPTIONS` is answered and no
 longer leaks a session, and the HTTP transports gain an optional bearer token
-(`GHIDRA_MCP_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
+(`GHIDRA_MCP_BRIDGE_INBOUND_TOKEN`), `--json-response`, `--stateless-http` and
 `--tools-page-size`.
 
 **Lazy tool loading is the default.** Advertising all 209 endpoints in one

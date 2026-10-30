@@ -136,9 +136,8 @@ as a tool error. Each one carries `loaded_variant`, the full
 
 The decompiler always decodes with the language the program was imported under
 and cannot be asked for another — that is why a mismatch is refused instead of
-answered. `force_decompile` does not help either: flushing the cache re-runs the
-same language and re-derives the same wrong C. Fixing it is a program-level
-operation:
+answered. Decompiling again does not help either: it re-runs the same language
+and re-derives the same wrong C. Fixing it is a program-level operation:
 
 - re-import with an explicit language: `import_file(file_path=..., language="PowerPC:BE:64:VLE-32addr")`, or
 - change it in Ghidra: **Language > Set Language** (re-disassembles; do this
@@ -146,11 +145,11 @@ operation:
 
 ### Composite analyses
 
-`force_decompile`, `analyze_function_complete` and `analyze_for_documentation`
-also return pseudocode, stamped the same way, and accept the same optional
-`variant=`. `force_decompile` refuses a contradicted one like `get_functions`
-does. The two composites instead return everything else with `decompiled_code`
-replaced by `decompiled_code_withheld`, rather than failing the whole call.
+`analyze_function_complete` and `analyze_for_documentation` also return
+pseudocode, stamped the same way, and accept the same optional `variant=`.
+Where `get_functions` refuses a contradicted one, the two composites return
+everything else with `decompiled_code` replaced by `decompiled_code_withheld`,
+rather than failing the whole call.
 
 ## Complete Workflow Pattern
 
@@ -348,7 +347,7 @@ XREF COUNT: 2 references
 
 **For validation:**
 
-- `validate_data_type(type_name)` - Check if type exists
+- `find_data_types(name=type_name)` - Resolve a type exactly as `apply_data_type` would (empty when it would reject the name)
 - `can_rename_at_address(address)` - Check what operation is appropriate
 
 ## Per-Program Storage: Options and Property Maps (v5.17.0+)
@@ -584,7 +583,7 @@ on every platform.
 
 #### B. WinDbg proxy family — standalone dbgeng server (Windows only)
 
-22 static bridge tools proxied to a standalone Python server via `GHIDRA_DEBUGGER_URL`
+22 static bridge tools proxied to a standalone Python server via `GHIDRA_MCP_BRIDGE_DEBUGGER_URL`
 (default `http://127.0.0.1:8099`). That server is not part of this repository. It wraps **dbgeng/WinDbg via `pybag`** —
 **Windows-only** (`pybag` requires `pywin32`). Adds dbgeng-specific capabilities the
 TraceRmi family doesn't have: attach-by-process-name, ordinal resolution, argument
@@ -596,8 +595,8 @@ Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
 registers/memory/stack/modules).
 
 **These tools are off by default** (`_debugger_enabled()` in the bridge). They register
-only when `GHIDRA_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_DEBUGGER_TOOLS=1`;
-`GHIDRA_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
+only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set to a loopback URL or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`;
+`GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=0` keeps them off even with a URL set. Calls are only proxied to
 loopback, so reach a server on another machine through a forwarded port.
 
 > Naming note: where the two families share a name (e.g. `debugger_status`), both stay
@@ -628,8 +627,8 @@ one search instead of one MCP round trip per function.
 ```
 
 Create and start are separate on purpose: config changes must not silently launch
-a multi-minute sweep. `disassemble_missing` defaults to off; set it true on create
-or configure only when you want the next sweep to disassemble entries that still
+a multi-minute sweep. `disassemble_missing` defaults to off (the `tree.disassemble_missing`
+setting); set it true on create or configure, or in that setting, only when you want the next sweep to disassemble entries that still
 have no instruction (and possibly reflow PE stub bodies) — that is a program write,
 not filesystem-only. `decompile_tree_status` is READ_ONLY so it stays usable in plan
 mode; the five write paths (`create` / `configure` / `start` / `stop` / `delete`)
@@ -846,31 +845,90 @@ find_functions(tag="crypto")            # any of several: tag="crypto,parser"
 
 Tags are case-sensitive; `find_functions(tag=...)` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
 
-## Security Environment Variables (v5.4.1+)
+## Settings (v7.3.0+)
 
-GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev box. Configure these before binding beyond loopback:
+`get_settings` lists every setting with its value, the scope it came from and the scopes that
+also hold one; `set_setting(key, value, scope)` changes one. Scopes, lowest first:
 
-| Env var | Effect |
-| --- | --- |
-| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are always exempt. |
-| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** (breaking change — these endpoints execute arbitrary Java against the Ghidra process). |
-| `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |
+- **default**: the registry's value.
+- **server**: set by the server operator when the server starts.
+- **project**: shared with everyone using the project, versioned with a shared one.
+- **local**: this machine only.
+- **program**: one program's own value.
+- **session**: the bridge session's own flags and environment.
+- **call**: a tool's own argument.
 
-The headless server refuses to start on a non-loopback bind address (`0.0.0.0`, explicit external IP) unless `GHIDRA_MCP_AUTH_TOKEN` is set.
+A *preference* is yours to set. A *guardrail* (`scripts.allow`, `files.root`,
+`project.folder_scope`) is set by the server operator: from the project or local scope you can
+only make it stricter, and a refusal says so rather than how to lift it. A *secret* is neither
+shown nor settable. List settings take `+x,-y` to adjust the scope below, or a plain list to
+replace it.
 
-**The MCP bridge reads the same `GHIDRA_MCP_AUTH_TOKEN`** and attaches `Authorization: Bearer <token>` to every outbound call (UDS and TCP). Export the same token in the bridge's environment — otherwise it will hit `401 Unauthorized` on every tool call to an auth-enabled server. When an HTTP/SSE bridge binds beyond loopback, clients must also send that bearer token to the bridge; unauthenticated requests receive `401 Unauthorized`. Unset = no header (matches the localhost default).
+<!-- settings-keys:start -->
+| Key | Kind | Type | Default | Scopes | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `tools.autoload` | preference | list | `listing,function,program` | server, project, local, session | Tool groups every new bridge session loads; +group/-group adjust the scope below. |
+| `tools.restore_loaded` | preference | bool | `true` | server, project, local, session | Whether a new bridge session also loads tools.last_loaded. |
+| `tools.last_loaded` | preference | list | none | local | Tool groups the last bridge session had loaded beyond tools.autoload; the bridge keeps it current. |
+| `tools.require_program` | preference | bool | `false` | server, project, local, session | Require an explicit program on every program-scoped tool call. |
+| `scripts.allow` | guardrail | bool | `false` | server, project, local | Whether run_ghidra_script and run_script_inline may run code. |
+| `files.root` | guardrail | string | none | server, project, local | Directory that file paths given to tools must lie within; empty for none. |
+| `project.folder_scope` | guardrail | string | none | server, project, local | Project folder that programs must lie within to be served; empty for none. |
+| `auth.token` | secret | string | hidden | server, session | Bearer token HTTP clients must present; empty disables authentication. The bridge sends its own value as the bearer token on outbound Ghidra calls. |
+| `bridge.server_url` | operator | string | none | session | Ghidra HTTP URL for this bridge session; empty discovers instances or uses the default loopback port. |
+| `bridge.max_concurrent_requests` | operator | int | `4` | session | Maximum Ghidra requests this bridge executes concurrently; values below 1 become 1. |
+| `bridge.log_level` | operator | string | `INFO` | session | Python logging level for this bridge process. |
+| `bridge.lazy` | operator | string | none | session | Lazy tool loading for this bridge session; empty uses the transport default. |
+| `bridge.project` | operator | string | none | session | Exact project name this bridge session connects to on startup; empty connects as without one. |
+| `bridge.expose` | operator | string | `full` | session | MCP surface this bridge session advertises: full (every tool), facade (five ghidra_* tools) or hybrid (both). |
+| `bridge.allowed_hosts` | operator | list | none | session | Extra hostnames allowed for HTTP/SSE DNS-rebinding and CORS checks (comma-separated). |
+| `bridge.inbound_token` | secret | string | hidden | session | Bearer token MCP HTTP clients must present to this bridge; empty disables inbound auth. |
+| `bridge.rebind_protection` | operator | bool | `true` | session | DNS-rebinding protection for wildcard HTTP binds; set false only on a wildcard bind to opt out. |
+| `bridge.debugger_url` | operator | string | none | session | Loopback URL of an external WinDbg debugger server; setting it registers the 22 debugger_* proxy tools, which are off by default. |
+| `bridge.debugger_tools` | operator | string | none | session | Force the debugger_* proxy tools on (true, at `http://127.0.0.1:8099` when no URL is set) or off (false, even with a URL); empty follows bridge.debugger_url. |
+| `tree.strategies` | preference | list | none | server, project, local, program | Partition strategies for decompile_tree_create; empty means the full cascade. |
+| `tree.band_size` | preference | int | `20` | server, project, local, program | Address-band width when bands apply in a decompilation tree. |
+| `tree.max_file_bytes` | preference | int | `32768` | server, project, local, program | Read-budget bytes per .c file inside a tree compartment (floored at 4096). |
+| `tree.exclusions` | preference | list | none | server, project, local, program | Exclusion specs (tag:/partition:/range:) for decompile_tree_create. |
+| `tree.include_only` | preference | list | none | server, project, local, program | Include-only specs (tag:/partition:/range:) for decompile_tree_create. |
+| `tree.throttle_percent` | preference | int | `10` | server, project, local, program | Interactive yield 0..90 after each function during a tree sweep. |
+| `tree.decompile_timeout_seconds` | preference | int | `30` | server, project, local, program | Per-function decompile budget during a tree sweep. |
+| `tree.analysis_wait_seconds` | preference | int | `600` | server, project, local, program | Cap on waiting for auto-analysis before a tree sweep partitions. |
+| `tree.disassemble_missing` | preference | bool | `false` | server, project, local, program | Before a tree sweep, disassemble at function entries with no instruction; writes the program, so off unless a scope or the create call turns it on. |
+| `naming.mode` | guardrail | string | `enforce` | server, project, local, program | Naming enforcement: off, warn, or enforce (reject low-quality names). |
+| `naming.override` | guardrail | string | `allow` | server, project, local, program | Whether per-call strict_mode may be lower than naming.mode (allow or deny). |
+| `naming.function.min_length` | operator | int | `8` | server, project, local, program | Minimum length for function names under the verb-tier rules. |
+| `naming.function.verbs_add` | operator | list | none | server, project, local, program | Extra PascalCase verbs accepted in function names (+name to add, -name to remove). |
+| `naming.function.verbs_remove` | operator | list | none | server, project, local, program | Built-in verbs to drop from the whitelist (+name to add, -name to remove). |
+| `naming.function.verb_tiers` | operator | list | none | server, project, local, program | Verb tier overrides as Verb:tier entries (tier 1..3; +Verb:2 to add, -Verb to remove). |
+| `naming.function.weak_nouns_add` | operator | list | none | server, project, local, program | Tokens treated as weak nouns in function names (+token/-token). |
+| `naming.function.weak_nouns_remove` | operator | list | none | server, project, local, program | Built-in weak nouns to stop treating as weak (+token/-token). |
+| `naming.hungarian.auto_fix` | operator | bool | `true` | server, project, local, program | Rewrite struct field names to Hungarian prefixes on create/modify. |
+| `naming.hungarian.prefixes` | operator | list | none | server, project, local, program | Extra type-to-prefix mappings as type:prefix entries (+type:prefix/-type to adjust). |
+| `naming.global.validate` | operator | bool | `true` | server, project, local, program | Run global symbol name quality checks on rename/set_global. |
+| `naming.global.require_g_prefix` | operator | bool | `true` | server, project, local, program | Require g_ on documented globals. |
+| `naming.global.min_descriptor_length` | operator | int | `2` | server, project, local, program | Minimum length of the descriptor after g_ on globals. |
+| `naming.plate.validate` | operator | bool | `true` | server, project, local, program | Validate plate comment structure on batch_set_comments and related tools. |
+| `naming.plate.required_sections` | operator | list | `Algorithm,Parameters,Returns` | server, project, local, program | Section headings required in function plate comments. |
+| `naming.plate.min_first_line_words` | operator | int | `4` | server, project, local, program | Minimum word count on the plate comment summary line. |
+| `server.bind_address` | operator | string | none | server | When non-empty, also serve HTTP on TCP at this address (headless/Docker). |
+| `programs.max_cached` | operator | int | `8` | server | Maximum programs kept open in the provider cache; values below 2 become 2. |
+| `archive.url` | operator | string | none | server | Documentation archive REST base URL; empty disables archive ingest. |
+| `project.shared_dir` | operator | string | none | server | Root directory for persistent local shared-server projects; empty uses the default under the home directory. |
+| `ghidra_server.host` | operator | string | `localhost` | server | Ghidra Server hostname for shared-repository connections. |
+| `ghidra_server.port` | operator | int | `13100` | server | Ghidra Server RMI port for shared-repository connections. |
+| `ghidra_server.user` | operator | string | none | server | Ghidra Server username; empty uses the OS user. |
+| `ghidra_server.password` | secret | string | hidden | server | Ghidra Server password for programmatic login; empty leaves server auth unset. |
+<!-- settings-keys:end -->
 
-### Worked example — exposing to a private LAN with auth
+The bridge reads the `tools.*` keys when it connects: it loads `tools.autoload`, plus
+`tools.last_loaded` (the groups the last session loaded beyond that) when
+`tools.restore_loaded` is on, and keeps `tools.last_loaded` current as you load and unload
+groups.
 
-```bash
-export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
-export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
-
-# The jar does not bundle Ghidra; put both on the classpath, as docker/entrypoint.sh does
-java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadlessServer \r
-    --bind 0.0.0.0 --port 8089
-```
+The bridge sends `GHIDRA_MCP_AUTH_TOKEN` as `Authorization: Bearer <token>` on every call when
+the server requires one; HTTP/SSE clients of a bridge bound beyond loopback must send the same
+token.
 
 ---
 

@@ -19,6 +19,117 @@ Changes on `dev` after 7.0.0.
 - Static facade imports refuse unsupported previews before dispatch, retain
   cancellation/socket-abort handling, and report failed imports as MCP errors.
 
+### Changed — naming rules are settings; `conventions.json` is gone
+
+The naming conventions `NamingConventions` enforces come from `naming.*` keys instead of
+`<project>/.ghidra-mcp/conventions.json`. That file sat in a per-machine cache directory, so on a
+shared project each machine enforced its own rules; the keys resolve through the project store
+like every other setting, so everyone on a repository gets the same ones, and a program can
+override them. Every field of the old file has a key (`naming.function.min_length`,
+`naming.function.verbs_add` / `verbs_remove` / `verb_tiers` / `weak_nouns_add` /
+`weak_nouns_remove`, `naming.hungarian.auto_fix` / `prefixes`, `naming.global.*`,
+`naming.plate.*`); `docs/prompts/CUSTOMIZING_CONVENTIONS.md` lists them.
+
+- **Agents cannot loosen the rules.** `naming.mode` (`off` < `warn` < `enforce`) is a guardrail:
+  an agent may only make it stricter. Every other `naming.*` key is the operator's: an agent can
+  read it but not set it, so it cannot add its own verb to get a name through.
+- **`naming.override` sets a floor for per-call `strict_mode`.** `deny` refuses a call that asks
+  for a mode below the resolved `naming.mode`; `allow`, the default, keeps today's behaviour.
+  Raising strictness per call is always allowed.
+- **The GUI checkbox writes the setting.** "Strict naming enforcement" now shows the resolved
+  `naming.mode` and, when changed, writes it at local scope, so the GUI and headless servers read
+  one value and `get_settings` shows it.
+
+### Changed — tree defaults are settings
+
+`decompile_tree_create`'s defaults come from `tree.*` keys (`strategies`, `band_size`,
+`max_file_bytes`, `exclusions`, `include_only`, `throttle_percent`, `decompile_timeout_seconds`,
+`analysis_wait_seconds`, `disassemble_missing`), resolved for the program at server, project,
+local or program scope; a parameter given on the call wins. Create takes
+`decompile_timeout_seconds` and `analysis_wait_seconds` now too. The resolved values are written
+to `tree.json`, so changing a default later leaves existing trees as they are.
+
+`tree.disassemble_missing` stays off by default: it is the one tree setting that writes the
+program (it creates instructions at function entries the importer left undefined). A project
+whose imports need it (PE `.pdata` entries, firmware) now sets it once instead of on every create.
+
+### Changed — the bridge's environment variables are settings keys
+
+The bridge's own variables are `bridge.*` registry keys at session scope, documented in the
+generated key table and named the derived way. The bridge refuses to start while an old name is
+set, naming the new one. `get_settings` leaves session-only keys out: the server cannot see the
+bridge's environment, so any value it printed would be wrong. `auth.token` keeps its name and now
+lists the session scope too, since the bridge sends the same variable as its bearer token.
+
+| Old variable | Key | Variable now |
+| --- | --- | --- |
+| `GHIDRA_MCP_URL` | `bridge.server_url` | `GHIDRA_MCP_BRIDGE_SERVER_URL` |
+| `GHIDRA_MCP_MAX_CONCURRENT_REQUESTS` | `bridge.max_concurrent_requests` | `GHIDRA_MCP_BRIDGE_MAX_CONCURRENT_REQUESTS` |
+| `GHIDRA_MCP_LOG_LEVEL` | `bridge.log_level` | `GHIDRA_MCP_BRIDGE_LOG_LEVEL` |
+| `GHIDRA_MCP_LAZY` | `bridge.lazy` | `GHIDRA_MCP_BRIDGE_LAZY` |
+| `GHIDRA_MCP_PROJECT` | `bridge.project` | `GHIDRA_MCP_BRIDGE_PROJECT` |
+| `GHIDRA_MCP_EXPOSE` | `bridge.expose` | `GHIDRA_MCP_BRIDGE_EXPOSE` |
+| `GHIDRA_MCP_ALLOWED_HOSTS` | `bridge.allowed_hosts` | `GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS` |
+| `GHIDRA_MCP_INBOUND_TOKEN` | `bridge.inbound_token` (secret) | `GHIDRA_MCP_BRIDGE_INBOUND_TOKEN` |
+| `GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1` | `bridge.rebind_protection` | `GHIDRA_MCP_BRIDGE_REBIND_PROTECTION=false` |
+| `GHIDRA_DEBUGGER_URL` | `bridge.debugger_url` | `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` |
+| `GHIDRA_DEBUGGER_TOOLS` | `bridge.debugger_tools` | `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS` |
+
+Update MCP client configs that set any of these (`"env"` blocks), Docker compose files and
+`.env`. The debugger proxies stay opt-in: setting `bridge.debugger_url` registers them,
+and `bridge.debugger_tools=false` keeps them off even then.
+
+### Changed — the server's own configuration is settings keys
+
+Every environment variable the server read directly is now a registry key, so `get_settings`
+shows what is in force and the generated key table documents it. They are a new kind,
+`operator`: set in the server's environment, read-only to agents (`set_setting` refuses them).
+The variable names derive from the key like every other setting, and the server refuses to start
+while an old name is set, in its environment or in a `.env` file, naming the new one.
+
+| Old variable | Key | Variable now |
+| --- | --- | --- |
+| `GHIDRA_MCP_BIND_ADDRESS` | `server.bind_address` | `GHIDRA_MCP_SERVER_BIND_ADDRESS` |
+| `GHIDRA_MCP_MAX_CACHED_PROGRAMS` | `programs.max_cached` | `GHIDRA_MCP_PROGRAMS_MAX_CACHED` |
+| `GHIDRA_MCP_SHARED_PROJECT_DIR` | `project.shared_dir` | `GHIDRA_MCP_PROJECT_SHARED_DIR` |
+| `GHIDRA_SERVER_HOST` | `ghidra_server.host` | `GHIDRA_MCP_GHIDRA_SERVER_HOST` |
+| `GHIDRA_SERVER_PORT` | `ghidra_server.port` | `GHIDRA_MCP_GHIDRA_SERVER_PORT` |
+| `GHIDRA_SERVER_USER` | `ghidra_server.user` | `GHIDRA_MCP_GHIDRA_SERVER_USER` |
+| `GHIDRA_SERVER_PASSWORD` | `ghidra_server.password` (secret) | `GHIDRA_MCP_GHIDRA_SERVER_PASSWORD` |
+| `GHIDRA_MCP_ARCHIVE_URL` | `archive.url` | unchanged |
+
+- **`.env` files apply to every server setting.** `.env` in the Ghidra directory and in the home
+  directory used to be read for the two credentials only; they now back the whole server scope,
+  with the process environment winning. The Java side no longer reads `.ghidra-cred`;
+  `ghidra-mcp-setup.ps1` still turns that file into the environment variable.
+- **Credentials are registered once, by one method, on both servers.** The GUI's module
+  initializer and the headless server's startup both call `ServerCredentials.registerFromSettings`.
+- **A login as the wrong user says so.** A Ghidra Server started without `-u` never lets a client
+  choose its user name, so `ghidra_server.user` is replaced by the OS user and the login fails
+  as plain "Authentication failed". The server now logs that, and the connection or project-open
+  error ends with it ("The Ghidra Server at host does not let clients choose a user name (it runs
+  without -u), so the login was as the OS user 'alice', not ghidra_server.user 'svc-ghidra'.").
+  Both connection paths behave the same; the earlier report that `/server/connect` used the
+  configured name only held because the OS user also existed on that server.
+
+### Changed — checks and `force_decompile` fold into the calls they stood in for
+
+- **`/validate_function_prototype` is `set_function_prototype(dry_run=true)`.** The validator
+  checked only that the string contained `(` and that the convention was one of a hard-coded x86
+  list, so it passed prototypes the real call rejects and warned on every non-x86 convention. The dry
+  run parses and applies the prototype, then rolls back.
+- **`/validate_data_type` is `apply_data_type(dry_run=true)` with an address, and
+  `find_data_types(name=...)` without one.** Its existence check searched only the program's own
+  types by exact name, so it answered `exists: false` for `int` or `dword[4]` in a program that
+  had not used them yet, while `apply_data_type` accepted them. `find_data_types(name=)`
+  resolves exactly as `apply_data_type` does and returns that type or `total: 0`.
+- **`/search_strings` is `list_strings(pattern=...)`.** `list_strings` gains `pattern` (a
+  case-insensitive regex) and `min_length`; `filter` stays a substring. `search_strings`'
+  `encoding` parameter only echoed a label back and is gone. See the migration guide.
+- **`/force_decompile` is `get_functions(fields=decompiled_code)`.** It flushed the cache of a
+  decompiler it had created a moment before, so it never refreshed anything: every
+  `get_functions` call already decompiles with a fresh decompiler. Nothing is lost.
+
 ### Fixed: builds and runs on Ghidra 12.2
 
 Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on
@@ -72,6 +183,44 @@ APIs present in both 12.1 and 12.2.
 Scorecard's push filter and its test constant still named `main` while the
 repository's default branch is `dev`. Pushes to `dev` now trigger Scorecard,
 and the existing check against `origin/HEAD` passes on a fresh clone.
+
+### Added — settings: one registry, scoped values, `get_settings` / `set_setting`
+
+Configuration was a scatter of environment variables, Tool Options and a JSON file, with no way
+for an agent to see what was in force or for a project to carry its own defaults. Settings are
+now dotted keys declared once (type, default, the scopes they may be set at, who may write them,
+how scopes combine) and resolved through default < server < project < local < program < session
+< call.
+
+- **Where values live.** *server*: the server's environment, `GHIDRA_MCP_` plus the key
+  upper-cased with dots as underscores. *project*: options on a `/.ghidra-mcp` data-type archive
+  in the project, created on first write; on a shared project it is versioned, and each write
+  checks it out and back in, so every instance of the repository reads it (measured live with
+  two servers on one throwaway repository). *local*: a properties file in the project's `.rep`
+  directory, never shared. *program*: the program's `GhidraMCP` options. Not Ghidra's project
+  saveable data for *local*: a headless project never saves it (`DefaultProject.save()` returns
+  without a ToolManager).
+- **`get_settings`** lists every key with its value, the scope it came from and the scopes that
+  also hold one; secrets show only whether they are set. **`set_setting`** writes or unsets one
+  scope.
+- **Guardrails only tighten.** `scripts.allow`, `files.root` and `project.folder_scope` are set
+  by the operator; a project or local value can make them stricter and takes effect without a
+  restart, and a write or unset that would loosen one is refused. Refusals state the guardrail
+  and never how to lift it (the script refusals used to say "Set GHIDRA_MCP_ALLOW_SCRIPTS=1").
+  `set_program_option` / `remove_program_option` refuse the `GhidraMCP` group, and `delete_file`
+  / `move_file` refuse the archive, which `list_project_files` does not show.
+- **Tool groups come from settings.** On connect the bridge loads `tools.autoload`, plus
+  `tools.last_loaded` (the groups the last session loaded beyond it) when `tools.restore_loaded`
+  is on, and records `tools.last_loaded` on this machine after every `load_tool_group` /
+  `unload_tool_group`. `tools.require_program` is strict program routing. A session overrides
+  any of them with its own environment, or `--default-groups` for `tools.autoload`; unknown
+  group names are warned about with the valid list.
+- **Breaking:** `GHIDRA_MCP_ALLOW_SCRIPTS` is now `GHIDRA_MCP_SCRIPTS_ALLOW`,
+  `GHIDRA_MCP_FILE_ROOT` is `GHIDRA_MCP_FILES_ROOT`, `GHIDRA_MCP_PROJECT_FOLDER` is
+  `GHIDRA_MCP_PROJECT_FOLDER_SCOPE`, and the bridge's `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS` is
+  `GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM`. No aliases, and no silent fallback either: an unset
+  `files.root` or `project.folder_scope` means unconfined, so a server whose environment still
+  sets an old guardrail name refuses to start and names the new one.
 
 ### Added — function resources and `/get_change_token`
 

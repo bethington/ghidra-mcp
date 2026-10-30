@@ -141,7 +141,7 @@ public class SharedProjectLocatorTest extends TestCase {
                     .resolve("definitely-outside-file-root-" + System.nanoTime()).toString();
             try {
                 SharedProjectLocator.resolveProjectDir(p, outside, security);
-                fail("path outside GHIDRA_MCP_FILE_ROOT must be rejected");
+                fail("path outside files.root must be rejected");
             } catch (IllegalArgumentException expected) {
                 assertTrue(expected.getMessage().contains("FILE_ROOT")
                         || expected.getMessage().contains("escapes"));

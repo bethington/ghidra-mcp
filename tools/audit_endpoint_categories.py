@@ -60,6 +60,7 @@ SCANNED_SERVICES = (
     "ChangeTokenService",
     "PartitionService",
     "DecompTreeService",
+    "SettingsService",
     "VersionControlService",
     "ServerLifecycleService",
     "GuiToolService",

@@ -152,7 +152,7 @@ def client_config_snippet(resolutions: list[SpawnResolution], repo_root: Path) -
             "ghidra-mcp": {
                 "command": command,
                 "args": args,
-                "env": {"GHIDRA_MCP_URL": "http://127.0.0.1:8089"},
+                "env": {"GHIDRA_MCP_BRIDGE_SERVER_URL": "http://127.0.0.1:8089"},
             }
         }
     }

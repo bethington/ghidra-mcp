@@ -4,7 +4,7 @@ Pure Python -- no Ghidra, no server, no subprocess. Every behaviour pinned here
 is one that produced a silent wrong answer during development:
 
 * credential precedence  -- an ambient ``GHIDRA_PASS`` the Ghidra Server rejects
-  beat the correct ``GHIDRA_SERVER_PASSWORD`` in ``.env`` and looked like an
+  beat the correct ``GHIDRA_MCP_GHIDRA_SERVER_PASSWORD`` in ``.env`` and looked like an
   auth outage.
 * MSYS argument mangling -- ``--folder /benchmark`` became
   ``C:/Program Files/Git/benchmark``, matched nothing, and the run reported
@@ -50,15 +50,15 @@ def test_dotenv_parses_and_skips_comments(tmp_path: Path):
     env.write_text(
         "# comment\n"
         "\n"
-        "GHIDRA_SERVER_USER=benam\n"
-        'GHIDRA_SERVER_PASSWORD="s3cret"\n'
+        "GHIDRA_MCP_GHIDRA_SERVER_USER=benam\n"
+        'GHIDRA_MCP_GHIDRA_SERVER_PASSWORD="s3cret"\n'
         "EMPTY=\n"
         "no_equals_line\n",
         encoding="utf-8",
     )
     values = upl.read_dotenv(env)
-    assert values["GHIDRA_SERVER_USER"] == "benam"
-    assert values["GHIDRA_SERVER_PASSWORD"] == "s3cret"
+    assert values["GHIDRA_MCP_GHIDRA_SERVER_USER"] == "benam"
+    assert values["GHIDRA_MCP_GHIDRA_SERVER_PASSWORD"] == "s3cret"
     assert "EMPTY" not in values, "blank values must not shadow a real one downstream"
     assert "no_equals_line" not in values
 
@@ -86,17 +86,17 @@ def test_server_password_outranks_ambient_ghidra_pass(tmp_path: Path, monkeypatc
     authentication failure with no obvious cause.
     """
     monkeypatch.setenv("GHIDRA_PASS", "wrong-ambient-value")
-    monkeypatch.delenv("GHIDRA_SERVER_PASSWORD", raising=False)
-    (tmp_path / ".env").write_text("GHIDRA_SERVER_PASSWORD=correct-value\n", encoding="utf-8")
+    monkeypatch.delenv("GHIDRA_MCP_GHIDRA_SERVER_PASSWORD", raising=False)
+    (tmp_path / ".env").write_text("GHIDRA_MCP_GHIDRA_SERVER_PASSWORD=correct-value\n", encoding="utf-8")
 
     password, source = upl.resolve_password(tmp_path)
     assert password == "correct-value"
-    assert "GHIDRA_SERVER_PASSWORD" in source
+    assert "GHIDRA_MCP_GHIDRA_SERVER_PASSWORD" in source
 
 
 def test_password_falls_back_to_ghidra_pass_when_no_specific_one(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GHIDRA_PASS", "fallback")
-    monkeypatch.delenv("GHIDRA_SERVER_PASSWORD", raising=False)
+    monkeypatch.delenv("GHIDRA_MCP_GHIDRA_SERVER_PASSWORD", raising=False)
     password, source = upl.resolve_password(tmp_path)
     assert password == "fallback"
     assert "GHIDRA_PASS" in source
@@ -104,8 +104,8 @@ def test_password_falls_back_to_ghidra_pass_when_no_specific_one(tmp_path: Path,
 
 def test_user_prefers_server_specific_name(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GHIDRA_USER", "generic")
-    monkeypatch.delenv("GHIDRA_SERVER_USER", raising=False)
-    (tmp_path / ".env").write_text("GHIDRA_SERVER_USER=specific\n", encoding="utf-8")
+    monkeypatch.delenv("GHIDRA_MCP_GHIDRA_SERVER_USER", raising=False)
+    (tmp_path / ".env").write_text("GHIDRA_MCP_GHIDRA_SERVER_USER=specific\n", encoding="utf-8")
     assert upl.resolve_user(tmp_path) == "specific"
 
 
@@ -157,7 +157,7 @@ def test_dotenv_supplies_the_server_when_ghidra_is_unreachable(monkeypatch, tmp_
 
     monkeypatch.setattr(upl, "mcp_get", unreachable)
     (tmp_path / ".env").write_text(
-        "GHIDRA_SERVER_HOST=host.example\nGHIDRA_SERVER_PORT=13100\n", encoding="utf-8")
+        "GHIDRA_MCP_GHIDRA_SERVER_HOST=host.example\nGHIDRA_MCP_GHIDRA_SERVER_PORT=13100\n", encoding="utf-8")
     server, repo, _origin = upl.resolve_server_and_repo("http://x", tmp_path, None, None)
     assert server == "host.example:13100"
     assert repo is None, "repo is not in .env; caller must refuse rather than guess"

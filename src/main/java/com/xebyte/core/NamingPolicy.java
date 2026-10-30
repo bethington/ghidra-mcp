@@ -1,45 +1,40 @@
 package com.xebyte.core;
 
-import java.nio.file.Path;
+import com.xebyte.core.settings.SettingKey;
+import ghidra.program.model.listing.Program;
 
 /**
  * Runtime policy for naming-convention enforcement.
  *
- * <p>The default is intentionally strict to preserve the v5.6.0 behavior:
- * rename endpoints reject low-quality function/global names before mutating
- * the program. GUI users can disable the hard reject layer through Tool
- * Options when the built-in heuristic does not match their naming convention.
- * Warning-only validation still runs in that mode.
- *
- * <p>v5.11.2 expansion: the policy now carries a full {@link ConventionConfig}
- * loaded from {@code .ghidra-mcp/conventions.json} in the Ghidra project
- * root (see {@link ConventionConfigLoader}). The {@code strictNamingEnforcement}
- * boolean is now a derived view of that config's mode — kept for backward
- * compatibility with the existing call sites and the Ghidra Tool Option
- * checkbox. The boolean setter overrides the config mode so the GUI toggle
- * still works even when a project ships its own config file.
+ * <p>The active {@link ConventionConfig} is built from {@code naming.*}
+ * settings for the program the current request acts on (see
+ * {@link ServiceUtils#peekResolvedProgram()}), memoized until settings
+ * change or the program changes. Tests may pin a config with
+ * {@link #setConfig(ConventionConfig, String)}.
  */
 public final class NamingPolicy {
 
     private static final NamingPolicy INSTANCE = new NamingPolicy();
     private static final boolean DEFAULT_STRICT_NAMING_ENFORCEMENT = true;
 
-    private volatile ConventionConfig config;
-    private volatile String source;
+    private volatile SettingsService settingsService;
+    private volatile ConventionConfig testOverride;
+    private volatile String testSource = "default";
+
+    /** The last built config and what it was built for, replaced as one unit. */
+    private record Built(long generation, String programKey, ConventionConfig config) {}
+
+    private volatile Built built = new Built(-1, "", ConventionConfig.defaults());
 
     /**
      * Per-request mode override set by an MCP endpoint that accepts a
-     * {@code strict_mode} query parameter. Threads that didn't set an
-     * override see the global config mode. Cleared in a finally block by
+     * {@code strict_mode} query parameter. Cleared in a finally block by
      * the entrypoint so it never leaks across requests.
      */
     private final ThreadLocal<ConventionConfig.Mode> requestOverride =
             new ThreadLocal<>();
 
-    private NamingPolicy() {
-        this.config = ConventionConfig.defaults();
-        this.source = "default";
-    }
+    private NamingPolicy() {}
 
     public static NamingPolicy getInstance() {
         return INSTANCE;
@@ -49,39 +44,46 @@ public final class NamingPolicy {
         return DEFAULT_STRICT_NAMING_ENFORCEMENT;
     }
 
-    /** Active config — never null. */
+    /** Resolve settings through {@code settings} (both servers call this at startup). */
+    public void useSettings(SettingsService settings) {
+        this.settingsService = settings;
+        invalidateCache();
+    }
+
+    /** Active config for the current request's program — never null. */
     public ConventionConfig getConfig() {
-        return config;
+        if (testOverride != null) {
+            return testOverride;
+        }
+        SettingsService settings = settingsService;
+        if (settings == null) {
+            return built.config();
+        }
+        Program program = ServiceUtils.peekResolvedProgram();
+        String programKey = programKey(program);
+        long generation = settings.settingsGeneration();
+        Built last = built;
+        if (last.generation() == generation && last.programKey().equals(programKey)) {
+            return last.config();
+        }
+        Built fresh = new Built(generation, programKey,
+            ConventionConfig.fromSettings(key -> settings.value(key, program)));
+        built = fresh;
+        return fresh.config();
     }
 
     /**
-     * Replace the active config wholesale. Used by the loader at startup and
-     * by the Ghidra Tool Option listener; tests can call it directly to
-     * sandbox a config.
+     * Replace the active config for tests. Pass {@code null} config to clear
+     * the override and return to settings-backed resolution.
      */
     public synchronized void setConfig(ConventionConfig newConfig, String source) {
-        this.config = newConfig != null ? newConfig : ConventionConfig.defaults();
-        this.source = source != null && !source.isBlank() ? source : "runtime";
-    }
-
-    /**
-     * Convenience: keep the legacy boolean setter working for the existing
-     * Ghidra Tool Option. Flipping the boolean preserves all other config
-     * sections — only the mode changes.
-     */
-    public synchronized void setStrictNamingEnforcement(boolean strictNamingEnforcement, String source) {
-        ConventionConfig current = this.config;
-        ConventionConfig.Mode mode = strictNamingEnforcement
-                ? ConventionConfig.Mode.ENFORCE
-                : ConventionConfig.Mode.WARN;
-        this.config = new ConventionConfig(
-                mode,
-                current.functionNaming(),
-                current.hungarian(),
-                current.globalNaming(),
-                current.plateComments()
-        );
-        this.source = source != null && !source.isBlank() ? source : "runtime";
+        if (newConfig == null) {
+            testOverride = null;
+            invalidateCache();
+        } else {
+            testOverride = newConfig;
+        }
+        this.testSource = source != null && !source.isBlank() ? source : "runtime";
     }
 
     public boolean isStrictNamingEnforcement() {
@@ -90,21 +92,13 @@ public final class NamingPolicy {
 
     /**
      * The mode that applies to the current request: the thread-local
-     * override if one is set, otherwise the global config mode. Validators
-     * call this through {@link #isStrictNamingEnforcement()}; entrypoints
-     * that want to introspect the override directly can use this.
+     * override if one is set, otherwise the resolved config mode.
      */
     public ConventionConfig.Mode getEffectiveMode() {
         ConventionConfig.Mode override = requestOverride.get();
-        return override != null ? override : config.getMode();
+        return override != null ? override : getConfig().getMode();
     }
 
-    /**
-     * Override the active mode for the duration of the current request.
-     * The caller MUST clear the override in a finally block — see
-     * {@link #clearRequestModeOverride()} — or the override leaks to the
-     * next request handled by the same HTTP thread.
-     */
     public void setRequestModeOverride(ConventionConfig.Mode mode) {
         if (mode == null) {
             requestOverride.remove();
@@ -119,20 +113,19 @@ public final class NamingPolicy {
     }
 
     /**
-     * Try-with-resources helper for per-call strict-mode overrides.
-     *
-     * <p>Endpoints that accept a {@code strict_mode} query parameter wrap
-     * their body in {@code try (var ignored = NamingPolicy.getInstance()
-     * .scopedRequestMode(strictModeArg)) { ... }}. When {@code strictMode}
-     * is null/blank/unrecognized, the helper is a no-op and the call sees
-     * the global config. When set, the override is pinned on this thread
-     * for the duration of the try block and cleared on close — even if
-     * the body throws.
+     * Per-call strict-mode override. When {@code naming.override} is {@code deny},
+     * lowering strictness below the resolved {@code naming.mode} refuses the call.
      */
     public AutoCloseable scopedRequestMode(String strictMode) {
         ConventionConfig.Mode mode = ConventionConfig.Mode.parse(strictMode, null);
         if (mode == null) {
-            return () -> {}; // no-op
+            return () -> {};
+        }
+        ConventionConfig config = getConfig();
+        ConventionConfig.Mode baseMode = config.getMode();
+        if (rank(mode) < rank(baseMode) && namingOverrideDenies()) {
+            throw new Refusal("strict_mode=" + mode.wireName()
+                + " is below this project's naming mode (" + baseMode.wireName() + ").");
         }
         setRequestModeOverride(mode);
         return this::clearRequestModeOverride;
@@ -141,33 +134,39 @@ public final class NamingPolicy {
     /**
      * Whether write endpoints should rewrite struct field names to match the
      * built-in Hungarian-prefix convention.
-     *
-     * <p>This intentionally follows the strict naming option: users who disable
-     * the built-in convention should be able to preserve names chosen by their
-     * agent, including snake_case fields.
      */
     public boolean shouldAutoFixStructFieldPrefixes() {
-        if (!config.isStrict()) return false;
-        return config.hungarian().autoFixStructFields();
+        if (!getConfig().isStrict()) {
+            return false;
+        }
+        return getConfig().hungarian().autoFixStructFields();
     }
 
     public String getSource() {
-        return source;
+        return testOverride != null ? testSource : (settingsService != null ? "settings" : "default");
     }
 
-    /**
-     * Load {@code .ghidra-mcp/conventions.json} from {@code projectRoot} and
-     * replace the active config with the result. Falls back to defaults if
-     * the file is missing or malformed; the returned LoadResult carries any
-     * error message so the caller can surface it via Msg.warn.
-     */
-    public ConventionConfigLoader.LoadResult refreshFromProjectRoot(Path projectRoot) {
-        ConventionConfigLoader.LoadResult result =
-                ConventionConfigLoader.loadFromProjectRoot(projectRoot);
-        String src = result.resolvedFrom() != null
-                ? "project:" + result.resolvedFrom()
-                : "default";
-        setConfig(result.config(), src);
-        return result;
+    private void invalidateCache() {
+        built = new Built(-1, "", ConventionConfig.defaults());
+    }
+
+    private static String programKey(Program program) {
+        if (program == null || program.getDomainFile() == null) {
+            return "";
+        }
+        return program.getDomainFile().getPathname();
+    }
+
+    private boolean namingOverrideDenies() {
+        if (settingsService == null) {
+            return false;
+        }
+        Program program = ServiceUtils.peekResolvedProgram();
+        Object raw = settingsService.value("naming.override", program);
+        return raw instanceof String s && "deny".equalsIgnoreCase(s.trim());
+    }
+
+    private static int rank(ConventionConfig.Mode mode) {
+        return SettingKey.namingModeRank(mode.wireName());
     }
 }

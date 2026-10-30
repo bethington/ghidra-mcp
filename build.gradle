@@ -282,7 +282,7 @@ def pluginClass = 'com.xebyte.GhidraMCPPlugin'
 // rewrites FrontEndTool.xml on exit, silently discarding patchGhidraUserConfig.
 // ----------------------------------------------------------------------
 
-def mcpUrl = (System.getenv('GHIDRA_MCP_URL') ?: 'http://127.0.0.1:8089').replaceAll('/+$', '')
+def mcpUrl = (System.getenv('GHIDRA_MCP_BRIDGE_SERVER_URL') ?: 'http://127.0.0.1:8089').replaceAll('/+$', '')
 
 def httpRequest = { String path, int timeoutSec ->
     try {

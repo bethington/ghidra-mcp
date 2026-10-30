@@ -10,7 +10,7 @@ Tests for the 15 Phase 3 endpoints:
 - remove_struct_field
 - delete_data_type
 - find_data_types
-- validate_data_type
+- find_data_types (name=)
 - get_type_size
 - get_struct_layout
 - get_enum_values
@@ -371,25 +371,20 @@ class TestValidateDataType:
     def test_validate_existing_type(self, http_client):
         """Test validating an existing type."""
         response = http_client.get(
-            "/validate_data_type", params={"type_name": "int"}
+            "/find_data_types", params={"name": "int"}
         )
         assert response.status_code == 200
-        text = response.text
-        # Should return JSON with exists: true
-        assert "exists" in text.lower()
+        assert response.json()["total"] == 1
 
     @pytest.mark.requires_program
     def test_validate_nonexistent_type(self, http_client):
         """Test validating non-existent type."""
         response = http_client.get(
-            "/validate_data_type",
-            params={"type_name": f"NonExistent_{uuid.uuid4().hex[:8]}"},
+            "/find_data_types",
+            params={"name": f"NonExistent_{uuid.uuid4().hex[:8]}"},
         )
         assert response.status_code == 200
-        text = response.text
-        assert "exists" in text.lower()
-        # exists should be false
-        assert "false" in text.lower()
+        assert response.json()["total"] == 0
 
 
 class TestGetDataTypeSize:
@@ -565,11 +560,11 @@ class TestPhase3Integration:
 
         # Validate it exists (may fail if struct not created)
         response = http_client.get(
-            "/validate_data_type", params={"type_name": struct_name}
+            "/find_data_types", params={"name": struct_name}
         )
         assert response.status_code == 200
         # Skip rest of test if struct wasn't created
-        if "false" in response.text.lower():
+        if response.json().get("total") == 0:
             pytest.skip("Struct creation not working in this mode")
 
         # Get layout (optional endpoint)

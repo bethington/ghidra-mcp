@@ -24,10 +24,10 @@ def restore_bridge(monkeypatch):
         "_full_schema": [], "_dynamic_tool_names": [], "_loaded_groups": set(),
     }.items():
         monkeypatch.setattr(state, name, value)
-    monkeypatch.delenv("GHIDRA_MCP_EXPOSE", raising=False)
-    monkeypatch.delenv("GHIDRA_MCP_LAZY", raising=False)
-    monkeypatch.delenv("GHIDRA_MCP_PROJECT", raising=False)
-    monkeypatch.delenv("GHIDRA_MCP_URL", raising=False)
+    monkeypatch.delenv("GHIDRA_MCP_BRIDGE_EXPOSE", raising=False)
+    monkeypatch.delenv("GHIDRA_MCP_BRIDGE_LAZY", raising=False)
+    monkeypatch.delenv("GHIDRA_MCP_BRIDGE_PROJECT", raising=False)
+    monkeypatch.delenv("GHIDRA_MCP_BRIDGE_SERVER_URL", raising=False)
     try:
         yield
     finally:
@@ -89,15 +89,15 @@ def test_cli_default_full_and_dev_flags_are_independent(monkeypatch, catalog):
 
 
 def test_expose_environment_and_explicit_flag_precedence(monkeypatch, catalog):
-    monkeypatch.setenv("GHIDRA_MCP_EXPOSE", "facade")
+    monkeypatch.setenv("GHIDRA_MCP_BRIDGE_EXPOSE", "facade")
     run_cli(monkeypatch, catalog, "--expose", "hybrid")
     assert state._expose_mode == "hybrid"
     assert facade.FACADE_TOOL_NAMES <= set(mcp._tool_manager._tools)
 
 
 def test_expose_env_does_not_replace_lazy_env(monkeypatch, catalog):
-    monkeypatch.setenv("GHIDRA_MCP_EXPOSE", "hybrid")
-    monkeypatch.setenv("GHIDRA_MCP_LAZY", "0")
+    monkeypatch.setenv("GHIDRA_MCP_BRIDGE_EXPOSE", "hybrid")
+    monkeypatch.setenv("GHIDRA_MCP_BRIDGE_LAZY", "0")
     run_cli(monkeypatch, catalog)
     assert state._expose_mode == "hybrid"
     assert not state._lazy_mode

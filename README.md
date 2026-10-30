@@ -22,7 +22,7 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **219 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **217 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Quickstart: install a release (no clone, no build)
 
@@ -79,7 +79,7 @@ API.
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **219 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **217 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -110,7 +110,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 ### Core MCP Integration
 
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **219 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
+- **217 MCP tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -145,7 +145,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Development & Automation
 
-- **Ghidra Script Execution** — List and run Ghidra scripts, or run inline script code, via MCP (running them is opt-in: `GHIDRA_MCP_ALLOW_SCRIPTS=1`)
+- **Ghidra Script Execution** — List and run Ghidra scripts, or run inline script code, via MCP (running them is opt-in: `GHIDRA_MCP_SCRIPTS_ALLOW=1`)
 - **Multi-Program Support** — Switch between and compare multiple open programs
 - **Batch Operations** — Bulk renaming, commenting, typing, and label management (93% fewer API calls)
 - **Headless Server** — Full analysis without Ghidra GUI — Docker and CI/CD ready
@@ -412,7 +412,7 @@ MCP client config (`.mcp.json`, `~/.cursor/mcp.json`, Claude Desktop config, …
     "ghidra-mcp": {
       "command": "/home/<you>/.local/bin/uv",
       "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra", "--transport", "stdio"],
-      "env": { "GHIDRA_MCP_URL": "http://127.0.0.1:8089" }
+      "env": { "GHIDRA_MCP_BRIDGE_SERVER_URL": "http://127.0.0.1:8089" }
     }
   }
 }
@@ -465,15 +465,15 @@ Browser-based clients (e.g. [MCP Inspector](https://github.com/modelcontextproto
 work out of the box: the HTTP transports answer CORS preflight (`OPTIONS`) requests and expose
 the `mcp-session-id` / `mcp-protocol-version` headers to scripts. Allowed origins mirror the
 Host-header policy — loopback on any port is always permitted, plus the bind host and any
-hosts listed in `GHIDRA_MCP_ALLOWED_HOSTS`.
+hosts listed in `GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS`.
 
-`GHIDRA_MCP_ALLOWED_HOSTS` also supports clients that route a loopback-bound
+`GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS` also supports clients that route a loopback-bound
 bridge through another network namespace. For example, a container can address
 the host as `host.containers.internal` without exposing the bridge on a LAN
 interface:
 
 ```bash
-GHIDRA_MCP_ALLOWED_HOSTS=host.containers.internal \
+GHIDRA_MCP_BRIDGE_ALLOWED_HOSTS=host.containers.internal \
   uv run bridge-mcp-ghidra --transport streamable-http \
   --mcp-host 127.0.0.1 --mcp-port 8081
 ```
@@ -495,15 +495,15 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
 | `--mcp-port` | — | Port for HTTP transports |
 | `--lazy` | (default) | Load only the default tool groups on connect, and let the model pull in the rest with `search_tools`/`load_tool_group`. |
-| `--project` | unset | Exact project name to select at startup, including when multiple instances are running. Overrides `GHIDRA_MCP_PROJECT`. |
+| `--project` | unset | Exact project name to select at startup, including when multiple instances are running. Overrides `GHIDRA_MCP_BRIDGE_PROJECT` (`bridge.project`). |
 | `--no-lazy` | off | Load all tool groups immediately on connect. Needed only by MCP clients that ignore `tools/list_changed`; **rejected outright by the Gemini API** (see below). |
-| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect under `--lazy`. |
+| `--default-groups` | the project's `tools.autoload` | This session's `tools.autoload`: a comma-separated list replaces the project's groups, `+group`/`-group` adjusts them. |
 | `--tools-page-size` | `0` | Serve `tools/list` in pages of this size (`0` = one page). Only for a client that cannot take one large response; a client that ignores `nextCursor` sees only the first page. |
 | `--json-response` | off | streamable-http: answer POSTs with plain JSON instead of an SSE stream. Server-initiated messages such as `tools/list_changed` are then not delivered. |
 | `--stateless-http` | off | streamable-http: no session id and no server-initiated notifications, for running several bridge workers behind a load balancer. Pair it with `--no-lazy`, since a group loaded later can never be announced. |
 
 To require a token from MCP clients of an HTTP transport, set
-`GHIDRA_MCP_INBOUND_TOKEN=<secret>`; clients must then send
+`GHIDRA_MCP_BRIDGE_INBOUND_TOKEN=<secret>`; clients must then send
 `Authorization: Bearer <secret>`. The bridge logs a warning when it binds a
 non-loopback `--mcp-host` without one. Separately, when `GHIDRA_MCP_AUTH_TOKEN`
 (the token the bridge sends to Ghidra) is set and the bridge binds a
@@ -512,7 +512,7 @@ be used to relay it.
 
 #### Lazy tool loading is the default (issue #440)
 
-Advertising all 220 endpoints in a single `tools/list` is over a hard limit for
+Advertising all 218 endpoints in a single `tools/list` is over a hard limit for
 at least one major provider. Gemini compiles function declarations into a
 constrained-decoding state machine and rejects the whole request before any tool
 is ever called:
@@ -532,24 +532,45 @@ are registered later, and should turn lazy loading off:
 
 ```bash
 uv run bridge-mcp-ghidra --no-lazy          # when you control the command line
-export GHIDRA_MCP_LAZY=0                    # when you don't (Docker, uvx, some client configs)
+export GHIDRA_MCP_BRIDGE_LAZY=0                    # when you don't (Docker, uvx, some client configs)
 ```
 
-`GHIDRA_MCP_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
+`GHIDRA_MCP_BRIDGE_LAZY` accepts `0/false/no/off` and `1/true/yes/on`; an explicit
 `--lazy`/`--no-lazy` on the command line wins over it. Startup logs which mode
 is in effect.
 
+#### Which groups load: tool settings
+
+The groups a session starts with come from the connected project's settings
+(`get_settings prefix=tools`, changed with `set_setting`):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `tools.autoload` | `listing,function,program` | Groups every new session loads. `+group`/`-group` adjust the scope below; a plain list replaces it. |
+| `tools.restore_loaded` | `true` | Also load the groups the last session had loaded beyond `tools.autoload`. |
+| `tools.last_loaded` | empty | Those groups. The bridge keeps it current on this machine as groups are loaded and unloaded. |
+| `tools.require_program` | `false` | Strict program routing, below. |
+
+Set a value for everyone using the project with `set_setting(key, value,
+scope="project")`, or for this machine only with `scope="local"`. One bridge
+session can override any of them with its own environment
+(`GHIDRA_MCP_TOOLS_AUTOLOAD=+xref`, `GHIDRA_MCP_TOOLS_RESTORE_LOADED=0`, ...) or,
+for `tools.autoload`, with `--default-groups`.
+
 #### Strict program routing (multi-program safety)
 
-Set `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1` to make the bridge refuse any program-scoped
+Turn on `tools.require_program` to make the bridge refuse any program-scoped
 call that omits a program selector, returning a clear error instead of letting the call
 ride the server's shared "current program" (the one `switch_program` and the
 active GUI tab move).
 
 ```bash
-export GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1
+export GHIDRA_MCP_TOOLS_REQUIRE_PROGRAM=1    # this session only
 uv run bridge-mcp-ghidra
 ```
+
+or `set_setting(key="tools.require_program", value="true", scope="project")` for
+every session on the project.
 
 Without this, a call that leaves `program=` out runs against whichever program
 is current, which is fine for a single-program workflow but a hazard once
@@ -583,11 +604,11 @@ instead of registering everything:
 
 To select a project before the client discovers tools, use
 `bridge-mcp-ghidra --project MyProject --no-lazy`, or set
-`GHIDRA_MCP_PROJECT=MyProject` and `GHIDRA_MCP_LAZY=0` in the client's environment.
+`GHIDRA_MCP_BRIDGE_PROJECT=MyProject` and `GHIDRA_MCP_BRIDGE_LAZY=0` in the client's environment.
 Project names are matched exactly. A missing or ambiguous match leaves the bridge
 disconnected; background retries retain the selector. Blank environment values mean
 unset, and a blank `--project` is rejected. Without a selector, auto-connect behavior
-is unchanged. For TCP-only servers, `GHIDRA_MCP_URL` limits project discovery to that
+is unchanged. For TCP-only servers, `GHIDRA_MCP_BRIDGE_SERVER_URL` limits project discovery to that
 listener; otherwise the usual local TCP discovery range is searched.
 
 `search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
@@ -645,7 +666,7 @@ Every tool above is a `GET`; none of them writes to the Ghidra database.
   `listing,function,program` groups, so they are registered even under `--lazy`.
   Of the additions above, only the `xref` ones fall outside: under `--lazy` you
   must either allow `load_tool_group` as well, or start the bridge with
-  `--default-groups listing,function,program,xref`.
+  `--default-groups +xref` (or set `tools.autoload` to `+xref` for the project).
 - **A narrow allowlist plus `--lazy` needs the group tools.** If you allowlist
   only leaf tools and run lazily, the agent has no way to load anything else.
   Either run eagerly (`--no-lazy`; lazy is the default) or add `search_tools`,
@@ -664,13 +685,13 @@ default** and register only when you opt in:
 
 ```bash
 # point the bridge at your debugger server (loopback only)
-export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+export GHIDRA_MCP_BRIDGE_DEBUGGER_URL=http://127.0.0.1:8099
 
 # or force registration against the default URL (http://127.0.0.1:8099)
-export GHIDRA_DEBUGGER_TOOLS=1
+export GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1
 ```
 
-`GHIDRA_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
+`GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS` decides outright when set: `1`/`true`/`yes`/`on`
 registers the tools, anything else (`0`, `false`, ...) keeps them off even with
 a URL configured. With neither variable set the tools simply do not appear,
 rather than appearing and failing. The host platform plays no part.
@@ -679,9 +700,9 @@ Ghidra's own TraceRmi debugger endpoints (`debugger_status`, `debugger_launch`,
 ...) are separate: they live in the GUI plugin and need no extra server.
 
 Calls are only ever proxied to a loopback URL (`127.0.0.1`, `localhost` or
-`::1`), so a non-loopback `GHIDRA_DEBUGGER_URL` does not register the tools. To
+`::1`), so a non-loopback `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` does not register the tools. To
 reach a debugger server on another machine, forward its port to loopback (for
-example an SSH tunnel) and point `GHIDRA_DEBUGGER_URL` there.
+example an SSH tunnel) and point `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` there.
 
 The bridge reads these from its own process environment (the MCP client's
 `env` block, or your shell); it does not read a `.env` file.
@@ -723,13 +744,20 @@ If Ghidra MCP saves you engineering or reverse-engineering time, consider [spons
 
 GhidraMCP is designed for **localhost-only development**. The default configuration — HTTP server bound to `127.0.0.1`, no authentication — is safe on a trusted single-user workstation and matches pre-v5.4.1 behavior.
 
-**If you expose the server beyond loopback, configure these three environment variables first.** The server refuses to start on a non-loopback bind without a token.
+**If you expose the server beyond loopback, configure these environment variables first.** The server refuses to start on a non-loopback bind without a token.
 
 | Env var | Effect |
 | --- | --- |
 | `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health` and `/check_connection` are exempt. |
-| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
-| `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+| `GHIDRA_MCP_SCRIPTS_ALLOW` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. In headless mode this also triggers OSGi `BundleHost` initialization at server startup (Felix framework, ~hundreds of ms); leave it off if you don't need script execution. |
+| `GHIDRA_MCP_FILES_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+| `GHIDRA_MCP_PROJECT_FOLDER_SCOPE` | When set to a project folder (e.g. `/Mods/PD2-S12`), programs outside it are neither served nor changed, and project file operations stay inside it. |
+
+Each is the server-scope value of a setting (`auth.token`, `scripts.allow`, `files.root`,
+`project.folder_scope`); the variable for any setting is `GHIDRA_MCP_` plus its key upper-cased
+with dots as underscores. The last three are guardrails: a project's or this machine's settings
+(`set_setting`) can make them stricter, never looser, and take effect without a restart.
+`get_settings` shows the value in force and where it came from.
 
 Name-quality enforcement is separate from security. By default,
 `rename_function` and global write endpoints reject names that fail
@@ -747,8 +775,8 @@ enforcement is disabled.
 
 ```bash
 export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
-export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
-export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
+export GHIDRA_MCP_SCRIPTS_ALLOW=1     # only if your workflow needs it
+export GHIDRA_MCP_FILES_ROOT=/srv/ghidra/inputs
 
 # Headless server (`mvn clean package -P headless -DskipTests`). The jar does not
 # bundle Ghidra, so Ghidra's Framework/Features/Processors jars go on the
@@ -768,17 +796,16 @@ Compatibility note: Ghidra 12.1.4 clients require Ghidra Server 12.1.2,
 12.0.5, or a newer compatible server. Older shared servers are not safe
 targets for a 12.1 client upgrade.
 
-1. `GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
-2. `~/.ghidra-cred` — single-line password file in your home directory
-3. `<ghidra-install-dir>/.ghidra-cred`
+1. `GHIDRA_MCP_GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
+2. `ghidra-mcp-setup.ps1` can read `.ghidra-cred` and export the password into the environment
 
-Username resolves similarly: `GHIDRA_SERVER_USER` env var → `user.name` system property.
+Username resolves similarly: `GHIDRA_MCP_GHIDRA_SERVER_USER` env var → `user.name` system property.
 
 If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env` (see `.env.template` for the full block) to enable silent auth.
 
 ### Migration from v5.4.0 → v5.4.1
 
-- **Script endpoints now default-off.** If you relied on `/run_script_inline` or `/run_ghidra_script`, export `GHIDRA_MCP_ALLOW_SCRIPTS=1`. This is a deliberate breaking change; the prior default was unsafe.
+- **Script endpoints now default-off.** If you relied on `/run_script_inline` or `/run_ghidra_script`, export `GHIDRA_MCP_SCRIPTS_ALLOW=1`. This is a deliberate breaking change; the prior default was unsafe.
 - **Localhost-only deployments need no changes.** Auth, bind refusal, and path-root checks are all opt-in.
 
 ## ❓ Troubleshooting
@@ -884,18 +911,18 @@ bridge-mcp-ghidra
 ### The `debugger_*` tools do not appear
 
 **Cause:** The 22 bridge-side debugger proxies are off by default. They register
-only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`, and they
+only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`, and they
 forward to an external debugger server that is not part of this repository.
 
 **Solution:** start your debugger server, then set the URL before launching the
 bridge:
 
 ```text
-export GHIDRA_DEBUGGER_URL=http://127.0.0.1:8099
+export GHIDRA_MCP_BRIDGE_DEBUGGER_URL=http://127.0.0.1:8099
 ```
 
 If the tools appear but every call reports that the server is not running,
-the URL is wrong or the server is down. `GHIDRA_DEBUGGER_TOOLS=0` turns them off
+the URL is wrong or the server is down. `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=0` turns them off
 again even with a URL configured.
 
 ### 500 Internal Server Errors
@@ -962,7 +989,7 @@ write the path with forward slashes.
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 219 tools fully implemented (the whole catalog; the GUI plugin serves 216 of them and the headless server 201)
+- **MCP Tools**: 217 tools fully implemented (the whole catalog; the GUI plugin serves 214 of them and the headless server 199)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -973,9 +1000,9 @@ write the path with forward slashes.
 
 <!-- BEGIN GENERATED API REFERENCE (tools/gen_readme_api_reference.py) -->
 
-219 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
+217 MCP tools backed by HTTP endpoints, grouped by catalog category. Generated from [tests/endpoints.json](tests/endpoints.json) by `python -m tools.gen_readme_api_reference --write`; the live schema at `/mcp/schema` is authoritative at runtime. Usage patterns: [docs/prompts/TOOL_USAGE_GUIDE.md](docs/prompts/TOOL_USAGE_GUIDE.md).
 
-196 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (19) or **(headless only)** (4) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
+194 of these are served by both the GUI plugin and the standalone headless server. The rest are marked **(GUI only)** (19) or **(headless only)** (4) — calling one against the other server returns a 404, not an error message. See `python -m tools.audit_server_scope` for how the split is derived.
 
 ### Program & Session Management
 
@@ -992,6 +1019,7 @@ write the path with forward slashes.
 - `get_metadata` - Get program metadata
 - `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
 - `get_property` - Read the value stored at an address in a property map
+- `get_settings` - Every setting with its effective value, the scope it came from and the scopes that also hold one
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
 - `list_bookmarks` - List bookmarks
 - `list_open_programs` - List open programs
@@ -1012,6 +1040,7 @@ write the path with forward slashes.
 - `set_memory_block` - Change an existing memory block's permissions or volatility
 - `set_program_option` - Set a typed program option
 - `set_property` - Set a value at an address in a property map
+- `set_setting` - Set or unset a setting at one scope: 'project' is shared with everyone using the project (versioned with a shared one), 'local' stays on this machine, 'program' is one program's
 - `switch_program` - Switch current program
 
 ### Project Organization
@@ -1048,8 +1077,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `list_globals` - List global variables
 - `list_program_items` - List one kind of program inventory with pagination
 - `list_shadowed_globals` - List named global DATA symbols that have NO type of their own because a larger data unit starting at an earlier address covers them
-- `list_strings` - List defined strings
-- `search_strings` - Search defined strings by a regex/substring pattern
+- `list_strings` - List defined strings of at least min_length mostly printable characters, optionally narrowed by a substring (filter) and/or a case-insensitive regex (pattern)
 - `set_equate` - Apply, remove or rename equates
 
 ### Current GUI Context
@@ -1067,7 +1095,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `delete_function_tag` - Delete a program-wide function tag definition
 - `disassemble_bytes` - Disassemble byte range
 - `disassemble_function` - Disassemble function
-- `force_decompile` - Force fresh decompilation (output stamped with language_id + variant; optional variant= is checked against the loaded one)
 - `get_functions` - Everything about one or many functions in a single call
 - `list_class_members` - List the member functions of a C++ class
 - `list_function_tags` - List all program-wide function tag definitions with their use counts
@@ -1133,8 +1160,6 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `resolve_duplicate_type` - Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists
 - `set_global` - Atomically apply name + type + plate-comment + array length to a global variable
 - `suggest_field_names` - Suggest field names
-- `validate_data_type` - Validate data type syntax
-- `validate_function_prototype` - Validate function prototype
 
 ### Comments
 
@@ -1225,7 +1250,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 ### Debugger (Ghidra TraceRmi)
 
-When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_URL` or `GHIDRA_DEBUGGER_TOOLS=1`), a TraceRmi tool below that shares a proxy's name gets a `_2` suffix (e.g. `debugger_status_2`), so both stay reachable.
+When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_MCP_BRIDGE_DEBUGGER_URL` or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`), a TraceRmi tool below that shares a proxy's name gets a `_2` suffix (e.g. `debugger_status_2`), so both stay reachable.
 
 - `debugger_dynamic_to_static` - Translate a runtime dynamic address from the current trace back to a static Ghidra program address **(GUI only)**
 - `debugger_interrupt` - Interrupt (break into) the running target **(GUI only)**
@@ -1259,7 +1284,7 @@ When the bridge's opt-in WinDbg debugger proxies are enabled (`GHIDRA_DEBUGGER_U
 
 ### Bridge Static Tools
 
-Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_DEBUGGER_URL` is set or `GHIDRA_DEBUGGER_TOOLS=1`.
+Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge can also proxy 22 `debugger_*` WinDbg tools to an external debugger server; they are off by default and register only when `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` is set or `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`.
 
 - `check_tools` - Report which tools are currently registered and callable
 - `connect_instance` - Connect the bridge to a specific Ghidra instance
@@ -1289,12 +1314,12 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (220 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (216 endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 201 endpoints, no GUI required
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (220 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (216 endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 201 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (218 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (214 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 199 endpoints, no GUI required
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (218 catalog entries)
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (214 endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 199 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -1374,16 +1399,16 @@ python -m tools.setup --help
 ```text
 ghidra-mcp/
 ├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 220 catalog entries)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 218 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (216 endpoints)
-│       ├── headless/                    # Headless server (201 endpoints)
-├── python/bridge_mcp_ghidra/ # MCP server package (Python, 220 catalog entries)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (214 endpoints)
+│       ├── headless/                    # Headless server (199 endpoints)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 218 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (216 endpoints)
-│       ├── headless/                    # Headless server (201 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (214 endpoints)
+│       ├── headless/                    # Headless server (199 endpoints)
 │       └── core/                        # Shared service layer (`*Service.java`, `@McpTool`-annotated)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
@@ -1561,7 +1586,7 @@ Environment variables for Docker:
 
 - `GHIDRA_MCP_AUTH_TOKEN` - Bearer token, **required** by the compose files (see above)
 - `GHIDRA_MCP_PORT` - Server port (default: 8089)
-- `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
+- `GHIDRA_MCP_SERVER_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
 - `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
 
 ## 🤝 Contributing
@@ -1587,9 +1612,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 | Metric | Value |
 | -------- | ------- |
 | **Version** | 7.0.0 |
-| **MCP Tools** | 220 catalog entries (219 agent-visible tools) |
-| **GUI Endpoints** | 216 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 201 (GhidraMCPHeadlessServer) |
+| **MCP Tools** | 218 catalog entries (217 agent-visible tools) |
+| **GUI Endpoints** | 214 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 199 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |

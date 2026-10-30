@@ -1,6 +1,8 @@
 package com.xebyte.core.tree;
 
 import com.xebyte.core.JsonHelper;
+import com.xebyte.core.settings.SettingKey;
+import com.xebyte.core.settings.SettingsRegistry;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -45,14 +47,10 @@ public record TreeConfig(
         int maxFileBytes,
         boolean disassembleMissing) {
 
-    public static final int DEFAULT_BAND_SIZE = 20;
-    public static final int DEFAULT_THROTTLE_PERCENT = 10;
-    public static final int DEFAULT_DECOMPILE_TIMEOUT_SECONDS = 30;
-    public static final int DEFAULT_ANALYSIS_WAIT_SECONDS = 600;
-    /** ~8K tokens — one comfortable agent Read. */
-    public static final int DEFAULT_MAX_FILE_BYTES = 32768;
     /** Floor so a typo cannot recreate the 1.9 MB compartment-file bug. */
     public static final int MIN_MAX_FILE_BYTES = 4096;
+
+    private static final SettingsRegistry REG = SettingsRegistry.DEFAULT;
 
     public TreeConfig {
         enabledStrategies = enabledStrategies == null
@@ -63,10 +61,10 @@ public record TreeConfig(
         bandSize = Math.max(1, bandSize);
         throttlePercent = Math.clamp(throttlePercent, 0, 90);
         if (decompileTimeoutSeconds < 1) {
-            decompileTimeoutSeconds = DEFAULT_DECOMPILE_TIMEOUT_SECONDS;
+            decompileTimeoutSeconds = registryInt("tree.decompile_timeout_seconds");
         }
         if (analysisWaitSeconds < 1) {
-            analysisWaitSeconds = DEFAULT_ANALYSIS_WAIT_SECONDS;
+            analysisWaitSeconds = registryInt("tree.analysis_wait_seconds");
         }
         if (maxFileBytes < MIN_MAX_FILE_BYTES) {
             maxFileBytes = MIN_MAX_FILE_BYTES;
@@ -76,19 +74,19 @@ public record TreeConfig(
         }
     }
 
-    /** Defaults: full cascade, no exclusions, band 20, throttle 10%, 32 KiB files. */
+    /** Placeholder config matching registry defaults (not program-scoped overrides). */
     public static TreeConfig defaults() {
         return new TreeConfig(
                 null,
                 List.of(),
-                DEFAULT_BAND_SIZE,
+                registryInt("tree.band_size"),
                 List.of(),
                 List.of(),
-                DEFAULT_THROTTLE_PERCENT,
-                DEFAULT_DECOMPILE_TIMEOUT_SECONDS,
-                DEFAULT_ANALYSIS_WAIT_SECONDS,
-                DEFAULT_MAX_FILE_BYTES,
-                false);
+                registryInt("tree.throttle_percent"),
+                registryInt("tree.decompile_timeout_seconds"),
+                registryInt("tree.analysis_wait_seconds"),
+                registryInt("tree.max_file_bytes"),
+                registryBool("tree.disassemble_missing"));
     }
 
     public static Builder builder() {
@@ -154,13 +152,13 @@ public record TreeConfig(
             }
             b.enabledStrategies(names);
         }
-        b.bandSize(JsonHelper.getInt(disk.get("band_size"), DEFAULT_BAND_SIZE));
-        b.maxFileBytes(JsonHelper.getInt(disk.get("max_file_bytes"), DEFAULT_MAX_FILE_BYTES));
-        b.throttlePercent(JsonHelper.getInt(disk.get("throttle_percent"), DEFAULT_THROTTLE_PERCENT));
+        b.bandSize(JsonHelper.getInt(disk.get("band_size"), registryInt("tree.band_size")));
+        b.maxFileBytes(JsonHelper.getInt(disk.get("max_file_bytes"), registryInt("tree.max_file_bytes")));
+        b.throttlePercent(JsonHelper.getInt(disk.get("throttle_percent"), registryInt("tree.throttle_percent")));
         b.decompileTimeoutSeconds(JsonHelper.getInt(
-                disk.get("decompile_timeout_seconds"), DEFAULT_DECOMPILE_TIMEOUT_SECONDS));
+                disk.get("decompile_timeout_seconds"), registryInt("tree.decompile_timeout_seconds")));
         b.analysisWaitSeconds(JsonHelper.getInt(
-                disk.get("analysis_wait_seconds"), DEFAULT_ANALYSIS_WAIT_SECONDS));
+                disk.get("analysis_wait_seconds"), registryInt("tree.analysis_wait_seconds")));
         Object dm = disk.get("disassemble_missing");
         if (dm instanceof Boolean bool) {
             b.disassembleMissing(bool);
@@ -203,17 +201,27 @@ public record TreeConfig(
         return out;
     }
 
+    static int registryInt(String key) {
+        SettingKey k = REG.get(key);
+        return ((Number) k.parse(k.defaultRaw())).intValue();
+    }
+
+    static boolean registryBool(String key) {
+        SettingKey k = REG.get(key);
+        return (Boolean) k.parse(k.defaultRaw());
+    }
+
     public static final class Builder {
         private String rootPath;
         private List<String> enabledStrategies = List.of();
-        private int bandSize = DEFAULT_BAND_SIZE;
+        private int bandSize = registryInt("tree.band_size");
         private List<ExclusionRule> exclusions = List.of();
         private List<ExclusionRule> includeOnly = List.of();
-        private int throttlePercent = DEFAULT_THROTTLE_PERCENT;
-        private int decompileTimeoutSeconds = DEFAULT_DECOMPILE_TIMEOUT_SECONDS;
-        private int analysisWaitSeconds = DEFAULT_ANALYSIS_WAIT_SECONDS;
-        private int maxFileBytes = DEFAULT_MAX_FILE_BYTES;
-        private boolean disassembleMissing = false;
+        private int throttlePercent = registryInt("tree.throttle_percent");
+        private int decompileTimeoutSeconds = registryInt("tree.decompile_timeout_seconds");
+        private int analysisWaitSeconds = registryInt("tree.analysis_wait_seconds");
+        private int maxFileBytes = registryInt("tree.max_file_bytes");
+        private boolean disassembleMissing = registryBool("tree.disassemble_missing");
 
         public Builder rootPath(String rootPath) {
             this.rootPath = rootPath;

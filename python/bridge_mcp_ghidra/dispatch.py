@@ -239,7 +239,7 @@ def _try_reconnect(
         return candidate
 
     try:
-        schema = registry._fetch_schema(connection=candidate)
+        schema, groups = registry.fetch_for_connect(candidate)
     except Exception as e:
         logger.warning(
             "Reconnect schema fetch failed for project '%s': %s",
@@ -256,7 +256,7 @@ def _try_reconnect(
             # load_tool_group()-ed tool into "Unknown tool" in the middle of a task.
             registry.register_tools_from_schema(
                 schema,
-                groups=None if not state._lazy_mode else state._default_groups | state._loaded_groups,
+                groups=None if groups is None else groups | state._loaded_groups,
             )
             state.notify_tools_changed_from_worker()
             target = promoted.active_socket or promoted.active_tcp

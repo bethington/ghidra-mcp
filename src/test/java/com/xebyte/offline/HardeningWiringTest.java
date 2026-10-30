@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * place. These are deliberately grep-style static checks (same rationale as
  * {@link RunGhidraScriptProgramPropagationTest}): the behaviors depend on a
  * live HTTP server, a browser, a Unix domain socket, or a configured
- * {@code GHIDRA_MCP_PROJECT_FOLDER} — none of which stand up cheaply in CI —
+ * {@code project.folder_scope} — none of which stand up cheaply in CI —
  * but a wiring regression (someone deleting a guard during a refactor) is
  * exactly the failure mode that a cheap source assertion catches.
  *
@@ -69,7 +69,7 @@ public class HardeningWiringTest extends TestCase {
      * The script-execution gate must live on the sink (the 3-arg
      * runGhidraScript), not only on the callers, so no route can bypass it.
      *
-     * <p>Behavioural check: with {@code GHIDRA_MCP_ALLOW_SCRIPTS} unset the
+     * <p>Behavioural check: with {@code scripts.allow} unset the
      * sink must refuse, and it must refuse <em>before</em> resolving the
      * program — which is why a deliberately nonexistent program name is
      * passed. If the gate ever moved after program resolution, the stub
@@ -80,7 +80,7 @@ public class HardeningWiringTest extends TestCase {
      */
     public void testRunGhidraScriptSinkRefusesBeforeResolvingProgram() {
         if (SecurityConfig.getInstance().areScriptsAllowed()) {
-            // GHIDRA_MCP_ALLOW_SCRIPTS is set in this environment, so the gate
+            // scripts.allow is set in this environment, so the gate
             // is deliberately open and its refusal cannot be observed. The
             // source-level ordering check below still runs.
             return;
@@ -95,14 +95,16 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("The 3-arg/4-arg runGhidraScript sink must refuse with the "
                         + "script-execution gate message before it resolves the "
                         + "requested program — got: " + msg,
-                msg.contains("Script execution disabled"));
+                msg.contains("Script execution is off"));
+        assertFalse("a refusal names the guardrail, never its override: " + msg,
+                msg.contains("GHIDRA_MCP"));
     }
 
     /**
      * Source backstop for the same property: the {@code areScriptsAllowed()}
      * gate must textually precede program resolution inside the sink. Kept
      * because the behavioural test above cannot observe the gate when a
-     * developer has {@code GHIDRA_MCP_ALLOW_SCRIPTS} set.
+     * developer has {@code scripts.allow} set.
      */
     public void testRunGhidraScriptSinkIsGated() throws IOException {
         String src = read("core", "ProgramScriptService.java");
@@ -149,7 +151,7 @@ public class HardeningWiringTest extends TestCase {
                         .contains("Internal server error. See the Ghidra application log"));
     }
 
-    /** Headless filesystem endpoints must honor GHIDRA_MCP_FILE_ROOT. */
+    /** Headless filesystem endpoints must honor files.root. */
     public void testHeadlessFsEndpointsEnforceFileRoot() throws IOException {
         String src = read("headless", "HeadlessManagementService.java");
         // create_project, export_program, import_program, archive_project all

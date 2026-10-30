@@ -68,7 +68,7 @@ USAGE
     python tools/upgrade_project_language.py --apply --folder /MyProduct/v1.0
 
 Password comes from the environment (never argv, which is world-readable):
-``GHIDRA_SERVER_PASSWORD`` then ``GHIDRA_PASS``. On Windows the user-scope
+``GHIDRA_MCP_GHIDRA_SERVER_PASSWORD`` then ``GHIDRA_PASS``. On Windows the user-scope
 registry value is consulted too, so a variable set after this shell started is
 still visible.
 """
@@ -211,7 +211,7 @@ def checkout_census(base: str) -> dict[str, dict]:
 # --------------------------------------------------------------------------- #
 
 
-CRED_NAMES = ("GHIDRA_SERVER_PASSWORD", "GHIDRA_PASS")
+CRED_NAMES = ("GHIDRA_MCP_GHIDRA_SERVER_PASSWORD", "GHIDRA_PASS")
 
 
 def read_dotenv(path: Path) -> dict[str, str]:
@@ -251,7 +251,7 @@ def credential_sources(ghidra_dir: Path) -> list[tuple[str, dict[str, str]]]:
 
             reg: dict[str, str] = {}
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-                for name in CRED_NAMES + ("GHIDRA_SERVER_USER",):
+                for name in CRED_NAMES + ("GHIDRA_MCP_GHIDRA_SERVER_USER",):
                     try:
                         value, _ = winreg.QueryValueEx(key, name)
                     except FileNotFoundError:
@@ -270,7 +270,7 @@ def resolve_password(ghidra_dir: Path) -> tuple[str | None, str]:
 
     Name outranks source, deliberately. ``GHIDRA_PASS`` is a general-purpose
     variable that exists in this environment holding a credential the *Ghidra
-    Server* rejects; ``GHIDRA_SERVER_PASSWORD`` is the specific one. Iterating
+    Server* rejects; ``GHIDRA_MCP_GHIDRA_SERVER_PASSWORD`` is the specific one. Iterating
     sources first would let the ambient wrong value beat the correct value in
     ``.env`` and present as an auth failure with no obvious cause.
     """
@@ -313,7 +313,7 @@ def resolve_server_and_repo(
 
     if not server:
         env = read_dotenv(ghidra_dir / ".env")
-        host, port = env.get("GHIDRA_SERVER_HOST"), env.get("GHIDRA_SERVER_PORT")
+        host, port = env.get("GHIDRA_MCP_GHIDRA_SERVER_HOST"), env.get("GHIDRA_MCP_GHIDRA_SERVER_PORT")
         if host and port:
             server = f"{host}:{port}"
             sources.append(f"{ghidra_dir / '.env'}")
@@ -324,7 +324,7 @@ def resolve_server_and_repo(
 def resolve_user(ghidra_dir: Path) -> str:
     """Name outranks source, for the same reason as resolve_password."""
     sources = credential_sources(ghidra_dir)
-    for name in ("GHIDRA_SERVER_USER", "GHIDRA_USER"):
+    for name in ("GHIDRA_MCP_GHIDRA_SERVER_USER", "GHIDRA_USER"):
         for _label, mapping in sources:
             value = mapping.get(name)
             if value:
@@ -892,7 +892,7 @@ def main() -> int:
     password, source = resolve_password(ghidra_dir)
     if not password:
         print(
-            "\nERROR: no server password. Set GHIDRA_SERVER_PASSWORD in the "
+            "\nERROR: no server password. Set GHIDRA_MCP_GHIDRA_SERVER_PASSWORD in the "
             f"environment or in {ghidra_dir / '.env'}.",
             file=sys.stderr,
         )

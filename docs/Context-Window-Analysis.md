@@ -6,7 +6,7 @@
 
 > **This is a dated measurement, not a live figure.** Every count and token
 > total below was measured against the 251-endpoint catalog this document was
-> generated from. The catalog stands at **220** today — see
+> generated from. The catalog stands at **218** today — see
 > [`tests/endpoints.json`](../tests/endpoints.json), which is authoritative.
 > The figures here have deliberately not been re-labelled: the token totals
 > were measured against that catalog, and re-running the measurement is what
@@ -145,7 +145,7 @@ The concern is **NOT** about token count. It's about **tool discoverability**:
 
 ### What ghidra-mcp Already Has
 
-- ✓ Tool groups (`GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`)
+- ✓ Tool groups (`tools.autoload`, `load_tool_group`)
 - ✓ Category filtering (20 categories)
 - ✓ Dynamic registration (headless vs. GUI)
 - ✓ Parameter aliases (Issue #210, improves prompt quality)

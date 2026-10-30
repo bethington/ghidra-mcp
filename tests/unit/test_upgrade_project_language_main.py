@@ -93,7 +93,7 @@ def env(tmp_path, monkeypatch):
                         lambda *a, **k: ("ghidra-host:13100", "diablo2", "test"))
     monkeypatch.setattr(upl, "walk_project", lambda base, root="/": list(CORPUS))
     monkeypatch.setattr(upl, "checkout_census", lambda base: {})
-    monkeypatch.setattr(upl, "resolve_password", lambda d: ("pw", "test:GHIDRA_SERVER_PASSWORD"))
+    monkeypatch.setattr(upl, "resolve_password", lambda d: ("pw", "test:GHIDRA_MCP_GHIDRA_SERVER_PASSWORD"))
     monkeypatch.setattr(upl, "resolve_user", lambda d: "benam")
     return {"ghidra": ghidra, "cwd": tmp_path}
 
@@ -409,7 +409,7 @@ def test_missing_credentials_refuse_the_apply_and_name_the_env_file(env, monkeyp
     assert _main(monkeypatch, "--apply") == 2
     err = capsys.readouterr().err
     assert "no server password" in err
-    assert "GHIDRA_SERVER_PASSWORD" in err
+    assert "GHIDRA_MCP_GHIDRA_SERVER_PASSWORD" in err
     assert ".env" in err
 
 
@@ -1365,7 +1365,7 @@ def test_an_unreadable_registry_is_not_fatal(tmp_path, monkeypatch):
 
 def test_registry_values_are_offered_as_a_credential_source(tmp_path, monkeypatch):
     monkeypatch.setattr(upl.sys, "platform", "win32")
-    stored = {"GHIDRA_SERVER_PASSWORD": "from-registry"}
+    stored = {"GHIDRA_MCP_GHIDRA_SERVER_PASSWORD": "from-registry"}
 
     class _Key:
         def __enter__(self):
@@ -1388,7 +1388,7 @@ def test_registry_values_are_offered_as_a_credential_source(tmp_path, monkeypatc
 
     sources = dict(upl.credential_sources(tmp_path))
 
-    assert sources[REGISTRY_LABEL] == {"GHIDRA_SERVER_PASSWORD": "from-registry"}
+    assert sources[REGISTRY_LABEL] == {"GHIDRA_MCP_GHIDRA_SERVER_PASSWORD": "from-registry"}
 
 
 def test_no_password_anywhere_returns_unset_rather_than_an_empty_string(tmp_path, monkeypatch):
@@ -1430,7 +1430,7 @@ def test_the_repo_alone_can_come_from_the_live_instance(tmp_path, monkeypatch):
 
 def test_the_server_falls_back_to_the_dotenv_host_and_port(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(
-        "GHIDRA_SERVER_HOST=ghidra-host\nGHIDRA_SERVER_PORT=13100\n", encoding="utf-8")
+        "GHIDRA_MCP_GHIDRA_SERVER_HOST=ghidra-host\nGHIDRA_MCP_GHIDRA_SERVER_PORT=13100\n", encoding="utf-8")
     monkeypatch.setattr(upl, "mcp_get", lambda *a, **k: {"server_repo": "diablo2"})
 
     server, repo, origin = upl.resolve_server_and_repo("http://h", tmp_path, None, None)

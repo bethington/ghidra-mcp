@@ -7,8 +7,8 @@
 > **Status note, 2026-10-07.** The standalone Python debugger server moved to
 > the `d2-game-exe` repository on 2026-08-11. This repository keeps the bridge's
 > 22 proxy tools (`python/bridge_mcp_ghidra/debugger.py`), which forward to
-> `GHIDRA_DEBUGGER_URL` and register by default on Windows (elsewhere only with
-> `GHIDRA_DEBUGGER_TOOLS=1`), plus the GUI-only Java `DebuggerService`
+> `GHIDRA_MCP_BRIDGE_DEBUGGER_URL` and register by default on Windows (elsewhere only with
+> `GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS=1`), plus the GUI-only Java `DebuggerService`
 > (`/debugger/*`, Trace RMI).
 
 ## Summary

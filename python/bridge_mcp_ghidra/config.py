@@ -1,10 +1,11 @@
 """Configuration constants, timeouts, environment, and logging for the bridge."""
 
 import logging
-import os
 from typing import Literal
 
 from mcp.types import ToolAnnotations
+
+from .keys import value as setting_value
 
 # ==========================================================================
 # MCP tool annotations
@@ -65,37 +66,34 @@ REQUEST_TIMEOUT_GRACE_SECONDS = 15
 # receive and forward Ghidra's final status instead of closing first.
 MAX_REQUEST_TIMEOUT_SECONDS = 1815
 
-try:
-    MAX_CONCURRENT_GHIDRA_REQUESTS = max(1, int(os.getenv("GHIDRA_MCP_MAX_CONCURRENT_REQUESTS", "4")))
-except ValueError:
-    MAX_CONCURRENT_GHIDRA_REQUESTS = 4
+MAX_CONCURRENT_GHIDRA_REQUESTS = setting_value("bridge.max_concurrent_requests")
 
 DEFAULT_TCP_URL = "http://127.0.0.1:8089"
 DEFAULT_TCP_PORT = 8089
 # When set, forwarded to the Ghidra server as `Authorization: Bearer <token>`.
 # Same env var the plugin/headless server enforces (v5.4.1+); unset = no header.
-AUTH_TOKEN = (os.getenv("GHIDRA_MCP_AUTH_TOKEN") or "").strip()
+AUTH_TOKEN = setting_value("auth.token")
 # Bridge-side TCP port scan range. Mirrors the plugin's
 # TCP_PORT_FALLBACK_RANGE so a TCP-only multi-instance setup (e.g. Windows
 # 10 pre-1803 where AF_UNIX is unavailable) can still be discovered without
-# having to set GHIDRA_MCP_URL per instance. See issue #175 + Copilot review.
+# having to set GHIDRA_MCP_BRIDGE_SERVER_URL per instance. See issue #175 + Copilot review.
 TCP_PORT_SCAN_RANGE = 16
 
 # Debugger proxy target: an external dbgeng (WinDbg engine) debugger server,
 # not part of this repo. DEBUGGER_URL_EXPLICIT records whether the operator
-# actually set GHIDRA_DEBUGGER_URL: the 22 debugger proxy tools are off by
-# default and only register when it is set (or GHIDRA_DEBUGGER_TOOLS is truthy).
+# actually set GHIDRA_MCP_BRIDGE_DEBUGGER_URL: the 22 debugger proxy tools are off by
+# default and only register when it is set (or GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS is truthy).
 # The fallback URL below is a default port, not evidence that a server exists.
 # A blank value counts as unset.
-_DEBUGGER_URL_ENV = (os.getenv("GHIDRA_DEBUGGER_URL") or "").strip()
-DEBUGGER_URL_EXPLICIT = bool(_DEBUGGER_URL_ENV)
-DEBUGGER_URL = _DEBUGGER_URL_ENV or "http://127.0.0.1:8099"
+_DEBUGGER_URL_SETTING = setting_value("bridge.debugger_url")
+DEBUGGER_URL_EXPLICIT = bool(_DEBUGGER_URL_SETTING)
+DEBUGGER_URL = _DEBUGGER_URL_SETTING or "http://127.0.0.1:8099"
 
 # ==========================================================================
 # Logging
 # ==========================================================================
 
-LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
+LOG_LEVEL = setting_value("bridge.log_level")
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -119,7 +117,7 @@ MANAGEMENT_TOOL_NAMES = {
 
 # WinDbg debugger proxy tools. They forward to an external dbgeng debugger
 # server (not part of this repo) and are OFF BY DEFAULT: registered only when
-# GHIDRA_DEBUGGER_URL is set or GHIDRA_DEBUGGER_TOOLS is truthy; see
+# GHIDRA_MCP_BRIDGE_DEBUGGER_URL is set or GHIDRA_MCP_BRIDGE_DEBUGGER_TOOLS is truthy; see
 # debugger._debugger_enabled(). The names are always listed in
 # _ALL_STATIC_TOOL_NAMES (validated at import, counted by the catalog tests);
 # collision handling uses the ACTIVE set (STATIC_TOOL_NAMES): while the proxies
