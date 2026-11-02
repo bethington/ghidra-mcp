@@ -1779,7 +1779,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             }
             return null;
         }
-        return "Variable '" + name + " was not recovered after the write; "
+        return "Variable '" + name + "' was not recovered after the write; "
             + "its SSA scope may have split or changed. Re-read the function's variables.";
     }
 

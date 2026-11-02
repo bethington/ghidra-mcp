@@ -45,6 +45,9 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         // this, their IDs all alias BAD_DATATYPE_ID and HighFunction's decoded
         // types are bogus even when the native C text is correct.
         ClassSearcher.search(TaskMonitor.DUMMY);
+        assertTrue("native fixtures require discovered builtin types",
+            ClassSearcher.getClasses(ghidra.program.model.data.BuiltInDataType.class)
+                .contains(IntegerDataType.class));
     }
 
     @Before public void setUp() throws Exception {
