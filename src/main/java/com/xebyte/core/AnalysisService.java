@@ -2341,6 +2341,7 @@ public class AnalysisService {
                     int missingPlateCount = 0;
                     for (Address gAddr : globalAddrs) {
                         Map<String, Object> audit = DataTypeService.auditGlobalAt(scoringProgram, gAddr);
+                        if (Boolean.FALSE.equals(audit.get("applicable"))) continue;
                         @SuppressWarnings("unchecked")
                         List<String> issues = (List<String>) audit.get("issues");
                         if (issues == null) continue;

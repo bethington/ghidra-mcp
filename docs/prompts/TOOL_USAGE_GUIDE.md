@@ -874,6 +874,25 @@ java -cp "GhidraMCP.jar:$GHIDRA_CLASSPATH" com.xebyte.headless.GhidraMCPHeadless
 
 ---
 
+## Global audit applicability
+
+`audit_global` includes `provenance` with symbol sources, namespaces, memory-block
+properties, defined storage and outgoing bindings. An imported identity in an
+uninitialized, unmapped reserved `EXTERNAL` block with no defined data or code is
+reported as `applicable:false`, `reason:external_linkage_placeholder`. Its
+completeness score is null, rather than a perfect score. Do not create application
+data at such an address to satisfy storage checks.
+
+Imported names are preserved independently of storage applicability. Real GOT
+cells, BSS, initialized or mapped blocks and defined data still need types and
+comments. A dynamic `PTR_` label does not prove imported identity merely because
+it points to an import. Analysis names require a retained imported alias before
+receiving this name protection; a namespace alone is insufficient.
+
+`audit_globals_in_function` reports `not_applicable` and
+`not_applicable_reasons` separately. Its `with_issues` count follows blocking
+incompleteness; soft findings remain visible in `issue_histogram`.
+
 ## Two Documentation Metrics: Hygiene vs Truth
 
 `analyze_function_completeness` is a **hygiene** score: it verifies documentation is *present and well-formed* (name quality, plate sections, typed params). It is computed entirely from the documentation, so it cannot detect a claim that is confidently wrong — a plate describing an algorithm the code does not implement still scores 100.
