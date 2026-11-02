@@ -8,6 +8,15 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: explicit bridge backend selection (#640)
+
+- Honor a nonblank `GHIDRA_MCP_URL` before instance discovery and keep startup
+  retries and request reconnection pinned to that listener. When a startup project
+  is also specified, verify it at the configured URL.
+- Keep retrying when schema registration produces no usable tools, preserving
+  facade mode's cache-only connections. Failed attachment restores the prior
+  catalog, and a late retry cannot overwrite a completed manual connection.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only

@@ -586,9 +586,14 @@ To select a project before the client discovers tools, use
 `GHIDRA_MCP_PROJECT=MyProject` and `GHIDRA_MCP_LAZY=0` in the client's environment.
 Project names are matched exactly. A missing or ambiguous match leaves the bridge
 disconnected; background retries retain the selector. Blank environment values mean
-unset, and a blank `--project` is rejected. Without a selector, auto-connect behavior
-is unchanged. For TCP-only servers, `GHIDRA_MCP_URL` limits project discovery to that
-listener; otherwise the usual local TCP discovery range is searched.
+unset, and a blank `--project` is rejected. Without a selector, startup
+uses discovery. A nonblank `GHIDRA_MCP_URL` instead selects that exact local TCP
+listener before UDS or TCP discovery. An invalid or unavailable configured URL
+leaves the bridge disconnected, with background retries targeting the same URL.
+When combined with `--project`, the configured listener must report that exact
+project name; neither discovery nor request reconnection selects another listener.
+Blank URL values count as unset. `connect_instance()` remains available for an
+explicit manual switch.
 
 `search_tools` works in both lazy and `--no-lazy` modes, so agents that honor
 `tools/list_changed` get full discovery without the upfront context cost.
