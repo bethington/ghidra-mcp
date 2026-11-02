@@ -1324,6 +1324,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                     + "Resolve to a concrete type: byte, ushort, int, uint, void *, etc.");
         }
 
+        boolean ambient = program != null && program.getCurrentTransactionInfo() != null;
         try {
             String text = threadingStrategy.executeWrite(program, "Set variable type", () -> {
                     DecompileResults results = decompileFunction(func, program);
@@ -1410,6 +1411,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                     throw new Refusal(unresolved.toString());
                 }
 
+                dataType = dataType.clone(dtm);
+                String requestError = validateVariableTypeRequest(newType, dataType);
+                if (requestError != null) throw new Refusal(requestError);
+
                 // Apply the type change in a transaction
                 StringBuilder errorDetails = new StringBuilder();
                 if (updateVariableType(program, symbol, dataType, errorDetails)) {
@@ -1444,7 +1449,9 @@ Map<String, Object> out = new LinkedHashMap<>();
             });
             return Response.success(text);
         } catch (Refusal r) {
-            return Response.err(r.getMessage());
+            return Response.err(r.getMessage() + (ambient
+                ? " The surrounding transaction owns any partial changes; they were not rolled back here."
+                : ""));
         } catch (Exception e) {
             Msg.error(this, "Set variable type failed", e);
             return ServiceUtils.fail("Write", e);
@@ -1717,6 +1724,107 @@ Map<String, Object> out = new LinkedHashMap<>();
         return null;
     }
 
+    /** A decompiler's pseudo-type must not silently bind to an unrelated Code enum. */
+    static String validateVariableTypeRequest(String requested, DataType resolved) {
+        if (requested != null && requested.replaceAll("\\s+", "").equals("code*")) {
+            DataType base = resolved instanceof Pointer p ? p.getDataType() : resolved;
+            if (!(base instanceof ghidra.program.model.data.FunctionDefinition)) {
+                return "The ambiguous type 'code *' resolved to " + resolved.getPathName()
+                    + ", not a function pointer. Use an explicit function-definition type "
+                    + "or void * for an opaque address.";
+            }
+        }
+        return null;
+    }
+
+    /** Verify the view the caller will actually read, rather than just a DB setter's return. */
+    static String verifyVariableUpdate(HighFunction fresh, String name, DataType expectedType) {
+        return verifyVariableUpdate(fresh, name, expectedType,
+            HighFunctionDBUtil::getFunctionVariable);
+    }
+
+    /** The lookup uses the fresh symbol's storage and first-use PC, never its name alone. */
+    static String verifyVariableUpdate(HighFunction fresh, String name, DataType expectedType,
+            java.util.function.Function<HighSymbol, Variable> persistedVariable) {
+        if (fresh == null) return "Fresh decompilation has no HighFunction";
+        Iterator<HighSymbol> symbols = fresh.getLocalSymbolMap().getSymbols();
+        while (symbols.hasNext()) {
+            HighSymbol symbol = symbols.next();
+            if (!symbol.getName().equals(name)) continue;
+            if (expectedType == null) return null;
+
+            // Inferred HighSymbol types can already look correct while a stale,
+            // name-only HASH record is still undefined. Verify the annotation
+            // actually attached to this symbol before accepting any rendering.
+            Variable stored;
+            try {
+                stored = persistedVariable.apply(symbol);
+            } catch (Exception e) {
+                return "Could not verify persisted annotation for '" + name + "': " + e.getMessage();
+            }
+            if (stored == null) {
+                return "No persisted DB variable is attached to fresh symbol '" + name
+                    + "' by storage and first-use PC";
+            }
+            if (!variableTypesMatch(expectedType, stored.getDataType())) {
+                return "Persisted DB type mismatch for '" + name + "': requested "
+                    + expectedType.getPathName() + ", stored " + stored.getDataType().getPathName();
+            }
+            if (!variableTypesMatch(expectedType, symbol.getDataType())
+                    && !canonicalLp64IntegerTypesMatch(expectedType, symbol.getDataType())) {
+                return "Type write did not survive fresh decompilation for '" + name
+                    + "': requested " + expectedType.getPathName() + ", read "
+                    + symbol.getDataType().getPathName()
+                    + ". A dynamic/SSA annotation may not have attached to the recovered variable.";
+            }
+            return null;
+        }
+        return "Variable '" + name + " was not recovered after the write; "
+            + "its SSA scope may have split or changed. Re-read the function's variables.";
+    }
+
+    /** Ghidra represents an opaque void pointer as undefined*, never as a scalar undefined. */
+    static boolean variableTypesMatch(DataType expected, DataType actual) {
+        if (expected.isEquivalent(actual)) return true;
+        if (expected instanceof Pointer requested && actual instanceof Pointer recovered
+                && expected.getLength() == actual.getLength()) {
+            DataType target = requested.getDataType();
+            return (target == null || target instanceof ghidra.program.model.data.VoidDataType)
+                && ghidra.program.model.data.Undefined.isUndefined(recovered.getDataType());
+        }
+        return false;
+    }
+
+    /**
+     * Ghidra's anonymous 8-byte integer decoder chooses LP64 long before
+     * same-width long long. This is only a fresh-view normalization; the
+     * persisted DB annotation must still match exactly above. Named aliases,
+     * enums, pointers, characters and differing widths/signedness stay strict.
+     */
+    static boolean canonicalLp64IntegerTypesMatch(DataType expected, DataType actual) {
+        if (expected.getLength() != 8 || actual.getLength() != 8
+                || !ghidra.program.model.data.CategoryPath.ROOT.equals(expected.getCategoryPath())
+                || !ghidra.program.model.data.CategoryPath.ROOT.equals(actual.getCategoryPath())) {
+            return false;
+        }
+        boolean signedPair =
+            (expected instanceof ghidra.program.model.data.LongDataType
+                && actual instanceof ghidra.program.model.data.LongLongDataType)
+            || (expected instanceof ghidra.program.model.data.LongLongDataType
+                && actual instanceof ghidra.program.model.data.LongDataType);
+        boolean unsignedPair =
+            (expected instanceof ghidra.program.model.data.UnsignedLongDataType
+                && actual instanceof ghidra.program.model.data.UnsignedLongLongDataType)
+            || (expected instanceof ghidra.program.model.data.UnsignedLongLongDataType
+                && actual instanceof ghidra.program.model.data.UnsignedLongDataType);
+        return signedPair || unsignedPair;
+    }
+
+    private HighFunction freshVariableView(Function function, Program program) {
+        DecompileResults result = decompileFunctionNoRetry(function, program);
+        return result != null && result.decompileCompleted() ? result.getHighFunction() : null;
+    }
+
     /**
      * Apply the type update in a transaction.
      */
@@ -1745,6 +1853,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                 dataType,              // The new data type
                 SourceType.USER_DEFINED // Mark as user-defined
             );
+
+            String verification = verifyVariableUpdate(
+                freshVariableView(symbol.getHighFunction().getFunction(), program),
+                symbol.getName(), dataType);
+            if (verification != null) {
+                if (errorDetails != null) errorDetails.append(verification);
+                return false;
+            }
 
             result = true;
             Msg.info(this, "Successfully set variable type using HighFunctionDBUtil");
@@ -3628,15 +3744,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                 "message", "No variables to set (empty payload)"));
         }
 
-        record SetVariablesOutcome(int typesSet, int namesSet, int failed, List<String> warnings, List<String> errors) {
-            SetVariablesOutcome requireSuccess(boolean atomic) throws InvalidInputException {
-                if (atomic && (failed > 0 || !errors.isEmpty())) {
-                    throw new InvalidInputException("Mixed variable batch rolled back: " + String.join("; ", errors));
-                }
-                return this;
-            }
-        }
+        record SetVariablesOutcome(int typesSet, int namesSet, int failed,
+                                   List<String> warnings, List<String> errors) {}
         SetVariablesOutcome outcome;
+        boolean ambient = program != null && program.getCurrentTransactionInfo() != null;
         try {
             outcome = threadingStrategy.executeWrite(program, "Set Variables", () -> {
                 int typesSetLocal = 0;
@@ -3660,6 +3771,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                 } catch (InvalidInputException e) {
                     return new SetVariablesOutcome(0, 0, 1, warningsLocal, List.of(e.getMessage()));
                 }
+                Map<String, Map<String, String>> named = new LinkedHashMap<>(variables);
+                named.keySet().removeIf(key -> key.startsWith("Stack["));
+                HighFunction original = named.isEmpty() ? null : freshVariableView(func, program);
+                Variable[] originalVariables = named.isEmpty() ? new Variable[0] : func.getAllVariables();
                 for (StackVariablePlan plan : stackPlans) {
                     for (Variable overlap : plan.overlaps()) func.removeVariable(overlap);
                     if (plan.create()) {
@@ -3672,180 +3787,92 @@ Map<String, Object> out = new LinkedHashMap<>();
                     if (plan.typeRequested()) typesSetLocal++;
                     if (plan.nameRequested()) namesSetLocal++;
                 }
-                // Storage operations have already been applied, never reprocess them as SSA names.
-                Map<String, Map<String, String>> namedVariables = new LinkedHashMap<>(variables);
-                namedVariables.keySet().removeIf(key -> key.startsWith("Stack["));
-                if (namedVariables.isEmpty()) {
-                    return new SetVariablesOutcome(typesSetLocal, namesSetLocal, 0, warningsLocal, errorsLocal);
-                }
-
-                    // Phase 1: Set types
-                    for (Map.Entry<String, Map<String, String>> entry : namedVariables.entrySet()) {
+                // Resolve names against ONE original recovered view. Re-decompiling
+                // between typing and naming can invalidate the caller's SSA names.
+                if (!named.isEmpty()) {
+                    Map<String, HighSymbol> highTargets = new LinkedHashMap<>();
+                    Map<String, Variable> lowTargets = new LinkedHashMap<>();
+                    Map<String, DataType> types = new LinkedHashMap<>();
+                    Map<String, String> names = new LinkedHashMap<>();
+                    for (var entry : named.entrySet()) {
                         String oldName = entry.getKey();
-                        String newType = entry.getValue().get("type");
-                        if (newType == null) continue;
-
-                        // Find the variable
-                        Variable target = null;
-                        for (Variable v : func.getLocalVariables()) {
-                            if (v.getName().equals(oldName)) { target = v; break; }
-                        }
-                        if (target == null) {
-                            for (Parameter p : func.getParameters()) {
-                                if (p.getName().equals(oldName)) { target = p; break; }
+                        var spec = entry.getValue();
+                        String desired = spec.get("name");
+                        names.put(oldName, desired == null || desired.isEmpty() ? oldName : desired);
+                        HighSymbol symbol = original == null ? null : findSymbolByName(original, oldName);
+                        if (symbol != null) highTargets.put(oldName, symbol);
+                        else {
+                            for (Variable local : originalVariables) {
+                                if (local.getName().equals(oldName)) { lowTargets.put(oldName, local); break; }
+                            }
+                            if (!lowTargets.containsKey(oldName)) {
+                                throw new Refusal("Variable not found in original view: " + oldName);
                             }
                         }
-                        if (target == null) {
-                            errorsLocal.add("Variable not found: " + oldName);
-                            failedLocal++;
-                            continue;
-                        }
-
-                        // Reject undefined -> undefined
-                        String oldType = target.getDataType().getName();
-                        if (NamingConventions.isUndefinedToUndefined(oldType, newType)) {
-                            errorsLocal.add("Rejected: " + oldName + " type " + oldType + " -> " + newType + " (still undefined)");
-                            failedLocal++;
-                            continue;
-                        }
-
-                        try {
-                            DataType dt = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
-                            if (dt == null) {
-                                errorsLocal.add("Unknown type '" + newType + "' for " + oldName);
-                                failedLocal++;
-                                continue;
+                        String requested = spec.get("type");
+                        if (requested != null) {
+                            if (requested.startsWith("undefined")) {
+                                throw new Refusal("Rejected undefined type for " + oldName);
                             }
-                            target.setDataType(dt, SourceType.USER_DEFINED);
-                            typesSetLocal++;
-                        } catch (Exception e) {
-                            errorsLocal.add("Failed to set type on " + oldName + ": " + e.getMessage());
-                            failedLocal++;
+                            DataType type = ServiceUtils.resolveDataType(program.getDataTypeManager(), requested);
+                            if (type == null) throw new Refusal("Unknown type '" + requested + "' for " + oldName);
+                            type = type.clone(program.getDataTypeManager());
+                            String error = validateVariableTypeRequest(requested, type);
+                            if (error != null) throw new Refusal(error);
+                            types.put(oldName, type);
                         }
                     }
-
-                    if (namedVariables.values().stream().noneMatch(spec -> spec.containsKey("name"))) {
-                        return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
-                                .requireSuccess(!stackPlans.isEmpty());
-                    }
-                    // Phase 2: Decompile to get fresh SSA variables for renaming
-                    DecompInterface decomp = null;
-                    try {
-                        decomp = ServiceUtils.createConfiguredDecompiler(program);
-                        DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                        if (decompResult == null || !decompResult.decompileCompleted()) {
-                            errorsLocal.add("Decompilation failed after type changes; renames skipped");
-                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
-                                .requireSuccess(!stackPlans.isEmpty());
+                    for (String oldName : named.keySet()) {
+                        String newName = names.get(oldName);
+                        DataType type = types.get(oldName);
+                        boolean rename = !newName.equals(oldName);
+                        if (type == null && !rename) continue;
+                        HighSymbol symbol = highTargets.get(oldName);
+                        DataType actualType;
+                        if (symbol != null) {
+                            actualType = type != null ? type : symbol.getDataType();
+                            HighFunctionDBUtil.updateDBVariable(symbol, rename ? newName : null,
+                                type, SourceType.USER_DEFINED);
+                        } else {
+                            Variable target = lowTargets.get(oldName);
+                            if (type != null) target.setDataType(type, SourceType.USER_DEFINED);
+                            if (rename) target.setName(newName, SourceType.USER_DEFINED);
+                            actualType = target.getDataType();
                         }
-                        HighFunction highFunction = decompResult.getHighFunction();
-                        if (highFunction == null) {
-                            errorsLocal.add("No HighFunction after decompile; renames skipped");
-                            return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
-                                .requireSuccess(!stackPlans.isEmpty());
-                        }
-
-                        // Commit params if needed
-                        LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
-                        Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
-                        if (checkSymbols.hasNext()) {
-                            HighSymbol first = checkSymbols.next();
-                            if (checkFullCommit(first, highFunction)) {
-                                HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
-                                        ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
-                            }
-                        }
-
-                        // Phase 3a: Rename via HighSymbol (decompiler-visible variables).
-                        // This is the primary path for SSA temporaries (iVar*, psVar*, etc.)
-                        // and for register-backed parameters/locals.
-                        Set<String> renamedHere = new HashSet<>();
-                        Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
-                        while (symbols.hasNext()) {
-                            HighSymbol symbol = symbols.next();
-                            String currentName = symbol.getName();
-                            Map<String, String> spec = namedVariables.get(currentName);
-                            if (spec == null || !spec.containsKey("name")) continue;
-
-                            String newName = spec.get("name");
-                            if (newName == null || newName.isEmpty() || newName.equals(currentName)) continue;
-
-                            // Validate Hungarian prefix against actual type
-                            String actualType = symbol.getDataType().getName();
-                            String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
-                            if (hungarianWarning != null) {
-                                warningsLocal.add(hungarianWarning);
-                            }
-
-                            try {
-                                HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                                namesSetLocal++;
-                                renamedHere.add(currentName);
-                            } catch (Exception e) {
-                                errorsLocal.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
-                                failedLocal++;
-                            }
-                        }
-
-                        // Phase 3b: Storage-based fallback. Stack-frame-only variables
-                        // (local_4, local_148, etc.) are not promoted to HighSymbol
-                        // form — they live only in func.getAllVariables(). Without
-                        // this fallback, a worker calling set_variables with
-                        // {local_4: {name: nStackDepth, ...}} sees types_set++ but
-                        // names_set silently stays at zero, then fails subsequent
-                        // calls with "Variable not found: nStackDepth".
-                        try {
-                            for (Variable lowVar : func.getAllVariables()) {
-                                String oldName = lowVar.getName();
-                                if (renamedHere.contains(oldName)) continue;
-                                Map<String, String> spec = namedVariables.get(oldName);
-                                if (spec == null || !spec.containsKey("name")) continue;
-                                String newName = spec.get("name");
-                                if (newName == null || newName.isEmpty() || newName.equals(oldName)) continue;
-                                try {
-                                    lowVar.setName(newName, SourceType.USER_DEFINED);
-                                    namesSetLocal++;
-                                    renamedHere.add(oldName);
-                                } catch (Exception e) {
-                                    errorsLocal.add("Failed to rename storage variable " + oldName + " -> " + newName + ": " + e.getMessage());
-                                    failedLocal++;
-                                }
-                            }
-                        } catch (Exception e) {
-                            errorsLocal.add("Storage-rename fallback failed: " + e.getMessage());
-                            failedLocal++;
-                            Msg.warn(this, "set_variables storage-rename fallback encountered error: " + e.getMessage());
-                        }
-
-                        // Phase 3c: Caller-visibility — surface any rename specs
-                        // that matched neither path so workers can tell at a
-                        // glance that part of their request didn't apply.
-                        for (Map.Entry<String, Map<String, String>> e : namedVariables.entrySet()) {
-                            String oldName = e.getKey();
-                            Map<String, String> spec = e.getValue();
-                            if (!spec.containsKey("name")) continue;
-                            String requestedNew = spec.get("name");
-                            if (requestedNew == null || requestedNew.isEmpty() || requestedNew.equals(oldName)) continue;
-                            if (!renamedHere.contains(oldName)) {
-                                errorsLocal.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
-                                        + "name unchanged. Re-fetch with get_functions(fields=parameters,locals) before retrying.");
-                                failedLocal++;
-                            }
-                        }
-                    } finally {
-                        if (decomp != null) {
-                            try { decomp.dispose(); } catch (Exception ignored) {}
+                        if (type != null) typesSetLocal++;
+                        if (rename) {
+                            namesSetLocal++;
+                            String warning = NamingConventions.validateHungarianPrefix(newName, actualType.getName());
+                            if (warning != null) warningsLocal.add(warning);
                         }
                     }
-                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal)
-                                .requireSuccess(!stackPlans.isEmpty());
+                    HighFunction fresh = highTargets.isEmpty() ? null : freshVariableView(func, program);
+                    for (String oldName : named.keySet()) {
+                        String newName = names.get(oldName);
+                        DataType type = types.get(oldName);
+                        if (type == null && newName.equals(oldName)) continue;
+                        if (highTargets.containsKey(oldName)) {
+                            String error = verifyVariableUpdate(fresh, newName, type);
+                            if (error != null) throw new Refusal(error);
+                        } else {
+                            Variable target = lowTargets.get(oldName);
+                            if (!newName.equals(target.getName())
+                                    || (type != null && !variableTypesMatch(type, target.getDataType()))) {
+                                throw new Refusal("Storage variable did not read back as requested: " + newName);
+                            }
+                        }
+                    }
+                }
+                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
             });
         } catch (Exception e) {
-            return ServiceUtils.fail(e);
+            return Response.err(ServiceUtils.failureMessage(e) + (ambient
+                ? " The surrounding transaction owns any partial changes; they were not rolled back here."
+                : " Variable batch rolled back."));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
+        result.put("success", outcome.failed() == 0 && outcome.errors().isEmpty());
         result.put("types_set", outcome.typesSet());
         result.put("names_set", outcome.namesSet());
         result.put("failed", outcome.failed());
