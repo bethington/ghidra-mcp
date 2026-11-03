@@ -116,6 +116,63 @@ mvn clean package -P headless -DskipTests
 mvn clean package -P docker -DskipTests
 ```
 
+## Sharing a Ghidra Server with a GUI
+
+The Ghidra Server is the source of truth. The headless server and your local Ghidra are two
+clients of it, each with its own working copies, and a check-in is what moves work between them.
+
+With `GHIDRA_MCP_AUTO_CHECKIN_IDLE_SECONDS` set, the headless server manages this itself:
+
+| Situation | What happens |
+| ---------- | ------------- |
+| A program is opened | It takes the exclusive checkout |
+| Someone else holds the checkout | The program opens read-only, and writes are refused rather than applied to a copy that could never be saved |
+| The program is edited, then idle | It is checked in as a new version under the server's user, and released |
+| The program is only read, then idle | The checkout is undone, leaving no new version |
+| A read-only copy goes idle | It is closed, so the next open sees the latest version |
+| The server stops | Everything is settled immediately, so give the container a long `stop_grace_period` |
+
+Anything that might hold an edit is checked in rather than undone, so an unnecessary version is
+possible and lost work is not.
+
+To work alongside it, open programs in local Ghidra **without checking them out**: a checkout
+there blocks the headless server from writing to that program until you check it back in. To see
+new work, close and reopen the program.
+
+Setup notes:
+
+- **Trust the server's certificate.** Ghidra 12.2 enforces TLS, so add
+  `-Dghidra.cacerts=<path to the .crt>` to `JAVA_OPTS`.
+- **Account password.** `svrAdmin -reset <user> --p` sets a password that expires after 24 hours.
+  The headless server stores it as permanent each time it connects.
+- **A user added while the server is running** can be reported as not in a repository's access
+  list even when `userAccess.acl` names it. `svrAdmin -grant <user> +a <repo>` updates the running
+  server.
+- **Image volumes.** `/data` and `/projects` are declared volumes, so Compose carries the old
+  mounts across a recreate. After changing them, run `docker compose rm -sf ghidra-mcp` first.
+
+### Connecting from another machine
+
+The bridge refuses non-loopback URLs because it speaks plain HTTP and forwards a bearer token.
+`tools/bridge_via_tunnel.py` opens an SSH tunnel for one MCP session, reads the token from the
+container, and starts the bridge pinned to that tunnel:
+
+```json
+{
+  "mcpServers": {
+    "ghidra-mcp": {
+      "command": "uv",
+      "args": ["run", "--no-sync", "--directory", "/path/to/ghidra-mcp", "python",
+               "tools/bridge_via_tunnel.py", "--ssh", "user@host"]
+    }
+  }
+}
+```
+
+The pin (`GHIDRA_MCP_PIN_URL=1`) matters: a local Ghidra's socket otherwise outranks
+`GHIDRA_MCP_URL`, so opening Ghidra to look at something would silently move every call to it. The
+19 GUI-only tools, including the debugger, are not available while pinned to a headless server.
+
 ## Configuration
 
 ### Environment Variables
@@ -129,7 +186,9 @@ mvn clean package -P docker -DskipTests
 | `GHIDRA_MCP_FILE_ROOT` | unset | Confine filesystem-path endpoints such as `/import_file` to this directory |
 | `JAVA_OPTS` | `-Xmx4g -XX:+UseG1GC` | JVM options |
 | `PROGRAM_FILE` | - | Path to binary file to load on startup |
-| `PROJECT_PATH` | - | Path to Ghidra project directory |
+| `PROJECT_PATH` | - | Ghidra project directory, or `ghidra://host[:port]/repo` to open a shared repository at startup |
+| `GHIDRA_MCP_SHARED_PROJECT_DIR` | `~/ghidra-shared-projects` | Where a shared repository's working copies live. Put it on a volume, inside `GHIDRA_MCP_FILE_ROOT` when that is set, or edits not yet checked in are lost with the container |
+| `GHIDRA_MCP_AUTO_CHECKIN_IDLE_SECONDS` | unset (off) | Take the exclusive checkout when a program opens, and settle it after this many idle seconds. See "Sharing a Ghidra Server with a GUI" |
 | `GHIDRA_USER` | - | Passed as `-Duser.name`, to open a project owned by that user |
 | `GHIDRA_SERVER_HOST` / `GHIDRA_SERVER_PORT` / `GHIDRA_SERVER_USER` | - | Shared Ghidra Server connection (port defaults to 13100) |
 

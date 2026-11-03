@@ -75,6 +75,10 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     // Ghidra server connection manager
     private GhidraServerManager serverManager;
 
+    // Null when GHIDRA_MCP_AUTO_CHECKIN_IDLE_SECONDS is unset: check-ins stay explicit.
+    private CheckoutLeases leases;
+    private java.util.concurrent.ScheduledExecutorService leaseSweeper;
+
     public static void main(String[] args) {
         GhidraMCPHeadlessServer server = new GhidraMCPHeadlessServer();
         try {
@@ -105,6 +109,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // VC endpoints resolve DomainFile through the open project.
 
         managementService = new HeadlessManagementService(programProvider, serverManager);
+
+        startLeases();
 
         // Load initial programs if specified
         loadInitialPrograms(args);
@@ -372,6 +378,45 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
     }
 
+    /** Before the first open, so a project named on the command line is covered too. */
+    private void startLeases() {
+        long idleSeconds = CheckoutLeases.parseIdleSeconds(System.getenv(CheckoutLeases.IDLE_ENV));
+        if (idleSeconds == 0) {
+            return;
+        }
+        leases = new CheckoutLeases(
+            new HeadlessLeaseOps(programProvider, new com.xebyte.core.ProjectVersionControl(programProvider)),
+            idleSeconds, System.out::println);
+        programProvider.useLeases(leases);
+        threadingStrategy.refuseUnsaveableWrites();
+        leaseSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "GhidraMCP-lease-sweeper");
+            thread.setDaemon(true);
+            return thread;
+        });
+        long periodSeconds = Math.max(1, Math.min(30, idleSeconds / 4));
+        leaseSweeper.scheduleWithFixedDelay(() -> settleLeases(false),
+            periodSeconds, periodSeconds, java.util.concurrent.TimeUnit.SECONDS);
+        System.out.println("Auto check-in: enabled, " + idleSeconds + "s idle");
+    }
+
+    /** Under the global lock, so a check-in cannot close a program a write is using. */
+    private void settleLeases(boolean flush) {
+        try {
+            threadingStrategy.executeRead(() -> {
+                if (flush) {
+                    leases.flush(System.currentTimeMillis());
+                } else {
+                    leases.sweep(System.currentTimeMillis());
+                }
+                return null;
+            });
+        } catch (Throwable t) {
+            // Rethrowing would cancel the schedule and silently end every later check-in.
+            System.err.println("Auto check-in sweep failed: " + t);
+        }
+    }
+
     private void startServer() throws IOException {
         http = new McpHttpServer("headless", Map::of);
         registerEndpoints();
@@ -461,6 +506,15 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             System.out.println("Stopping HTTP server...");
             http.stop();
             http = null;
+        }
+
+        // After HTTP stops, so no edit can land behind the flush; before the disconnect,
+        // because a check-in needs the server.
+        if (leaseSweeper != null) {
+            leaseSweeper.shutdownNow();
+            leaseSweeper = null;
+            System.out.println("Settling checkouts...");
+            settleLeases(true);
         }
 
         if (serverManager != null && serverManager.isConnected()) {

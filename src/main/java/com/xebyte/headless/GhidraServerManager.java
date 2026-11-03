@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.GhidraMCPAuthenticator;
+import generic.hash.HashUtilities;
 import com.xebyte.core.Response;
 import com.xebyte.core.ServerSession;
 import ghidra.framework.client.ClientUtil;
@@ -121,6 +122,7 @@ public class GhidraServerManager implements ServerSession {
 
             if (connected) {
                 System.out.println("Connected to Ghidra server at " + host + ":" + port + " as " + user);
+                keepPasswordFromExpiring();
                 return Response.ok(connection("connected"));
             }
             lastError = "Connection returned but server reports not connected";
@@ -132,6 +134,28 @@ public class GhidraServerManager implements ServerSession {
                     + " - " + e.getMessage());
             e.printStackTrace();
             return Response.err(lastError + " (" + host + ":" + port + ")");
+        }
+    }
+
+    /**
+     * Store the configured password as the account's own. {@code svrAdmin -reset} sets a
+     * temporary one that the server refuses after 24 hours ("User password not set, must be
+     * reset"), and only the logged-in user can make it permanent. A person gets prompted for
+     * that; an unattended server would just stop working a day later. The adapter does not
+     * report the expiry, so this runs on every connect, and storing the same password is
+     * harmless. A failure leaves the connection usable, so it is logged and not raised.
+     */
+    private void keepPasswordFromExpiring() {
+        try {
+            if (!serverAdapter.canSetPassword()
+                    || !serverAdapter.setPassword(HashUtilities.getSaltedHash(
+                        HashUtilities.SHA256_ALGORITHM, password))) {
+                System.err.println("Could not make the password of " + user + " permanent; "
+                        + "the server may refuse it within 24 hours of a reset");
+            }
+        } catch (Exception e) {
+            System.err.println("Could not make the password of " + user + " permanent; "
+                    + "the server may refuse it within 24 hours of a reset: " + e.getMessage());
         }
     }
 

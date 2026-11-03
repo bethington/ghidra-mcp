@@ -15,6 +15,8 @@
  */
 package com.xebyte.headless;
 
+import com.xebyte.core.ProgramSaves;
+import com.xebyte.core.Refusal;
 import com.xebyte.core.ThreadingStrategy;
 import com.xebyte.core.WriteTx;
 import ghidra.program.model.listing.Program;
@@ -33,6 +35,16 @@ import java.util.concurrent.locks.ReentrantLock;
 public class DirectThreadingStrategy implements ThreadingStrategy {
 
     private final ReentrantLock globalLock = new ReentrantLock();
+    private volatile boolean refuseUnsaveableWrites;
+
+    /**
+     * Refuse a write to a program that can never be saved, instead of applying it to an
+     * in-memory copy with a warning. Set when the server takes its own checkouts, because
+     * there the copy means someone else holds the checkout, and the edit would be lost.
+     */
+    public void refuseUnsaveableWrites() {
+        refuseUnsaveableWrites = true;
+    }
 
     @Override
     public <T> T executeRead(Callable<T> action) throws Exception {
@@ -62,12 +74,16 @@ public class DirectThreadingStrategy implements ThreadingStrategy {
             WriteTx tx = null;
             boolean success = false;
             try {
+                String unsaveable = refuseUnsaveableWrites ? ProgramSaves.unsaveableReason(program) : null;
+                if (unsaveable != null) {
+                    throw new Refusal(unsaveable);
+                }
                 tx = WriteTx.begin(program, txName);
                 T result = action.call();
                 success = true;
                 return result;
             } catch (Exception e) {
-                if (!com.xebyte.core.Refusal.is(e)) {
+                if (!Refusal.is(e)) {
                     Msg.error(this, "Error during transaction '" + txName + "'", e);
                 }
                 throw e;
