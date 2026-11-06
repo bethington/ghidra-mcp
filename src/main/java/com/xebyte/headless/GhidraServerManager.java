@@ -51,10 +51,13 @@ public class GhidraServerManager implements ServerSession {
     private volatile String user;
     private volatile char[] password;
 
-    private RepositoryServerAdapter serverAdapter;
+    // ClientUtil caches one adapter per host:port, so the open project's repository uses
+    // this same instance and can reconnect it without going through connect(). Connection
+    // state is therefore always read from the adapter, never remembered: a remembered flag
+    // kept saying "disconnected" for two days after a project reopened the connection.
+    private volatile RepositoryServerAdapter serverAdapter;
     private final Map<String, RepositoryAdapter> repositoryCache = new HashMap<>();
-    private volatile boolean connected = false;
-    private String lastError;
+    private volatile String lastError;
     /** Open project — DomainFile VC ops need this, not RepositoryAdapter alone. */
 
     public GhidraServerManager() {
@@ -104,7 +107,7 @@ public class GhidraServerManager implements ServerSession {
      */
     @Override
     public synchronized Response connect() {
-        if (connected && serverAdapter != null && serverAdapter.isConnected()) {
+        if (isConnected()) {
             return Response.ok(connection("already_connected"));
         }
 
@@ -117,10 +120,9 @@ public class GhidraServerManager implements ServerSession {
             System.out.println("Connecting to Ghidra server at " + host + ":" + port + " as " + user);
             serverAdapter = ClientUtil.getRepositoryServer(host, port);
             serverAdapter.connect();
-            connected = serverAdapter.isConnected();
             lastError = null;
 
-            if (connected) {
+            if (isConnected()) {
                 System.out.println("Connected to Ghidra server at " + host + ":" + port + " as " + user);
                 keepPasswordFromExpiring();
                 return Response.ok(connection("connected"));
@@ -128,7 +130,6 @@ public class GhidraServerManager implements ServerSession {
             lastError = "Connection returned but server reports not connected";
             return Response.err(lastError);
         } catch (Exception e) {
-            connected = false;
             lastError = e.getMessage();
             System.err.println("Failed to connect to Ghidra server at " + host + ":" + port
                     + " - " + e.getMessage());
@@ -170,7 +171,7 @@ public class GhidraServerManager implements ServerSession {
 
     @Override
     public synchronized Response disconnect() {
-        if (!connected || serverAdapter == null) {
+        if (serverAdapter == null) {
             return Response.ok(Map.of("status", "not_connected"));
         }
 
@@ -183,7 +184,6 @@ public class GhidraServerManager implements ServerSession {
             lastError = e.getMessage();
             return Response.err(lastError);
         } finally {
-            connected = false;
             serverAdapter = null;
             repositoryCache.clear();
         }
@@ -192,17 +192,16 @@ public class GhidraServerManager implements ServerSession {
     @Override
     public Map<String, Object> status() {
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("connected", connected);
+        boolean live = isConnected();
+        out.put("connected", live);
         out.put("host", host);
         out.put("port", port);
         if (user != null && !user.isEmpty()) {
             out.put("user", user);
         }
         out.put("credentials_configured", user != null && password != null);
-        if (connected && serverAdapter != null) {
-            out.put("server_connected", serverAdapter.isConnected());
-        }
-        if (lastError != null) {
+        // A past failure explains a current disconnection; once connected it is history.
+        if (!live && lastError != null) {
             out.put("last_error", lastError);
         }
         return out;
@@ -217,7 +216,7 @@ public class GhidraServerManager implements ServerSession {
      * Get or create a RepositoryAdapter for the specified repository.
      */
     private RepositoryAdapter getRepository(String repoName) throws IOException {
-        if (!connected || serverAdapter == null) {
+        if (!isConnected()) {
             throw new IOException("Not connected to server");
         }
         
@@ -233,7 +232,8 @@ public class GhidraServerManager implements ServerSession {
     }
 
     public boolean isConnected() {
-        return connected && serverAdapter != null && serverAdapter.isConnected();
+        RepositoryServerAdapter adapter = serverAdapter;
+        return adapter != null && adapter.isConnected();
     }
 
     public String getHost() {

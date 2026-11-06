@@ -374,8 +374,36 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             } else {
                 System.err.println("Failed to open project: "
                         + (opened.error != null ? opened.error : projectPath));
+                if (SharedProjectLocator.isGhidraUrl(projectPath)) {
+                    retryOpeningSharedProject(projectPath);
+                }
             }
         }
+    }
+
+    /**
+     * Keep trying a shared project the server refused at startup. Started together, the
+     * server can still be coming up: measured on a host restart, this server's connect was
+     * refused 0.5s after the Ghidra Server started, and the project stayed closed until
+     * someone opened it by hand. Stops as soon as any project is open, by this or by a call.
+     */
+    private void retryOpeningSharedProject(String projectPath) {
+        Thread retry = new Thread(() -> StartupRetry.run(
+            () -> {
+                HeadlessProgramProvider.OpenProjectResult opened =
+                    programProvider.openProject(projectPath, serverManager);
+                if (opened.success) {
+                    System.out.println("Opened project on retry: " + programProvider.getProjectName());
+                } else {
+                    System.err.println("Retrying project open: " + opened.error);
+                }
+                return opened.success;
+            },
+            () -> !running || programProvider.getProject() != null,
+            StartupRetry::sleep),
+            "GhidraMCP-project-retry");
+        retry.setDaemon(true);
+        retry.start();
     }
 
     /** Before the first open, so a project named on the command line is covered too. */

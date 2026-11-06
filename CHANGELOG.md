@@ -47,6 +47,14 @@ ignored.
   tunnel, reading the token over SSH so no client config holds it.
 - `PROJECT_PATH` accepts a `ghidra://` URL in the Docker image.
 
+### Fixed — headless connection state after a restart
+
+- `/server/status` reads the live connection instead of a remembered flag. The open project
+  shares the server adapter and can reconnect it without `connect()`, so after a host restart the
+  status said `connected: false` with a stale error for two days while every checkout succeeded.
+- A shared project the server refuses at startup is retried with a capped backoff, until it opens
+  or a project is opened by a call. Started together, the Ghidra Server can still be coming up.
+
 ### Fixed — headless password expiry
 
 - A password set by `svrAdmin -reset` expires after 24 hours unless the user changes it, which an
