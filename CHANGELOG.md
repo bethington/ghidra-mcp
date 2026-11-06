@@ -8,6 +8,16 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed — `get_comment` advertised readback contract (#638)
+
+- The `get_comment` tool description, response-contract doc, endpoint catalog,
+  schema snapshot and assertion-corpus comment claimed `null` for a never-set
+  comment kind and `""` for one explicitly cleared. Clearing through
+  `set_comment` removes the comment record, so a cleared kind reads back as
+  `null` too; `""` can still appear only for a legacy record whose stored
+  text is empty. The advertised contract now matches the readback callers
+  actually observe.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only
