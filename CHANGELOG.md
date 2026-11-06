@@ -8,6 +8,15 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: `search_byte_patterns` applies the `mask` parameter (#627)
+
+The `mask` argument was accepted but never used, so a masked search quietly
+returned the exact matches instead. A supplied mask now applies per byte — `00`,
+`??` or `..` leaves the byte free, and any other hex value compares exactly the
+bits it sets — replacing the pattern's inline wildcards. A mask of the wrong
+length, or a mask byte that is not a hex pair, returns an error instead of being
+ignored.
+
 ### Fixed — `get_comment` advertised readback contract (#638)
 
 - The `get_comment` tool description, response-contract doc, endpoint catalog,
