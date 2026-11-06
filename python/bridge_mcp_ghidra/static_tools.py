@@ -648,9 +648,70 @@ async def import_file(
     return result
 
 
+def _attach_auto_connection(candidate: state.ConnectionSnapshot, previous: state.ConnectionSnapshot) -> bool:
+    """Fetch off-lock, then install schema and route together if still unconnected."""
+    schema = registry._fetch_schema(connection=candidate)
+    with state._tool_registry_lock:
+        # A manual switch may have completed while discovery/schema I/O ran.
+        if state.get_connection_snapshot() != previous:
+            return False
+        tools = dict(mcp._tool_manager._tools)
+        old_schema = state._full_schema
+        old_names = list(state._dynamic_tool_names)
+        old_groups = set(state._loaded_groups)
+        try:
+            count = registry.register_tools_from_schema(
+                schema,
+                groups=None if not state._lazy_mode else state._default_groups,
+            )
+            # Facade intentionally caches the catalog without dynamic tools.
+            if count == 0 and not (state._expose_mode == "facade" and state._full_schema):
+                raise RuntimeError("No tools available from auto-connect schema")
+        except Exception:
+            # Registration replaces the catalog; a failed attachment must not
+            # leave tools from a backend whose route was never installed.
+            mcp._tool_manager._tools.clear()
+            mcp._tool_manager._tools.update(tools)
+            state._full_schema = old_schema
+            state._dynamic_tool_names[:] = old_names
+            state._loaded_groups.clear()
+            state._loaded_groups.update(old_groups)
+            raise
+        state.set_connection_snapshot(
+            candidate.mode,
+            active_socket=candidate.active_socket,
+            active_tcp=candidate.active_tcp,
+            connected_project=candidate.connected_project,
+        )
+    facade._log_auto_connect(count, project=candidate.connected_project, tcp_url=candidate.active_tcp)
+    return True
+
+
 def _auto_connect(project: str | None = None) -> bool:
-    """Return True after connecting and registering tools for a unique instance."""
-    # Try UDS first
+    """Return True after attachment; False keeps the startup retry loop running."""
+    previous = state.get_connection_snapshot()
+    if previous.mode != "none":
+        return True
+    explicit_url = (os.getenv("GHIDRA_MCP_URL") or "").strip()
+    if explicit_url:
+        # An explicit URL is already a selection. Never discover or fall back
+        # to a different listener, even when the selected one is unavailable.
+        if not validate_server_url(explicit_url):
+            logger.warning("Refusing to auto-connect to invalid URL: %s", explicit_url)
+            return False
+        try:
+            if project is not None:
+                text, status = transport.tcp_request(explicit_url, "GET", "/mcp/instance_info", timeout=5)
+                info = discovery._unwrap_response_data(text) if status == 200 else {}
+                if not isinstance(info, dict) or info.get("project") != project:
+                    logger.warning("Configured URL does not match startup project %r", project)
+                    return False
+            candidate = state.build_connection_snapshot(mode="tcp", active_tcp=explicit_url, connected_project=project)
+            return _attach_auto_connection(candidate, previous)
+        except Exception as e:
+            logger.info("Could not auto-connect to configured URL %s: %s", explicit_url, e)
+            return False
+
     instances = discovery.discover_instances()
     if project is not None:
         instances = discovery.find_project_instances(project, instances)
@@ -658,98 +719,37 @@ def _auto_connect(project: str | None = None) -> bool:
             return False
     if len(instances) == 1:
         inst = instances[0]
+        candidate = None
         if inst.get("socket") and transport.uds_supported():
             candidate = state.build_connection_snapshot(
-                mode="uds",
-                active_socket=inst["socket"],
-                connected_project=inst.get("project"),
+                mode="uds", active_socket=inst["socket"], connected_project=inst.get("project"),
             )
-            logger.info(f"Auto-connecting via UDS to {inst.get('project') or 'unknown'}")
-            try:
-                schema = registry._fetch_schema(connection=candidate)
-                with state._tool_registry_lock:
-                    count = registry.register_tools_from_schema(
-                        schema,
-                        groups=None if not state._lazy_mode else state._default_groups,
-                    )
-                    state.set_connection_snapshot(
-                        "uds",
-                        active_socket=inst["socket"],
-                        active_tcp=None,
-                        connected_project=inst.get("project"),
-                    )
-                facade._log_auto_connect(count, project=inst.get("project"))
-                return True
-            except Exception as e:
-                logger.warning(f"UDS auto-connect schema fetch failed: {e}")
         elif inst.get("url") and validate_server_url(inst["url"]):
-            # Windows CPython can't dial the discovered socket; discovery
-            # enriched it with the instance's TCP url — connect there.
+            # Windows discovery enriches socket records with a dialable URL.
             candidate = state.build_connection_snapshot(
-                mode="tcp",
-                active_tcp=inst["url"],
-                connected_project=inst.get("project"),
+                mode="tcp", active_tcp=inst["url"], connected_project=inst.get("project"),
             )
-            logger.info(
-                f"Auto-connecting via TCP ({inst['url']}) to "
-                f"{inst.get('project') or 'unknown'} (UDS unavailable on this Python)"
-            )
+        if candidate is not None:
             try:
-                schema = registry._fetch_schema(connection=candidate)
-                with state._tool_registry_lock:
-                    count = registry.register_tools_from_schema(
-                        schema,
-                        groups=None if not state._lazy_mode else state._default_groups,
-                    )
-                    state.set_connection_snapshot(
-                        "tcp",
-                        active_socket=None,
-                        active_tcp=inst["url"],
-                        connected_project=inst.get("project"),
-                    )
-                facade._log_auto_connect(count, project=inst.get("project"))
-                return True
+                return _attach_auto_connection(candidate, previous)
             except Exception as e:
-                logger.warning(f"TCP auto-connect schema fetch failed: {e}")
+                logger.warning("Discovered instance auto-connect failed: %s", e)
     elif len(instances) > 1:
         names = ", ".join(i.get("project") or i.get("socket") or "?" for i in instances)
-        logger.info(f"Multiple UDS instances found ({len(instances)}: {names}). " "Use connect_instance() to choose.")
-        # Do NOT fall through to the TCP fallback — that would silently
-        # connect to whichever Ghidra happened to bind 8089 (possibly a
-        # third instance entirely) right after telling the user to choose.
-        # Stay unconnected until connect_instance() is called explicitly,
-        # matching connect_instance's own multi-instance refusal logic.
+        logger.info(f"Multiple UDS instances found ({len(instances)}: {names}). Use connect_instance() to choose.")
         return False
 
     if project is not None:
         # Never fall back to an unrelated listener after selecting a project.
         return False
-
-    # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
-    if not validate_server_url(tcp_url):
-        logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
-        return False
     try:
-        candidate = state.build_connection_snapshot(mode="tcp", active_tcp=tcp_url)
-        schema = registry._fetch_schema(connection=candidate)
-        with state._tool_registry_lock:
-            count = registry.register_tools_from_schema(
-                schema,
-                groups=None if not state._lazy_mode else state._default_groups,
-            )
-            state.set_connection_snapshot(
-                "tcp",
-                active_socket=None,
-                active_tcp=tcp_url,
-                connected_project=None,
-            )
-        facade._log_auto_connect(count, tcp_url=tcp_url)
-        return True
-    except Exception:
-        if not instances:
-            logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
-    return False
+        return _attach_auto_connection(
+            state.build_connection_snapshot(mode="tcp", active_tcp=DEFAULT_TCP_URL),
+            previous,
+        )
+    except Exception as e:
+        logger.info("No Ghidra tools available at the default TCP URL: %s", e)
+        return False
 
 
 # How often the background retry re-attempts auto-connect. One attempt costs
