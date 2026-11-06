@@ -40,7 +40,7 @@ def ghidraDir   = ghidraRoot
     : null
 
 def ghidraVersion  = null
-def ghidraJavaVersion = 21  // fallback when the install doesn't declare one
+def ghidraJavaVersion = 25  // fallback when the install doesn't declare one
 def buildTimestamp = new Date().format('yyyyMMdd-HHmmss')
 
 if (ghidraDir) {
@@ -103,7 +103,7 @@ dependencies {
 }
 
 // Byte Buddy experimental mode required for Mockito to instrument sealed
-// classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
+// classes under Java 25 — mirrors the maven-surefire argLine in pom.xml.
 test {
     jvmArgs '-Dnet.bytebuddy.experimental=true'
     // GhidraScriptsCompileGhidraTest compiles ghidra_scripts/, which is not a

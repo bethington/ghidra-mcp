@@ -14,7 +14,7 @@ Run it against the fixture in a throwaway headless project — never against the
 live GUI instance or a shared project:
 
 ```text
-F:\ghidra_12.1.2_PUBLIC\support\analyzeHeadless.bat ^
+F:\ghidra_12.2_PUBLIC\support\analyzeHeadless.bat ^
   %TEMP%\bmproj BenchFixture ^
   -import tests\fixtures\benchmark\Benchmark.dll ^
   -scriptPath tests\fixtures\benchmark\tools ^
