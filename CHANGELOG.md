@@ -8,6 +8,16 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: recovered variable type persistence (#642)
+
+- Type and rename decompiler-only locals through their recovered symbols in one
+  batch, then verify the attached database annotation and a fresh decompilation.
+  Failed batches roll back when the endpoint owns the transaction; errors inside
+  an ambient transaction leave the enclosing owner's work intact.
+- Resolve the exact C spelling `unsigned long long` as a builtin. Permit LP64
+  long/long-long rendering only after verifying the exact persisted type, width
+  and signedness. Reject ambiguous `code *` requests that resolve to an enum.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only
