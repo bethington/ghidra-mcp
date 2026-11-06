@@ -784,6 +784,29 @@ public class AnalysisService {
                 byteIndex++;
             }
 
+            // A supplied mask takes effect per byte, replacing the pattern's inline wildcards:
+            // 00 (or ?? or ..) leaves the byte free, and any other hex value compares exactly
+            // the bits it sets. It must name every byte of the pattern.
+            if (mask != null && !mask.trim().isEmpty()) {
+                String cleanMask = mask.trim().toUpperCase().replaceAll("\\s+", "");
+                if (cleanMask.length() != patternLen * 2) {
+                    return Response.err("Mask must be " + patternLen + " bytes (" + patternLen * 2
+                            + " hex digits), the length of the pattern");
+                }
+                for (int i = 0; i < patternLen; i++) {
+                    String maskByte = cleanMask.substring(i * 2, i * 2 + 2);
+                    if (maskByte.equals("??") || maskByte.equals("..")) {
+                        maskBytes[i] = 0;
+                    } else {
+                        try {
+                            maskBytes[i] = (byte) Integer.parseInt(maskByte, 16);
+                        } catch (NumberFormatException e) {
+                            return Response.err("Mask byte '" + maskByte + "' is not a hex pair, ?? or ..");
+                        }
+                    }
+                }
+            }
+
             // Search memory for pattern
             Memory memory = program.getMemory();
             List<Map<String, Object>> matches = new ArrayList<>();
@@ -805,7 +828,7 @@ public class AnalysisService {
                 for (int i = 0; i <= blockData.length - patternBytes.length; i++) {
                     boolean matchFound = true;
                     for (int j = 0; j < patternBytes.length; j++) {
-                        if (maskBytes[j] != 0 && blockData[i + j] != patternBytes[j]) {
+                        if (maskBytes[j] != 0 && ((blockData[i + j] ^ patternBytes[j]) & (maskBytes[j] & 0xFF)) != 0) {
                             matchFound = false;
                             break;
                         }
