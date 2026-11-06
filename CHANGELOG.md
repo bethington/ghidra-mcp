@@ -8,6 +8,15 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: imported global audit applicability (#643)
+
+- Include read-only symbol, memory-block and binding provenance in global audits.
+  Exclude only proven synthetic imported linkage placeholders from storage
+  completeness; real GOT cells, BSS and defined storage remain auditable.
+- Preserve imported identity names without forgiving their storage requirements.
+  Per-function audit summaries distinguish non-applicable addresses and blocking
+  issues while retaining soft findings in the issue histogram.
+
 ### Fixed: `search_byte_patterns` applies the `mask` parameter (#627)
 
 The `mask` argument was accepted but never used, so a masked search quietly
