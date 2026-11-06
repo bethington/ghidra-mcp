@@ -17,6 +17,16 @@ bits it sets — replacing the pattern's inline wildcards. A mask of the wrong
 length, or a mask byte that is not a hex pair, returns an error instead of being
 ignored.
 
+### Fixed — `get_comment` advertised readback contract (#638)
+
+- The `get_comment` tool description, response-contract doc, endpoint catalog,
+  schema snapshot and assertion-corpus comment claimed `null` for a never-set
+  comment kind and `""` for one explicitly cleared. Clearing through
+  `set_comment` removes the comment record, so a cleared kind reads back as
+  `null` too; `""` can still appear only for a legacy record whose stored
+  text is empty. The advertised contract now matches the readback callers
+  actually observe.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only

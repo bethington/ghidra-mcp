@@ -1698,7 +1698,7 @@
         "gui",
         "headless"
       ],
-      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts."
+      "description": "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind has no comment record (never set, or cleared -- set_comment removes the record instead of storing \"\") while \"\" can still appear for a legacy record whose stored text is empty. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts."
     },
     {
       "path": "/get_entry_points",
