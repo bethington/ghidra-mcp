@@ -17,10 +17,10 @@ on:
       ghidra_path:
         description: 'Ghidra path for live regression self-hosted runner'
         required: false
-        default: 'F:\ghidra_12.1.4_PUBLIC'
+        default: 'F:\ghidra_12.2_PUBLIC'
 
 env:
-  GHIDRA_VERSION: 12.1.4
+  GHIDRA_VERSION: "12.2"
   GHIDRA_DATE: 20260921
 
 # OSSF Scorecard Token-Permissions: default to read-only. The
@@ -51,10 +51,10 @@ jobs:
         ref: ${{ github.event.inputs.branch }}
         fetch-depth: 0
 
-    - name: Set up JDK 21
+    - name: Set up JDK 25
       uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
       with:
-        java-version: '21'
+        java-version: '25'
         distribution: 'temurin'
         cache: maven
 

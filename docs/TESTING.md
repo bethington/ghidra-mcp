@@ -50,13 +50,13 @@ pytest tests/unit/ -v --no-cov
 Deploy without importing the benchmark binary:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.2_PUBLIC"
 ```
 
 Deploy and run the release-grade live regression:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.2_PUBLIC" --test release
 ```
 
 Opt in locally so every deploy runs the release regression:
@@ -263,7 +263,7 @@ The normal CI suite runs on GitHub-hosted runners.
 The live release regression requires a self-hosted Windows runner with:
 
 - Ghidra 12.1 installed.
-- Java 21.
+- Java 25.
 - Python 3.13.
 - Maven.
 - Access to the Ghidra project that should receive `/testing/benchmark`.
@@ -309,10 +309,10 @@ and post-release steps, see
 Minimum local verification:
 
 ```text
-python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
+python -m tools.setup preflight --ghidra-path "F:\ghidra_12.2_PUBLIC"
 python -m tools.setup build
 pytest tests/unit/ -v --no-cov
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.2_PUBLIC" --test release
 git add docs/releases/live-regression-evidence.json
 ```
 

@@ -37,7 +37,7 @@
         "refs/heads/main"
       ],
       "required_status_checks": [
-        "Java Build (Maven) (21)",
+        "Java Build (Maven) (25)",
         "Python Tests (pytest) (3.10)",
         "Python Tests (pytest) (3.11)",
         "Python Tests (pytest) (3.12)",

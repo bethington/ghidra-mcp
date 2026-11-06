@@ -55,6 +55,20 @@ runtime and the build did not compile. The build now targets the Java level the
 installed Ghidra declares, using any JDK at least that new, and the code calls only
 APIs present in both 12.1 and 12.2.
 
+### Changed: Ghidra 12.2 and Java 25 are now the supported target
+
+The Maven build, CI, the release workflows, the Docker image and the docs now pin
+Ghidra 12.2 and JDK 25. Existing shared projects need two manual steps on 12.2: the
+client must trust the server's TLS certificate, and programs open read-only until
+upgraded to the new database version. See the README.
+
+### Fixed: deploy no longer leaves a plugin prompt in the Debugger tool
+
+Deploy marked the extension as known in each tool's config without naming its plugin
+class. Ghidra treats that as new plugins and prompts, and the modal blocked the
+Debugger tool's auto-start, so `debugger_launch` timed out on a fresh user config.
+Deploy now writes the plugin class and upgrades markers left by earlier deploys.
+
 ### Security - Docker build verifies the Ghidra download
 
 - `docker/Dockerfile` checks the downloaded Ghidra release zip against

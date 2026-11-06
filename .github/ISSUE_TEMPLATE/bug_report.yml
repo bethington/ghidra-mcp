@@ -45,8 +45,8 @@ body:
     id: ghidra-version
     attributes:
       label: Ghidra version
-      description: From Help > About Ghidra, e.g. 12.1.4 PUBLIC.
-      placeholder: "12.1.4 PUBLIC"
+      description: From Help > About Ghidra, e.g. 12.2 PUBLIC.
+      placeholder: "12.2 PUBLIC"
     validations:
       required: true
 

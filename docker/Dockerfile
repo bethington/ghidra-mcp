@@ -4,7 +4,7 @@
 # =============================================================================
 # Stage 1: Builder - Download Ghidra and build the plugin
 # =============================================================================
-FROM eclipse-temurin:21-jdk AS builder
+FROM eclipse-temurin:25-jdk AS builder
 
 # Build arguments
 # IMPORTANT: keep GHIDRA_VERSION in sync with pom.xml's <ghidra.version>.
@@ -13,11 +13,11 @@ FROM eclipse-temurin:21-jdk AS builder
 # the Ghidra release zip. A mismatch means Maven can't resolve dependencies
 # (see #183). GHIDRA_DATE must match the asset filename of the chosen
 # version on the upstream NSA/ghidra GitHub release.
-ARG GHIDRA_VERSION=12.1.4
-ARG GHIDRA_DATE=20260921
+ARG GHIDRA_VERSION=12.2
+ARG GHIDRA_DATE=20261016
 # SHA-256 of the release zip, as published in the upstream release notes.
 # Keep in sync with GHIDRA_VERSION/GHIDRA_DATE.
-ARG GHIDRA_SHA256=ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db
+ARG GHIDRA_SHA256=2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -96,7 +96,7 @@ RUN mvn clean package -P headless -DskipTests -q
 # javax.tools.ToolProvider.getSystemJavaCompiler() to compile .java scripts on
 # the fly. That returns null on a JRE, causing
 # "AssertException: Can't find java compiler" when running any Java script.
-FROM eclipse-temurin:21-jdk
+FROM eclipse-temurin:25-jdk
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
