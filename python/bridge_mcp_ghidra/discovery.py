@@ -24,6 +24,16 @@ def _unwrap_response_data(text: str) -> dict:
     return data
 
 
+def url_is_pinned() -> bool:
+    """True when ``GHIDRA_MCP_PIN_URL`` says to use ``GHIDRA_MCP_URL`` and nothing else.
+
+    Discovery prefers any local Ghidra over a configured URL. That is right on a
+    workstation, and wrong when the URL is a tunnel to a shared headless server: opening
+    a local Ghidra just to look at something would silently move every call to it.
+    """
+    return os.getenv("GHIDRA_MCP_PIN_URL", "").strip().lower() in {"1", "true", "yes"}
+
+
 def discover_instances() -> list[dict]:
     """Scan every plausible socket directory and query each live instance.
 
@@ -35,6 +45,8 @@ def discover_instances() -> list[dict]:
     side knows about `$TMPDIR`. A socket discovered under one candidate dir
     is de-duplicated by absolute path.
     """
+    if url_is_pinned():
+        return []
     seen_paths: set[str] = set()
     instances: list[dict] = []
     uds_ok = transport.uds_supported()

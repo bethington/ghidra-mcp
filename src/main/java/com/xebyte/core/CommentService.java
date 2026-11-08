@@ -15,8 +15,8 @@ import java.util.Map;
 @McpToolGroup(value = "comment", description = "Set/get plate, decompiler, disassembly, repeatable comments")
 public class CommentService {
 
-    // get_comment needs `null` to survive serialization (it is the only way to
-    // tell "never set" from "cleared to empty"), which the shared JsonHelper
+    // get_comment needs `null` to survive serialization (all five kinds are
+    // always present in each result), which the shared JsonHelper
     // Gson instance deliberately does not do -- every other endpoint relies on
     // absent-means-null. Kept local to this one response rather than changed
     // globally.
@@ -91,7 +91,7 @@ public class CommentService {
      * quality sweeps (auditing every function's plate for stale cross-version content) cost one
      * HTTP round trip per function otherwise -- thousands of calls for a mid-size DLL.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.", category = "comment", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind has no comment record (never set, or cleared -- set_comment removes the record instead of storing \"\") while \"\" can still appear for a legacy record whose stored text is empty. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.", category = "comment", access = ToolAccess.READ_ONLY)
     public Response getComment(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Address in the program (single mode). Accepts 0x<hex> (default space) or "
@@ -111,7 +111,8 @@ public class CommentService {
         if (addr == null) {
             return Response.err("address parameter is required (or pass addresses for bulk)");
         }
-// Explicit nulls for kinds never set, distinct from "" for kinds explicitly cleared.
+// Explicit nulls for kinds with no comment record: never set, or cleared
+        // (a clear removes the record rather than storing "").
         // The shared Gson instance drops null map values (see JsonHelper), so the response is
         // serialized with a local Gson configured to keep them, via Response.text -- the
         // sanctioned pre-serialized-JSON escape hatch, not a prose report.

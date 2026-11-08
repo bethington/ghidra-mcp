@@ -17,6 +17,58 @@ Changes on `dev` after 7.0.0.
   facade mode's cache-only connections. Failed attachment restores the prior
   catalog, and a late retry cannot overwrite a completed manual connection.
 
+### Fixed: imported global audit applicability (#643)
+
+- Include read-only symbol, memory-block and binding provenance in global audits.
+  Exclude only proven synthetic imported linkage placeholders from storage
+  completeness; real GOT cells, BSS and defined storage remain auditable.
+- Preserve imported identity names without forgiving their storage requirements.
+  Per-function audit summaries distinguish non-applicable addresses and blocking
+  issues while retaining soft findings in the issue histogram.
+
+### Fixed: `search_byte_patterns` applies the `mask` parameter (#627)
+
+The `mask` argument was accepted but never used, so a masked search quietly
+returned the exact matches instead. A supplied mask now applies per byte — `00`,
+`??` or `..` leaves the byte free, and any other hex value compares exactly the
+bits it sets — replacing the pattern's inline wildcards. A mask of the wrong
+length, or a mask byte that is not a hex pair, returns an error instead of being
+ignored.
+
+### Fixed — `get_comment` advertised readback contract (#638)
+
+- The `get_comment` tool description, response-contract doc, endpoint catalog,
+  schema snapshot and assertion-corpus comment claimed `null` for a never-set
+  comment kind and `""` for one explicitly cleared. Clearing through
+  `set_comment` removes the comment record, so a cleared kind reads back as
+  `null` too; `""` can still appear only for a legacy record whose stored
+  text is empty. The advertised contract now matches the readback callers
+  actually observe.
+
+### Added — sharing a Ghidra Server between headless and a GUI
+
+- `GHIDRA_MCP_AUTO_CHECKIN_IDLE_SECONDS`: the headless server takes the exclusive checkout on
+  open, checks edited programs in after they go idle, undoes the checkout of untouched ones, and
+  closes idle read-only copies. Writes to a program someone else holds are refused instead of
+  applied to a copy that could never be saved.
+- `GHIDRA_MCP_PIN_URL`: keeps the bridge on `GHIDRA_MCP_URL` when a local Ghidra starts.
+- `tools/bridge_via_tunnel.py`: runs the bridge against a remote server through a per-session SSH
+  tunnel, reading the token over SSH so no client config holds it.
+- `PROJECT_PATH` accepts a `ghidra://` URL in the Docker image.
+
+### Fixed — headless connection state after a restart
+
+- `/server/status` reads the live connection instead of a remembered flag. The open project
+  shares the server adapter and can reconnect it without `connect()`, so after a host restart the
+  status said `connected: false` with a stale error for two days while every checkout succeeded.
+- A shared project the server refuses at startup is retried with a capped backoff, until it opens
+  or a project is opened by a call. Started together, the Ghidra Server can still be coming up.
+
+### Fixed — headless password expiry
+
+- A password set by `svrAdmin -reset` expires after 24 hours unless the user changes it, which an
+  unattended server cannot be prompted to do. It is now stored as permanent on connect.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only
@@ -35,6 +87,20 @@ Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on
 runtime and the build did not compile. The build now targets the Java level the
 installed Ghidra declares, using any JDK at least that new, and the code calls only
 APIs present in both 12.1 and 12.2.
+
+### Changed: Ghidra 12.2 and Java 25 are now the supported target
+
+The Maven build, CI, the release workflows, the Docker image and the docs now pin
+Ghidra 12.2 and JDK 25. Existing shared projects need two manual steps on 12.2: the
+client must trust the server's TLS certificate, and programs open read-only until
+upgraded to the new database version. See the README.
+
+### Fixed: deploy no longer leaves a plugin prompt in the Debugger tool
+
+Deploy marked the extension as known in each tool's config without naming its plugin
+class. Ghidra treats that as new plugins and prompts, and the modal blocked the
+Debugger tool's auto-start, so `debugger_launch` timed out on a fresh user config.
+Deploy now writes the plugin class and upgrades markers left by earlier deploys.
 
 ### Security - Docker build verifies the Ghidra download
 

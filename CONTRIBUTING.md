@@ -84,12 +84,12 @@ gates on.
 
 | Requirement | Version | Needed for |
 | --- | --- | --- |
-| Java | 21 LTS | Any Java build or test |
+| Java | 25 LTS | Any Java build or test |
 | Python | 3.10–3.13 | Bridge, `tools.setup`, Python tests |
 | [uv](https://docs.astral.sh/uv/) | current | Dependency resolution from `uv.lock` |
 | Gradle | bundled wrapper (`./gradlew`) | Default Java backend — nothing to install |
 | Maven | 3.9+ | Peer Java backend; what CI builds and gates with |
-| Ghidra | 12.1.4 | Compiling against Ghidra's jars; all live tiers |
+| Ghidra | 12.2 | Compiling against Ghidra's jars; all live tiers |
 
 Python-only changes need Java and Ghidra for nothing at all.
 
@@ -110,7 +110,7 @@ MCP client spawn commands:
   ...                        (advisory; how your MCP client would spawn the bridge)
 Java: available on PATH
 Project version: 7.0.0
-Ghidra version from pom.xml: 12.1.4
+Ghidra version from pom.xml: 12.2
 No Ghidra path configured; skipped Ghidra-specific preflight checks.
 ```
 
@@ -157,9 +157,9 @@ TOOLS_SETUP_BACKEND=gradle python -m tools.setup preflight --ghidra-path <dir>
 ```text
 > Task :verifyVersion
 Project version         : 7.0.0
-Ghidra version (pom.xml): 12.1.4
+Ghidra version (pom.xml): 12.2
 Ghidra install dir      : ...
-Ghidra version (install): 12.1.4
+Ghidra version (install): 12.2
 Version check passed.
 
 > Task :preflight
@@ -227,13 +227,13 @@ Verified both ways:
 
 ```text
 # Git Bash — works
-./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.2_PUBLIC"
 
 # Git Bash — fails with 100 "package does not exist" errors
-./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.4_PUBLIC
+./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.2_PUBLIC
 
 # PowerShell — the backslash form is fine
-.\gradlew.bat test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1.4_PUBLIC
+.\gradlew.bat test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.2_PUBLIC
 ```
 
 ## Test
@@ -341,7 +341,7 @@ benchmark binary in the active project — that is why they are opt-in.
 
 | Job | Gates the build? | What it does |
 | --- | --- | --- |
-| Java Build (Maven) | **Yes** | Downloads Ghidra 12.1.4, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate, then the real-Ghidra tier (and fails if it skipped) |
+| Java Build (Maven) | **Yes** | Downloads Ghidra 12.2, installs its jars, `mvn package`, runs the offline + core Java tests under the JaCoCo coverage gate, then the real-Ghidra tier (and fails if it skipped) |
 | Python Tests (pytest) | **Yes** | `tests/unit/` on Python 3.10, 3.11, 3.12, 3.13 with the coverage floor |
 | Python Tests (pytest, Windows) | **Yes** | `tests/unit/` on Windows, no coverage floor — it exists so both sides of every `os.name == "nt"` branch execute |
 | Offline HTTP Tier (no Ghidra) | **Yes** | `tests/offline/` (the fake server + the real bridge, end to end), then `tests/integration/test_readonly_endpoints.py` replayed against the fake |

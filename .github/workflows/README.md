@@ -68,7 +68,7 @@ wait for the live regression before publishing.
 The release regression workflow expects:
 
 - Ghidra installed on the self-hosted runner.
-- Java 21, Python 3.13, and Maven.
+- Java 25, Python 3.13, and Maven.
 - Access to the target Ghidra project.
 - Any `.env` credentials needed by the project or Ghidra Server.
 

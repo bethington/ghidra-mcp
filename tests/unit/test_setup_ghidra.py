@@ -34,6 +34,9 @@ from tools.setup.ghidra import (
 )
 from tools.setup.versioning import VersionInfo
 
+KNOWN_PLUGIN = f'<PLUGIN CLASS="{PLUGIN_CLASS}" />'
+INCLUDE_PLUGIN = f'<INCLUDE CLASS="{PLUGIN_CLASS}"'
+
 
 class _FakeCompleted:
     def __init__(self, returncode: int = 0) -> None:
@@ -126,7 +129,7 @@ def test_patch_frontend_tool_config_adds_plugin_to_self_closing_utility_block():
     assert modified is True
     assert PLUGIN_CLASS in updated
     assert '<PACKAGE NAME="Utility">' in updated
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert KNOWN_PLUGIN in updated
 
 
 def test_patch_frontend_tool_config_removes_stale_package_and_inserts_plugin():
@@ -144,8 +147,8 @@ def test_patch_frontend_tool_config_removes_stale_package_and_inserts_plugin():
     assert modified is True
     assert 'PACKAGE NAME="GhidraMCP"' not in updated
     assert PLUGIN_CLASS in updated
-    assert updated.count(PLUGIN_CLASS) == 1
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert updated.count(INCLUDE_PLUGIN) == 1
+    assert KNOWN_PLUGIN in updated
 
 
 def test_patch_frontend_tool_config_inserts_into_existing_open_utility_block():
@@ -188,17 +191,19 @@ def test_patch_frontend_tool_config_is_idempotent_when_plugin_present():
         f'        <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
         "    </PACKAGE>\n"
         '    <EXTENSIONS>\n'
-        '        <EXTENSION NAME="GhidraMCP" />\n'
+        '        <EXTENSION NAME="GhidraMCP">\n'
+        f'            {KNOWN_PLUGIN}\n'
+        "        </EXTENSION>\n"
         "    </EXTENSIONS>\n"
         "</TOOL>"
     )
 
     updated, modified = patch_frontend_tool_config(content)
 
-    assert updated.count(PLUGIN_CLASS) == 1, (
+    assert updated.count(INCLUDE_PLUGIN) == 1, (
         "Plugin already present — must not be re-added"
     )
-    assert updated.count('<EXTENSION NAME="GhidraMCP" />') == 1
+    assert updated.count(KNOWN_PLUGIN) == 1
     assert modified is False, "no-op patch must report unmodified"
 
 
@@ -214,9 +219,9 @@ def test_patch_codebrowser_tcd_removes_ghidra_mcp_package_block():
     updated, modified = patch_codebrowser_tcd(content)
 
     assert modified is True
-    assert PLUGIN_CLASS not in updated
+    assert INCLUDE_PLUGIN not in updated
     assert 'PACKAGE NAME="GhidraMCP"' not in updated
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert KNOWN_PLUGIN in updated
 
 
 def test_resolve_ghidra_user_dir_prefers_matching_public_dir(tmp_path: Path):
@@ -1030,7 +1035,7 @@ def test_mark_extension_known_promotes_empty_extensions_to_open_form():
 
     assert "<EXTENSIONS />" not in updated
     assert "<EXTENSIONS>" in updated
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert KNOWN_PLUGIN in updated
 
 
 def test_mark_extension_known_appends_into_existing_open_extensions_block():
@@ -1046,14 +1051,16 @@ def test_mark_extension_known_appends_into_existing_open_extensions_block():
 
     assert updated.count("<EXTENSIONS>") == 1
     assert '<EXTENSION NAME="OtherExt" />' in updated
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert KNOWN_PLUGIN in updated
 
 
 def test_mark_extension_known_is_idempotent():
     content = (
         "<TOOL>\n"
         "    <EXTENSIONS>\n"
-        '        <EXTENSION NAME="GhidraMCP" />\n'
+        '        <EXTENSION NAME="GhidraMCP">\n'
+        f'            {KNOWN_PLUGIN}\n'
+        "        </EXTENSION>\n"
         "    </EXTENSIONS>\n"
         "</TOOL>"
     )
@@ -1061,7 +1068,7 @@ def test_mark_extension_known_is_idempotent():
     updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
 
     assert updated == content
-    assert updated.count('<EXTENSION NAME="GhidraMCP" />') == 1
+    assert updated.count(KNOWN_PLUGIN) == 1
 
 
 def test_mark_extension_known_creates_extensions_block_when_missing():
@@ -1074,7 +1081,7 @@ def test_mark_extension_known_creates_extensions_block_when_missing():
     updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
 
     assert "<EXTENSIONS>" in updated
-    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+    assert KNOWN_PLUGIN in updated
 
 
 # ---------------------------------------------------------------------------
@@ -1098,7 +1105,7 @@ def test_patch_ghidra_user_configs_patches_frontend_tool_xml(tmp_path: Path):
 
     patched = fe_xml.read_text(encoding="utf-8")
     assert PLUGIN_CLASS in patched
-    assert '<EXTENSION NAME="GhidraMCP" />' in patched
+    assert KNOWN_PLUGIN in patched
 
 
 def test_patch_ghidra_user_configs_dry_run_does_not_modify(tmp_path: Path):
@@ -1141,9 +1148,9 @@ def test_patch_ghidra_user_configs_strips_stale_codebrowser_tcd(tmp_path: Path):
     patch_ghidra_user_configs(user_base)
 
     patched = tcd.read_text(encoding="utf-8")
-    assert PLUGIN_CLASS not in patched
+    assert INCLUDE_PLUGIN not in patched
     assert 'PACKAGE NAME="GhidraMCP"' not in patched
-    assert '<EXTENSION NAME="GhidraMCP" />' in patched
+    assert KNOWN_PLUGIN in patched
 
 
 def test_patch_ghidra_user_configs_idempotent_second_call_no_op(tmp_path: Path):
@@ -1160,8 +1167,8 @@ def test_patch_ghidra_user_configs_idempotent_second_call_no_op(tmp_path: Path):
     after_second = fe_xml.read_text(encoding="utf-8")
 
     assert after_first == after_second
-    assert after_second.count(PLUGIN_CLASS) == 1
-    assert after_second.count('<EXTENSION NAME="GhidraMCP" />') == 1
+    assert after_second.count(INCLUDE_PLUGIN) == 1
+    assert after_second.count(KNOWN_PLUGIN) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1215,7 +1222,7 @@ def test_patch_ghidra_user_configs_target_dir_only_touches_target_tcd(tmp_path: 
 
     patch_ghidra_user_configs(user_base, target)
 
-    assert PLUGIN_CLASS not in (target / "tools" / "_code_browser.tcd").read_text(encoding="utf-8")
+    assert INCLUDE_PLUGIN not in (target / "tools" / "_code_browser.tcd").read_text(encoding="utf-8")
     # Sibling tcd must keep its (stale) PACKAGE block — leaving it for
     # whatever Ghidra version actually owns that user dir.
     assert (sibling / "tools" / "_code_browser.tcd").read_text(encoding="utf-8") == stale_tcd
@@ -1827,3 +1834,81 @@ def test_multi_program_targeting_still_fails_on_the_wrong_function(monkeypatch):
     ghidra = _targeting_fixture(monkeypatch, {"name": "other", "address": "0x10002000"})
     with pytest.raises(RuntimeError, match="expected 10001000"):
         ghidra.run_multi_program_targeting_test(Path("."), "http://127.0.0.1:8089")
+
+
+# ---------------------------------------------------------------------------
+# Ghidra prompts for an EXTENSION entry with no PLUGIN child. The modal blocked
+# the Debugger tool's auto-start, so the release tier's debugger step timed out.
+# ---------------------------------------------------------------------------
+
+
+def test_patch_tool_tcd_upgrades_a_marker_with_no_plugin_child():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="GhidraMCP" />\n'
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated, modified = patch_codebrowser_tcd(content)
+
+    assert modified is True
+    assert '<EXTENSION NAME="GhidraMCP" />' not in updated
+    assert (
+        '        <EXTENSION NAME="GhidraMCP">\n'
+        f"            {KNOWN_PLUGIN}\n"
+        "        </EXTENSION>\n"
+    ) in updated
+    assert patch_codebrowser_tcd(updated) == (updated, False)
+
+
+def test_mark_extension_known_fills_an_open_entry_with_no_plugin_child():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="GhidraMCP">\n'
+        "        </EXTENSION>\n"
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert updated.count(KNOWN_PLUGIN) == 1
+    assert mark_extension_known_in_tool_config(updated, "GhidraMCP") == updated
+
+
+def test_mark_extension_known_leaves_other_extensions_empty():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="OtherExt" />\n'
+        '        <EXTENSION NAME="GhidraMCP" />\n'
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert '<EXTENSION NAME="OtherExt" />' in updated
+    assert updated.count(KNOWN_PLUGIN) == 1
+
+
+def test_patch_frontend_adds_the_include_when_only_the_extension_entry_names_the_class():
+    content = (
+        "<TOOL>\n"
+        '    <PACKAGE NAME="Utility" />\n'
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="GhidraMCP">\n'
+        f"            {KNOWN_PLUGIN}\n"
+        "        </EXTENSION>\n"
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated, modified = patch_frontend_tool_config(content)
+
+    assert modified is True
+    assert updated.count(INCLUDE_PLUGIN) == 1
+    assert updated.count(KNOWN_PLUGIN) == 1

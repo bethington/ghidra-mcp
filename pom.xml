@@ -11,9 +11,9 @@
     <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. Provides MCP-based tooling and automation for reverse engineering workflows: convention-enforcing rename/type/comment endpoints, batch operations, P-code emulation, live debugger integration, headless server, and Ghidra Server multi-version support.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <ghidra.version>12.1.4</ghidra.version>
+        <ghidra.version>12.2</ghidra.version>
         <!-- Build timestamp generated at compile time (format: yyyyMMdd-HHmmss) -->
         <build.timestamp>${maven.build.timestamp}</build.timestamp>
         <maven.build.timestamp.format>yyyyMMdd-HHmmss</maven.build.timestamp.format>
@@ -229,7 +229,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0</version>
+                <version>3.6.1</version>
                 <configuration>
                     <argLine>@{argLine} -Dnet.bytebuddy.experimental=true</argLine>
                     <systemPropertyVariables>
@@ -249,7 +249,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.15</version>
+                <version>0.8.16</version>
                 <executions>
                     <execution>
                         <id>jacoco-prepare-agent</id>
@@ -443,7 +443,7 @@
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.15</version>
+                        <version>0.8.16</version>
                         <executions>
                             <execution>
                                 <id>jacoco-check</id>
@@ -521,6 +521,10 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
+                            <systemPropertyVariables>
+                                <!-- Maven relocates Ghidra module jars outside their installation paths. -->
+                                <class.searcher.search.all.jars>true</class.searcher.search.all.jars>
+                            </systemPropertyVariables>
                             <additionalClasspathElements>
                                 <!-- Framework/Generic/lib -->
                                 <!-- log4j: DefaultLanguageService.<clinit> -> LogManager. -->
@@ -537,6 +541,8 @@
                                 <element>${ghidra.generic.lib}/commons-lang3-3.20.0.jar</element>
                                 <!-- commons-collections4: listing iteration -> IteratorUtils. -->
                                 <element>${ghidra.generic.lib}/commons-collections4-4.6.0.jar</element>
+                                <!-- ClassSearcher discovers builtin types before native decompilation. -->
+                                <element>${ghidra.generic.lib}/commons-io-2.19.0.jar</element>
 
                                 <!-- Framework/SoftwareModeling/lib -->
                                 <!-- antlr: SleighLanguageProvider parses the .sla grammar. -->

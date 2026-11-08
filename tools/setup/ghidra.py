@@ -260,7 +260,8 @@ def patch_frontend_tool_config(content: str) -> tuple[str, bool]:
             updated,
         )
 
-    if PLUGIN_CLASS in updated:
+    # Match the INCLUDE, not the bare class: the EXTENSIONS entry names it too.
+    if f'<INCLUDE CLASS="{PLUGIN_CLASS}"' in updated:
         updated = mark_extension_known_in_tool_config(updated, PLUGIN_EXTENSION_NAME)
         return updated, updated != original
 
@@ -301,15 +302,37 @@ def patch_frontend_tool_config(content: str) -> tuple[str, bool]:
     return updated, updated != original
 
 
-def mark_extension_known_in_tool_config(content: str, extension_name: str) -> str:
-    """Record an installed extension as known to suppress Ghidra's first-run plugin dialog."""
-    if re.search(
-        rf'<EXTENSION\s+(?:[^>]*\s)?NAME="{re.escape(extension_name)}"',
-        content,
-    ):
-        return content
+def mark_extension_known_in_tool_config(
+    content: str, extension_name: str, plugin_class: str = PLUGIN_CLASS
+) -> str:
+    """Record an installed extension as known to suppress Ghidra's first-run plugin dialog.
 
-    extension_entry = f'            <EXTENSION NAME="{extension_name}" />\n'
+    The entry must name the plugin class: Ghidra's ToolExtensionsStatusManager treats
+    an EXTENSION with no PLUGIN child as having new plugins and prompts anyway, and
+    that modal stops the Debugger tool from auto-starting.
+    """
+    extension_tag = rf'<EXTENSION\s+(?:[^>]*\s)?NAME="{re.escape(extension_name)}"[^>/]*'
+    plugin_entry = f'<PLUGIN CLASS="{plugin_class}" />'
+
+    empty_marker = re.compile(rf"(?m)^([ \t]*)({extension_tag}?)\s*/>")
+    match = empty_marker.search(content)
+    if match:
+        indent = match[1]
+        expanded = f"{indent}{match[2]}>\n{indent}    {plugin_entry}\n{indent}</EXTENSION>"
+        return content[: match.start()] + expanded + content[match.end() :]
+
+    match = re.search(rf"(?s)^([ \t]*){extension_tag}>(.*?)</EXTENSION>", content, re.MULTILINE)
+    if match:
+        if f'CLASS="{plugin_class}"' in match[2]:
+            return content
+        insert_at = match.start(2)
+        return f"{content[:insert_at]}\n{match[1]}    {plugin_entry}{content[insert_at:]}"
+
+    extension_entry = (
+        f'            <EXTENSION NAME="{extension_name}">\n'
+        f"                {plugin_entry}\n"
+        "            </EXTENSION>\n"
+    )
     empty_extensions = re.compile(r"(?m)^([ \t]*)<EXTENSIONS\s*/>\s*$")
     if empty_extensions.search(content):
         return empty_extensions.sub(
@@ -2634,7 +2657,7 @@ def collect_preflight_issues(
         issues.append(str(exc))
 
     if shutil.which("java") is None:
-        issues.append("Java not found on PATH (JDK 21 recommended).")
+        issues.append("Java not found on PATH (JDK 25 required).")
 
     try:
         find_ghidra_executable(ghidra_path)
