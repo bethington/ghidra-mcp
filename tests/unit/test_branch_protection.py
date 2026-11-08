@@ -16,9 +16,9 @@ live rulesets (``tests/ci/required_status_checks.json``, written by
    check, either directly or through the ``Build Status`` aggregator itself;
 3. the default branch is covered by an active ruleset.
 
-(2) is the drift the issue describes.  It is allowlisted in ``KNOWN_DRIFT``
-until the ruleset is updated; deleting an entry makes that job's coverage
-mandatory, so the allowlist is a ratchet rather than a permanent exception.
+(2) is the drift the issue describes.  It was allowlisted in ``KNOWN_DRIFT``
+until the ruleset began requiring ``Build Status`` (2026-11-08); the allowlist
+is now empty, and the stale-entry test keeps it a ratchet in both directions.
 
 Note on the legacy API: ``/repos/{owner}/{repo}/branches/{branch}/protection``
 reports "Branch not protected" for ``dev`` even though the ruleset covers it.
@@ -46,27 +46,12 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 AGGREGATOR_JOB = "build-status"
 AGGREGATOR_CONTEXT = "Build Status"
 
-# Blocking jobs that no required check currently covers.  Each entry is a job
-# id from tests.yml with the reason it is not covered yet.  When the ruleset
-# starts requiring `Build Status` (or these jobs directly), delete the entry:
-# the coverage test then enforces it, and re-adding an entry becomes a
-# deliberate, visible act.
-KNOWN_DRIFT: dict[str, str] = {
-    "python-tests-windows": (
-        "not required: `Python Tests (pytest, Windows)` is the only place the "
-        "os.name == 'nt' half of the bridge runs, so it can fail without "
-        "blocking anything"
-    ),
-    "offline-http-tier": "not required: `Offline HTTP Tier (no Ghidra)`",
-    "markdown-lint": "not required: `Documentation Quality`",
-    "pester-tests": "not required: `Pester (ghidra-mcp-setup.ps1)`",
-    "code-quality": (
-        "advisory by name, gating in effect: the ruff F step inside "
-        "`Code Quality` fails the job, and build-status compares "
-        "needs.code-quality.result, so the gate only reaches the branch "
-        "through `Build Status` -- which nothing currently requires"
-    ),
-}
+# Blocking jobs that no required check covers, each with the reason.  Empty
+# since 2026-11-08, when the ruleset began requiring `Build Status`, which
+# covers every job it aggregates.  It must stay empty: an entry here is a
+# deliberate decision to let a blocking job fail without blocking a merge, and
+# the stale-entry test rejects one the ruleset no longer needs.
+KNOWN_DRIFT: dict[str, str] = {}
 
 SNAPSHOT_STALE_DAYS = 90
 
