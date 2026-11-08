@@ -1,6 +1,7 @@
 """HTTP dispatch: timeout scaling, reconnection, and GET/POST helpers."""
 
 import json
+import os
 import time
 
 from . import discovery
@@ -222,6 +223,11 @@ def _try_reconnect(
     """Reconnect one request to its original project without clobbering a switch."""
     base = connection or state.get_connection_snapshot()
     if not base.connected_project:
+        return None
+    # Keep an explicitly configured listener pinned after a failed request,
+    # including when startup also verified a project name at that URL.
+    explicit_url = (os.getenv("GHIDRA_MCP_URL") or "").strip()
+    if explicit_url and base.active_tcp == explicit_url:
         return None
 
     candidate = _discover_project_connection(base.connected_project)
