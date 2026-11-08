@@ -19,6 +19,7 @@ import com.xebyte.core.ProjectProgramProvider;
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
 import ghidra.framework.model.ProjectLocator;
@@ -27,8 +28,10 @@ import ghidra.framework.project.DefaultProjectManager;
 import ghidra.framework.store.LockException;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
+import ghidra.util.task.TaskMonitor;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -44,6 +47,7 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
 
     private Project project;
     private GhidraProject ghidraProject;  // For headless project management
+    private volatile CheckoutLeases leases;  // null: never check out or in automatically
 
     /**
      * Create a new HeadlessProgramProvider.
@@ -57,6 +61,78 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
     @Override
     protected Project project() {
         return project;
+    }
+
+    /** Check out what is opened from now on, for {@code leases} to settle once it goes idle. */
+    public void useLeases(CheckoutLeases leases) {
+        this.leases = leases;
+    }
+
+    @Override
+    public Program openDomainFile(DomainFile df) throws Exception {
+        CheckoutLeases current = leases;
+        if (current == null) {
+            return super.openDomainFile(df);
+        }
+        // Already open is not a new open: a checkout now would leave this copy behind it.
+        if (isOpen(df.getPathname())) {
+            return super.openDomainFile(df);
+        }
+        DomainFile target = checkOutForLease(df);
+        Program program = super.openDomainFile(target);
+        long now = System.currentTimeMillis();
+        if (target.isCheckedOut()) {
+            current.opened(target.getPathname(), program.getModificationNumber(), now);
+        } else if (target.isVersioned()) {
+            current.openedReadOnly(target.getPathname(), now);
+        }
+        return program;
+    }
+
+    private boolean isOpen(String path) {
+        for (Program program : getAllOpenPrograms()) {
+            DomainFile file = program.getDomainFile();
+            if (file != null && path.equals(file.getPathname())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Take the exclusive checkout a write will need. When someone else holds it the program
+     * still opens, read-only, because reading must not depend on who is editing.
+     */
+    private DomainFile checkOutForLease(DomainFile df) {
+        if (!df.isVersioned() || df.isCheckedOut()) {
+            return df;
+        }
+        try {
+            if (!df.checkout(true, TaskMonitor.DUMMY)) {
+                Msg.warn(this, df.getPathname() + " is checked out elsewhere; opening read-only");
+                return df;
+            }
+            ProjectData data = df.getParent().getProjectData();
+            data.refresh(true);
+            DomainFile again = data.getFile(df.getPathname());
+            return again != null ? again : df;
+        } catch (Exception e) {
+            Msg.warn(this, "Could not check out " + df.getPathname() + "; opening read-only: "
+                + e.getMessage());
+            return df;
+        }
+    }
+
+    /** Hand every checkout already in the project to the leases, so a restart strands none. */
+    private void adoptCheckouts(DomainFolder folder, CheckoutLeases current) throws IOException {
+        for (DomainFile file : folder.getFiles()) {
+            if (file.isCheckedOut()) {
+                current.adopt(file.getPathname(), System.currentTimeMillis());
+            }
+        }
+        for (DomainFolder sub : folder.getFolders()) {
+            adoptCheckouts(sub, current);
+        }
     }
 
     /**
@@ -313,6 +389,14 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
 
         if (project == null) {
             return OpenProjectResult.fail("ProjectManager returned null for " + ghidraUrl);
+        }
+        CheckoutLeases current = leases;
+        if (current != null) {
+            try {
+                adoptCheckouts(project.getProjectData().getRootFolder(), current);
+            } catch (IOException e) {
+                Msg.warn(this, "Could not scan for existing checkouts: " + e.getMessage());
+            }
         }
         return OpenProjectResult.ok(
                 parsed.repo(), true, parsed.repo(), projectParent.toAbsolutePath().toString());

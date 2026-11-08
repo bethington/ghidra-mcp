@@ -45,6 +45,56 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
+class TestUrlPin(unittest.TestCase):
+    """GHIDRA_MCP_PIN_URL keeps the bridge on GHIDRA_MCP_URL when a local Ghidra starts.
+
+    Without it a local instance's socket outranks the configured URL, so opening Ghidra
+    to look at something would silently move every call off the shared headless server.
+    """
+
+    def _live_local_instance(self):
+        import tempfile
+        from pathlib import Path
+
+        folder = Path(tempfile.mkdtemp())
+        (folder / "ghidra-1.sock").touch()
+        return folder
+
+    def test_pinned_ignores_a_local_instance(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery, transport
+
+        folder = self._live_local_instance()
+        with (
+            patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": "1"}),
+            patch.object(transport, "get_socket_dir_candidates", return_value=[folder]) as candidates,
+        ):
+            self.assertEqual(discovery.discover_instances(), [])
+        candidates.assert_not_called()
+
+    def test_unpinned_still_scans_for_local_instances(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery, transport
+
+        with (
+            patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": ""}),
+            patch.object(transport, "get_socket_dir_candidates", return_value=[]) as candidates,
+        ):
+            discovery.discover_instances()
+        candidates.assert_called_once()
+
+    def test_only_a_truthy_value_pins(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery
+
+        for value, pinned in (("1", True), ("true", True), ("YES", True), ("0", False), ("", False)):
+            with patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": value}):
+                self.assertEqual(discovery.url_is_pinned(), pinned, value)
+
+
 class TestTcpPortScan(unittest.TestCase):
     """Test _scan_tcp_for_project (issue #175 + Copilot review): when UDS
     discovery returns nothing (e.g., AF_UNIX unavailable on the host), the

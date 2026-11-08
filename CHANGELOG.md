@@ -36,6 +36,30 @@ ignored.
   text is empty. The advertised contract now matches the readback callers
   actually observe.
 
+### Added — sharing a Ghidra Server between headless and a GUI
+
+- `GHIDRA_MCP_AUTO_CHECKIN_IDLE_SECONDS`: the headless server takes the exclusive checkout on
+  open, checks edited programs in after they go idle, undoes the checkout of untouched ones, and
+  closes idle read-only copies. Writes to a program someone else holds are refused instead of
+  applied to a copy that could never be saved.
+- `GHIDRA_MCP_PIN_URL`: keeps the bridge on `GHIDRA_MCP_URL` when a local Ghidra starts.
+- `tools/bridge_via_tunnel.py`: runs the bridge against a remote server through a per-session SSH
+  tunnel, reading the token over SSH so no client config holds it.
+- `PROJECT_PATH` accepts a `ghidra://` URL in the Docker image.
+
+### Fixed — headless connection state after a restart
+
+- `/server/status` reads the live connection instead of a remembered flag. The open project
+  shares the server adapter and can reconnect it without `connect()`, so after a host restart the
+  status said `connected: false` with a stale error for two days while every checkout succeeded.
+- A shared project the server refuses at startup is retried with a capped backoff, until it opens
+  or a project is opened by a call. Started together, the Ghidra Server can still be coming up.
+
+### Fixed — headless password expiry
+
+- A password set by `svrAdmin -reset` expires after 24 hours unless the user changes it, which an
+  unattended server cannot be prompted to do. It is now stored as permanent on connect.
+
 ### Fixed — facade mode compatibility (#527)
 
 - Keep the full tool surface as the default; register the five facade tools only
