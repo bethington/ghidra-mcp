@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-23T22:27:39Z",
+  "captured_at": "2026-11-08T08:20:01Z",
   "repo": "bethington/ghidra-mcp",
   "default_branch": "dev",
   "rulesets": [
@@ -37,6 +37,7 @@
         "refs/heads/main"
       ],
       "required_status_checks": [
+        "Build Status",
         "Java Build (Maven) (25)",
         "Python Tests (pytest) (3.10)",
         "Python Tests (pytest) (3.11)",
