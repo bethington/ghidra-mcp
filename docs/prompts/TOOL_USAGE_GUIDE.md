@@ -926,11 +926,13 @@ fields such as `signature` does not open the decompiler.
 
 For a recovered local, send its current name with both the justified `type` and
 optional final `name` in one `set_variables` call. The batch uses one original
-symbol view and verifies a fresh decompilation and the attached database type.
-Re-read `decompiler_symbols` after a write because SSA names can change. A failed
-batch rolls back when the endpoint owns the transaction. Within a script or other
-ambient transaction, the enclosing owner must decide whether to commit or undo
-partial changes. Rename-only requests do not pin an inferred type.
+symbol view and verifies the attached database type through that same symbol,
+without a verification decompile. Re-read `decompiler_symbols` after a write
+because SSA names can change. An unknown name or failed write rolls back the
+whole batch, including a named-only batch, when the endpoint owns the transaction.
+Within a script or other ambient transaction, the enclosing owner must decide
+whether to commit or undo partial changes. Rename-only requests do not pin an
+inferred type.
 
 Exact C builtin spellings select builtins; use a category-qualified name to select
 an imported typedef with the same name. `code *` is ambiguous: use an explicit

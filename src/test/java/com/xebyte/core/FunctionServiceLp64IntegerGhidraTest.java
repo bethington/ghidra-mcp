@@ -14,7 +14,6 @@ import org.junit.*;
 import java.util.List;
 
 import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
 
 /** Native LP64 fixture only: no server, saved project, or target execution. */
 public class FunctionServiceLp64IntegerGhidraTest {
@@ -77,15 +76,10 @@ public class FunctionServiceLp64IntegerGhidraTest {
         return type.clone(program.getDataTypeManager());
     }
 
-    /** Keep real storage, PC, and owning function; only model native integer decoding. */
-    private HighFunction canonicalView(HighSymbol realSymbol, DataType canonical) {
-        HighSymbol decoded = spy(realSymbol);
-        doReturn(canonical).when(decoded).getDataType();
-        HighFunction view = mock(HighFunction.class);
-        LocalSymbolMap locals = mock(LocalSymbolMap.class);
-        when(view.getLocalSymbolMap()).thenReturn(locals);
-        when(locals.getSymbols()).thenAnswer(i -> List.of(decoded).iterator());
-        return view;
+    private Variable stored(HighSymbol symbol) {
+        Variable stored = HighFunctionDBUtil.getFunctionVariable(symbol);
+        assertNotNull("annotation must attach to the original symbol's storage and first-use PC", stored);
+        return stored;
     }
 
     private HighSymbol write(String spelling) {
@@ -93,12 +87,13 @@ public class FunctionServiceLp64IntegerGhidraTest {
         Response response = service.setLocalVariableType(
             function, before.getName(), spelling, program);
         assertTrue(response.toJson(), response instanceof Response.Ok);
-        HighSymbol fresh = service.findSymbolByName(high(), before.getName());
+        stored(before);
+        var fresh = service.decompileFunctionNoRetry(function, program);
         assertNotNull(fresh);
-        assertNotNull("annotation must attach by storage and first-use PC",
-            HighFunctionDBUtil.getFunctionVariable(fresh));
+        assertTrue(fresh.getErrorMessage(), fresh.decompileCompleted());
+        assertTrue(fresh.getDecompiledFunction().getC().contains(before.getName()));
         assertEquals("[RE] Preserve LP64 fixture plate.", function.getComment());
-        return fresh;
+        return before;
     }
 
     @Test public void cSpellingChoosesBuiltinInsteadOfImportedTypedef() {
@@ -118,37 +113,37 @@ public class FunctionServiceLp64IntegerGhidraTest {
     }
 
     @Test public void nativeSignedIntegerWriteHasAttachedExactDbType() {
-        HighSymbol fresh = write("long long");
+        HighSymbol written = write("long long");
         DataType expected = inProgram(LongLongDataType.dataType);
-        assertTrue(expected.isEquivalent(HighFunctionDBUtil.getFunctionVariable(fresh).getDataType()));
-        assertNull(FunctionService.verifyVariableUpdate(high(), fresh.getName(), expected));
+        assertTrue(expected.isEquivalent(stored(written).getDataType()));
+        assertNull(service.verifyPersistedVariableUpdate(written, written.getName(), expected));
     }
 
     @Test public void nativeUnsignedIntegerWriteHasAttachedExactDbType() {
-        HighSymbol fresh = write("unsigned long long");
+        HighSymbol written = write("unsigned long long");
         DataType expected = inProgram(UnsignedLongLongDataType.dataType);
-        assertTrue(expected.isEquivalent(HighFunctionDBUtil.getFunctionVariable(fresh).getDataType()));
-        assertNull(FunctionService.verifyVariableUpdate(high(), fresh.getName(), expected));
+        assertTrue(expected.isEquivalent(stored(written).getDataType()));
+        assertNull(service.verifyPersistedVariableUpdate(written, written.getName(), expected));
     }
 
     @Test public void signedCanonicalViewRequiresRealAttachedLongLongAnnotation() {
-        HighSymbol fresh = write("long long");
+        HighSymbol written = write("long long");
         DataType expected = inProgram(LongLongDataType.dataType);
         DataType canonical = AbstractIntegerDataType.getSignedDataType(8, program.getDataTypeManager());
         assertTrue(canonical.getPathName(), canonical instanceof LongDataType);
-        assertFalse("fixture must exercise normalization", expected.isEquivalent(canonical));
-        assertNull(FunctionService.verifyVariableUpdate(
-            canonicalView(fresh, canonical), fresh.getName(), expected));
+        assertFalse("fixture must exercise LP64 rendering differences", expected.isEquivalent(canonical));
+        assertFalse(FunctionService.variableTypesMatch(expected, canonical));
+        assertNull(service.verifyPersistedVariableUpdate(written, written.getName(), expected));
     }
 
     @Test public void unsignedCanonicalViewRequiresRealAttachedLongLongAnnotation() {
-        HighSymbol fresh = write("unsigned long long");
+        HighSymbol written = write("unsigned long long");
         DataType expected = inProgram(UnsignedLongLongDataType.dataType);
         DataType canonical = AbstractIntegerDataType.getUnsignedDataType(8, program.getDataTypeManager());
         assertTrue(canonical.getPathName(), canonical instanceof UnsignedLongDataType);
         assertFalse(expected.isEquivalent(canonical));
-        assertNull(FunctionService.verifyVariableUpdate(
-            canonicalView(fresh, canonical), fresh.getName(), expected));
+        assertFalse(FunctionService.variableTypesMatch(expected, canonical));
+        assertNull(service.verifyPersistedVariableUpdate(written, written.getName(), expected));
     }
 
     @Test public void matchingInferredIntegerWithoutDbAttachmentCannotSucceed() {
@@ -156,26 +151,24 @@ public class FunctionServiceLp64IntegerGhidraTest {
         assertEquals(0, function.getLocalVariables().length);
         assertNull(HighFunctionDBUtil.getFunctionVariable(inferred));
         DataType expected = inProgram(LongLongDataType.dataType);
-        String error = FunctionService.verifyVariableUpdate(
-            canonicalView(inferred, inProgram(LongDataType.dataType)), inferred.getName(), expected);
+        String error = service.verifyPersistedVariableUpdate(inferred, inferred.getName(), expected);
         assertNotNull(error);
         assertTrue(error, error.contains("No persisted DB variable"));
     }
 
     @Test public void staleUndefinedDbAnnotationCannotBorrowInferredIntegerType() throws Exception {
-        HighSymbol fresh = write("long long");
-        Variable stored = HighFunctionDBUtil.getFunctionVariable(fresh);
+        HighSymbol written = write("long long");
+        Variable stored = stored(written);
         int tx = program.startTransaction("Stale DB regression fixture");
         try { stored.setDataType(Undefined8DataType.dataType, SourceType.USER_DEFINED); }
         finally { program.endTransaction(tx, true); }
-        String error = FunctionService.verifyVariableUpdate(
-            canonicalView(fresh, inProgram(LongDataType.dataType)), fresh.getName(),
-            inProgram(LongLongDataType.dataType));
+        String error = service.verifyPersistedVariableUpdate(
+            written, written.getName(), inProgram(LongLongDataType.dataType));
         assertNotNull(error);
         assertTrue(error, error.contains("Persisted DB type mismatch"));
     }
 
-    @Test public void integerNormalizationPreservesAliasEnumPointerWidthAndSignedness() {
+    @Test public void readbackMatchingRejectsAliasEnumPointerWidthAndSignedness() {
         DataType signed = inProgram(LongLongDataType.dataType);
         DataType unsigned = inProgram(UnsignedLongLongDataType.dataType);
         DataType alias = new TypedefDataType(new CategoryPath("/Imported"),
@@ -184,28 +177,26 @@ public class FunctionServiceLp64IntegerGhidraTest {
         enumeration.add("ONE", 1);
         for (DataType other : List.of(unsigned, inProgram(IntegerDataType.dataType), alias,
                 enumeration, new PointerDataType(IntegerDataType.dataType, 8))) {
-            assertFalse(other.getPathName(), FunctionService.canonicalLp64IntegerTypesMatch(signed, other));
-            assertFalse(other.getPathName(), FunctionService.canonicalLp64IntegerTypesMatch(other, signed));
+            assertFalse(other.getPathName(), FunctionService.variableTypesMatch(signed, other));
+            assertFalse(other.getPathName(), FunctionService.variableTypesMatch(other, signed));
         }
-        assertFalse(FunctionService.canonicalLp64IntegerTypesMatch(alias,
-            inProgram(UnsignedLongDataType.dataType)));
-        assertFalse(FunctionService.canonicalLp64IntegerTypesMatch(unsigned, alias));
+        assertFalse(FunctionService.variableTypesMatch(alias, inProgram(UnsignedLongDataType.dataType)));
+        assertFalse(FunctionService.variableTypesMatch(unsigned, alias));
         // Non-LP64 long stays strict even when long long has eight bytes.
         assertEquals(4, LongDataType.dataType.getLength());
-        assertFalse(FunctionService.canonicalLp64IntegerTypesMatch(signed, LongDataType.dataType));
+        assertFalse(FunctionService.variableTypesMatch(signed, LongDataType.dataType));
     }
 
     @Test public void canonicalViewCannotHideWrongSignednessInAttachedDbAnnotation() {
-        HighSymbol fresh = write("unsigned long long");
-        String error = FunctionService.verifyVariableUpdate(
-            canonicalView(fresh, inProgram(LongDataType.dataType)), fresh.getName(),
-            inProgram(LongLongDataType.dataType));
+        HighSymbol written = write("unsigned long long");
+        String error = service.verifyPersistedVariableUpdate(
+            written, written.getName(), inProgram(LongLongDataType.dataType));
         assertNotNull(error);
         assertTrue(error, error.contains("Persisted DB type mismatch"));
     }
 
     @Test public void attachedIntegerDoesNotPermitFreshAliasEnumPointerOrDifferentWidth() {
-        HighSymbol fresh = write("unsigned long long");
+        HighSymbol written = write("unsigned long long");
         DataType expected = inProgram(UnsignedLongLongDataType.dataType);
         EnumDataType enumeration = new EnumDataType("Flags", 8);
         enumeration.add("ONE", 1);
@@ -214,10 +205,10 @@ public class FunctionServiceLp64IntegerGhidraTest {
         for (DataType other : List.of(imported, enumeration,
                 new PointerDataType(IntegerDataType.dataType, 8),
                 inProgram(UnsignedIntegerDataType.dataType), inProgram(LongDataType.dataType))) {
-            String error = FunctionService.verifyVariableUpdate(
-                canonicalView(fresh, other), fresh.getName(), expected);
+            assertFalse(other.getPathName(), FunctionService.variableTypesMatch(other, expected));
+            String error = service.verifyPersistedVariableUpdate(written, written.getName(), other);
             assertNotNull(other.getPathName(), error);
-            assertTrue(error, error.contains("did not survive fresh decompilation"));
+            assertTrue(error, error.contains("Persisted DB type mismatch"));
         }
     }
 }

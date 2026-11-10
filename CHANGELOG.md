@@ -11,12 +11,17 @@ Changes on `dev` after 7.0.0.
 ### Fixed: recovered variable type persistence (#642)
 
 - Type and rename decompiler-only locals through their recovered symbols in one
-  batch, then verify the attached database annotation and a fresh decompilation.
+  batch, then verify the attached database annotation through the original
+  symbol. This avoids a verification decompile for every type write. Batches
+  touching only existing storage variables do not decompile at all.
+- Contract change: `set_variables` is atomic for named-only batches as well as
+  mixed stack/named batches. An unknown name or failed write now rolls back the
+  whole batch instead of applying the other entries and reporting an item error.
   Failed batches roll back when the endpoint owns the transaction; errors inside
   an ambient transaction leave the enclosing owner's work intact.
-- Resolve the exact C spelling `unsigned long long` as a builtin. Permit LP64
-  long/long-long rendering only after verifying the exact persisted type, width
-  and signedness. Reject ambiguous `code *` requests that resolve to an enum.
+- Resolve the exact C spelling `unsigned long long` as a builtin. Verify the
+  exact persisted type, width and signedness instead of relying on LP64
+  long/long-long rendering. Reject ambiguous `code *` requests that resolve to an enum.
 
 ### Fixed: imported global audit applicability (#643)
 

@@ -1737,50 +1737,42 @@ Map<String, Object> out = new LinkedHashMap<>();
         return null;
     }
 
-    /** Verify the view the caller will actually read, rather than just a DB setter's return. */
-    static String verifyVariableUpdate(HighFunction fresh, String name, DataType expectedType) {
-        return verifyVariableUpdate(fresh, name, expectedType,
+    /**
+     * Verify the database annotation through the same recovered symbol used for
+     * the write. A fresh SSA symbol can resolve to dynamic hash storage even
+     * when the requested register or stack annotation is present, so looking
+     * the variable up through that fresh symbol produces a false negative and
+     * requires an otherwise unnecessary second decompilation.
+     */
+    String verifyPersistedVariableUpdate(HighSymbol symbol, String name, DataType expectedType) {
+        return verifyPersistedVariableUpdate(symbol, name, expectedType,
             HighFunctionDBUtil::getFunctionVariable);
     }
 
-    /** The lookup uses the fresh symbol's storage and first-use PC, never its name alone. */
-    static String verifyVariableUpdate(HighFunction fresh, String name, DataType expectedType,
-            java.util.function.Function<HighSymbol, Variable> persistedVariable) {
-        if (fresh == null) return "Fresh decompilation has no HighFunction";
-        Iterator<HighSymbol> symbols = fresh.getLocalSymbolMap().getSymbols();
-        while (symbols.hasNext()) {
-            HighSymbol symbol = symbols.next();
-            if (!symbol.getName().equals(name)) continue;
-            if (expectedType == null) return null;
-
-            // Inferred HighSymbol types can already look correct while a stale,
-            // name-only HASH record is still undefined. Verify the annotation
-            // actually attached to this symbol before accepting any rendering.
-            Variable stored;
-            try {
-                stored = persistedVariable.apply(symbol);
-            } catch (Exception e) {
-                return "Could not verify persisted annotation for '" + name + "': " + e.getMessage();
-            }
-            if (stored == null) {
-                return "No persisted DB variable is attached to fresh symbol '" + name
-                    + "' by storage and first-use PC";
-            }
-            if (!variableTypesMatch(expectedType, stored.getDataType())) {
-                return "Persisted DB type mismatch for '" + name + "': requested "
-                    + expectedType.getPathName() + ", stored " + stored.getDataType().getPathName();
-            }
-            if (!variableTypesMatch(expectedType, symbol.getDataType())
-                    && !canonicalLp64IntegerTypesMatch(expectedType, symbol.getDataType())) {
-                return "Type write did not survive fresh decompilation for '" + name
-                    + "': requested " + expectedType.getPathName() + ", read "
-                    + symbol.getDataType().getPathName()
-                    + ". A dynamic/SSA annotation may not have attached to the recovered variable.";
-            }
-            return null;
+    static String verifyPersistedVariableUpdate(HighSymbol symbol, String name,
+            DataType expectedType, java.util.function.Function<HighSymbol, Variable> persistedVariable) {
+        if (symbol == null) {
+            return "Variable '" + name + "' was not present in the original recovered view";
         }
-        return "Variable '" + name + "' was not recovered after the write; "
-            + "its SSA scope may have split or changed. Re-read the function's variables.";
+        Variable stored;
+        try {
+            stored = persistedVariable.apply(symbol);
+        } catch (Exception e) {
+            return "Could not verify persisted annotation for '" + name + "': " + e.getMessage();
+        }
+        if (stored == null) {
+            return "No persisted DB variable is attached to original symbol '" + name
+                + "' by storage and first-use PC";
+        }
+        if (!name.equals(stored.getName())) {
+            return "Persisted DB name mismatch: requested '" + name + "', stored '"
+                + stored.getName() + "'";
+        }
+        if (expectedType != null && !variableTypesMatch(expectedType, stored.getDataType())) {
+            return "Persisted DB type mismatch for '" + name + "': requested "
+                + expectedType.getPathName() + ", stored " + stored.getDataType().getPathName();
+        }
+        return null;
     }
 
     /** Ghidra represents an opaque void pointer as undefined*, never as a scalar undefined. */
@@ -1793,31 +1785,6 @@ Map<String, Object> out = new LinkedHashMap<>();
                 && ghidra.program.model.data.Undefined.isUndefined(recovered.getDataType());
         }
         return false;
-    }
-
-    /**
-     * Ghidra's anonymous 8-byte integer decoder chooses LP64 long before
-     * same-width long long. This is only a fresh-view normalization; the
-     * persisted DB annotation must still match exactly above. Named aliases,
-     * enums, pointers, characters and differing widths/signedness stay strict.
-     */
-    static boolean canonicalLp64IntegerTypesMatch(DataType expected, DataType actual) {
-        if (expected.getLength() != 8 || actual.getLength() != 8
-                || !ghidra.program.model.data.CategoryPath.ROOT.equals(expected.getCategoryPath())
-                || !ghidra.program.model.data.CategoryPath.ROOT.equals(actual.getCategoryPath())) {
-            return false;
-        }
-        boolean signedPair =
-            (expected instanceof ghidra.program.model.data.LongDataType
-                && actual instanceof ghidra.program.model.data.LongLongDataType)
-            || (expected instanceof ghidra.program.model.data.LongLongDataType
-                && actual instanceof ghidra.program.model.data.LongDataType);
-        boolean unsignedPair =
-            (expected instanceof ghidra.program.model.data.UnsignedLongDataType
-                && actual instanceof ghidra.program.model.data.UnsignedLongLongDataType)
-            || (expected instanceof ghidra.program.model.data.UnsignedLongLongDataType
-                && actual instanceof ghidra.program.model.data.UnsignedLongDataType);
-        return signedPair || unsignedPair;
     }
 
     private HighFunction freshVariableView(Function function, Program program) {
@@ -1854,9 +1821,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                 SourceType.USER_DEFINED // Mark as user-defined
             );
 
-            String verification = verifyVariableUpdate(
-                freshVariableView(symbol.getHighFunction().getFunction(), program),
-                symbol.getName(), dataType);
+            String verification = verifyPersistedVariableUpdate(
+                symbol, symbol.getName(), dataType);
             if (verification != null) {
                 if (errorDetails != null) errorDetails.append(verification);
                 return false;
@@ -3773,7 +3739,6 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
                 Map<String, Map<String, String>> named = new LinkedHashMap<>(variables);
                 named.keySet().removeIf(key -> key.startsWith("Stack["));
-                HighFunction original = named.isEmpty() ? null : freshVariableView(func, program);
                 Variable[] originalVariables = named.isEmpty() ? new Variable[0] : func.getAllVariables();
                 for (StackVariablePlan plan : stackPlans) {
                     for (Variable overlap : plan.overlaps()) func.removeVariable(overlap);
@@ -3794,20 +3759,26 @@ Map<String, Object> out = new LinkedHashMap<>();
                     Map<String, Variable> lowTargets = new LinkedHashMap<>();
                     Map<String, DataType> types = new LinkedHashMap<>();
                     Map<String, String> names = new LinkedHashMap<>();
+                    HighFunction original = null;
+                    boolean originalRequested = false;
                     for (var entry : named.entrySet()) {
                         String oldName = entry.getKey();
                         var spec = entry.getValue();
                         String desired = spec.get("name");
                         names.put(oldName, desired == null || desired.isEmpty() ? oldName : desired);
-                        HighSymbol symbol = original == null ? null : findSymbolByName(original, oldName);
-                        if (symbol != null) highTargets.put(oldName, symbol);
-                        else {
-                            for (Variable local : originalVariables) {
-                                if (local.getName().equals(oldName)) { lowTargets.put(oldName, local); break; }
+                        for (Variable local : originalVariables) {
+                            if (local.getName().equals(oldName)) { lowTargets.put(oldName, local); break; }
+                        }
+                        if (!lowTargets.containsKey(oldName)) {
+                            // Decompile only when a name has no existing DB variable.
+                            // Entirely storage-backed batches need no decompilation at all.
+                            if (!originalRequested) {
+                                original = freshVariableView(func, program);
+                                originalRequested = true;
                             }
-                            if (!lowTargets.containsKey(oldName)) {
-                                throw new Refusal("Variable not found in original view: " + oldName);
-                            }
+                            HighSymbol symbol = original == null ? null : findSymbolByName(original, oldName);
+                            if (symbol != null) highTargets.put(oldName, symbol);
+                            else throw new Refusal("Variable not found in original view: " + oldName);
                         }
                         String requested = spec.get("type");
                         if (requested != null) {
@@ -3846,13 +3817,13 @@ Map<String, Object> out = new LinkedHashMap<>();
                             if (warning != null) warningsLocal.add(warning);
                         }
                     }
-                    HighFunction fresh = highTargets.isEmpty() ? null : freshVariableView(func, program);
                     for (String oldName : named.keySet()) {
                         String newName = names.get(oldName);
                         DataType type = types.get(oldName);
                         if (type == null && newName.equals(oldName)) continue;
                         if (highTargets.containsKey(oldName)) {
-                            String error = verifyVariableUpdate(fresh, newName, type);
+                            String error = verifyPersistedVariableUpdate(
+                                highTargets.get(oldName), newName, type);
                             if (error != null) throw new Refusal(error);
                         } else {
                             Variable target = lowTargets.get(oldName);

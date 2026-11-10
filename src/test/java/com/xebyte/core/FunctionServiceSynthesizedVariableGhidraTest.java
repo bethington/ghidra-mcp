@@ -7,9 +7,11 @@ import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.program.database.ProgramBuilder;
 import ghidra.program.database.ProgramDB;
+import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.data.IntegerDataType;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Variable;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
@@ -81,6 +83,26 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         return result.getHighFunction();
     }
 
+    private String freshC(Function target) {
+        var result = service.decompileFunctionNoRetry(target, program);
+        assertNotNull("real native decompiler returned no result", result);
+        assertTrue(result.getErrorMessage(), result.decompileCompleted());
+        return result.getDecompiledFunction().getC();
+    }
+
+    private Variable stored(Function target, String name) {
+        for (Variable variable : target.getAllVariables()) {
+            if (variable.getName().equals(name)) return variable;
+        }
+        fail("No persisted DB variable named " + name);
+        return null;
+    }
+
+    private void assertIntPointer(Variable variable) {
+        assertTrue(variable.getDataType().toString(), variable.getDataType() instanceof Pointer);
+        assertTrue(((Pointer) variable.getDataType()).getDataType().isEquivalent(IntegerDataType.dataType));
+    }
+
     private String synthesizedName() {
         assertEquals("fixture must start with no DB locals", 0, function.getLocalVariables().length);
         var symbols = high().getLocalSymbolMap().getSymbols();
@@ -108,10 +130,9 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         assertEquals(result.toString(), true, result.get("success"));
         assertEquals(1, result.get("types_set"));
         assertEquals(1, result.get("names_set"));
-        HighSymbol updated = service.findSymbolByName(high(), "pLoadedResult");
-        assertNotNull(updated);
-        assertTrue(updated.getDataType().toString(), updated.getDataType() instanceof Pointer);
-        assertTrue(((Pointer) updated.getDataType()).getDataType().isEquivalent(IntegerDataType.dataType));
+        Variable updated = stored(function, "pLoadedResult");
+        assertIntPointer(updated);
+        assertTrue(freshC(function).contains("int *pLoadedResult"));
         assertEquals("[RE] Keep this existing plate.", function.getComment());
     }
 
@@ -130,11 +151,28 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         String name = synthesizedName();
         Response response = service.setLocalVariableType(function, name, "int *", program);
         assertTrue(response.toJson(), response instanceof Response.Ok);
-        HighSymbol updated = service.findSymbolByName(high(), name);
-        assertNotNull(updated);
-        assertTrue(updated.getDataType().toString(), updated.getDataType() instanceof Pointer);
-        assertTrue(((Pointer) updated.getDataType()).getDataType().isEquivalent(IntegerDataType.dataType));
+        Variable updated = stored(function, name);
+        assertIntPointer(updated);
+        assertTrue(freshC(function).contains("int *" + name));
         assertEquals("[RE] Keep this existing plate.", function.getComment());
+    }
+
+    @Test public void singleTypeWriteDoesNotRunAVerificationDecompile() {
+        String name = synthesizedName();
+        FunctionService checked = spy(service);
+        Response response = checked.setLocalVariableType(function, name, "int *", program);
+        assertTrue(response.toJson(), response instanceof Response.Ok);
+        verify(checked, times(1)).decompileFunction(function, program);
+        verify(checked, never()).decompileFunctionNoRetry(function, program);
+    }
+
+    @Test public void batchTypeAndRenameUsesOnlyTheOriginalDecompile() {
+        String name = synthesizedName();
+        FunctionService checked = spy(service);
+        String changes = JsonHelper.toJson(Map.of(name, Map.of("name", "pLoadedResult", "type", "int *")));
+        Map<String, Object> result = data(checked.setVariables(function, changes, program));
+        assertEquals(result.toString(), true, result.get("success"));
+        verify(checked, times(1)).decompileFunctionNoRetry(function, program);
     }
 
     @Test public void establishedApiProducesConcretePointerAfterCommit() throws Exception {
@@ -150,21 +188,17 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
             }
         } finally { program.endTransaction(transaction, true); }
         var result = service.decompileFunctionNoRetry(function, program);
-        System.out.println(result.getDecompiledFunction().getC());
-        HighSymbol updated = service.findSymbolByName(result.getHighFunction(), "pDirectResult");
-        assertNotNull(updated);
-        assertTrue(updated.getDataType().toString(), updated.getDataType() instanceof Pointer);
-        assertTrue(updated.getDataType().toString(),
-            ((Pointer) updated.getDataType()).getDataType().isEquivalent(IntegerDataType.dataType));
+        String c = result.getDecompiledFunction().getC();
+        System.out.println(c);
+        assertTrue(c.contains("int *pDirectResult"));
+        assertIntPointer(stored(function, "pDirectResult"));
     }
 
-    @Test public void failedFreshReadbackRollsBackBatchTypeWrite() {
+    @Test public void failedPersistedReadbackRollsBackBatchTypeWrite() {
         String name = synthesizedName();
-        var original = service.decompileFunctionNoRetry(function, program);
         FunctionService checked = spy(service);
-        // Simulate a native dynamic/SSA mapping that fails to recover the new
-        // annotation. The DB write is real; its stale readback must not succeed.
-        doReturn(original).when(checked).decompileFunctionNoRetry(function, program);
+        doReturn("Forced persisted readback failure").when(checked)
+            .verifyPersistedVariableUpdate(any(HighSymbol.class), anyString(), any(DataType.class));
         Response result = checked.setVariables(function, JsonHelper.toJson(Map.of(
             name, Map.of("type", "int *"))), program);
         assertTrue(result.toJson(), result instanceof Response.Err);
@@ -172,23 +206,23 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         assertEquals("[RE] Keep this existing plate.", function.getComment());
     }
 
-    @Test public void failedFreshReadbackRollsBackSingleTypeWrite() {
+    @Test public void failedPersistedReadbackRollsBackSingleTypeWrite() {
         String name = synthesizedName();
-        var original = service.decompileFunctionNoRetry(function, program);
         FunctionService checked = spy(service);
-        doReturn(original).when(checked).decompileFunctionNoRetry(function, program);
+        doReturn("Forced persisted readback failure").when(checked)
+            .verifyPersistedVariableUpdate(any(HighSymbol.class), anyString(), any(DataType.class));
         Response result = checked.setLocalVariableType(function, name, "int *", program);
         assertTrue(result.toJson(), result instanceof Response.Err);
-        assertTrue(result.toJson(), result.toJson().contains("persisted DB variable") || result.toJson().contains("did not survive fresh decompilation"));
+        assertTrue(result.toJson(), result.toJson().contains("Forced persisted readback failure"));
         assertEquals(0, function.getLocalVariables().length);
         assertEquals("[RE] Keep this existing plate.", function.getComment());
     }
 
     @Test public void ambientOwnerRetainsWorkAndReceivesTruthfulPartialFailure() {
         String name = synthesizedName();
-        var original = service.decompileFunctionNoRetry(function, program);
         FunctionService checked = spy(service);
-        doReturn(original).when(checked).decompileFunctionNoRetry(function, program);
+        doReturn("Forced persisted readback failure").when(checked)
+            .verifyPersistedVariableUpdate(any(HighSymbol.class), anyString(), any(DataType.class));
         int outer = program.startTransaction("Unrelated outer work");
         try {
             function.setComment("[RE] Outer owner's existing work.");
@@ -205,10 +239,9 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         String name = synthesizedName();
         Response response = service.setLocalVariableType(function, name, "void *", program);
         assertTrue(response.toJson(), response instanceof Response.Ok);
-        HighSymbol updated = service.findSymbolByName(high(), name);
-        assertNotNull(updated);
+        Variable updated = stored(function, name);
         assertTrue(updated.getDataType().toString(), updated.getDataType() instanceof Pointer);
-        System.out.println("Opaque pointer fresh readback: " + updated.getDataType());
+        System.out.println("Opaque pointer fresh readback: " + freshC(function));
     }
     @Test public void renameOnlyDoesNotRequireAnExplicitType() {
         String name = synthesizedName();
@@ -217,7 +250,9 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         assertEquals(true, result.get("success"));
         assertEquals(0, result.get("types_set"));
         assertEquals(1, result.get("names_set"));
-        assertNotNull(service.findSymbolByName(high(), "loadedResult"));
+        assertNotNull(stored(function, "loadedResult"));
+        // An undefined register local can be omitted from fresh SSA output. Do
+        // not pin its inferred type just to make that rendering deterministic.
         assertEquals("[RE] Keep this existing plate.", function.getComment());
     }
 
@@ -231,14 +266,10 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         Map<String, Object> result = data(service.setVariables(target,
             JsonHelper.toJson(Map.of(parameter.getName(), Map.of("name", "pInput", "type", "int *"))), program));
         assertEquals(true, result.get("success"));
-        var fresh = service.decompileFunctionNoRetry(target, program).getHighFunction();
-        HighSymbol updated = service.findSymbolByName(fresh, "pInput");
-        assertNotNull(updated);
-        var stored = HighFunctionDBUtil.getFunctionVariable(updated);
-        assertNotNull(stored);
+        assertTrue(freshC(target).contains("int *pInput"));
+        var stored = stored(target, "pInput");
         assertTrue(stored instanceof ghidra.program.model.listing.Parameter);
-        assertTrue(stored.getDataType() instanceof Pointer);
-        assertTrue(((Pointer) stored.getDataType()).getDataType().isEquivalent(IntegerDataType.dataType));
+        assertIntPointer(stored);
         assertEquals(SourceType.USER_DEFINED, stored.getSource());
     }
 }
