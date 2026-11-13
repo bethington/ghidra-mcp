@@ -8,6 +8,14 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: headless `--help` names the fallback socket directory (#653)
+
+The help said the server always serves on
+`$XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock`. With `XDG_RUNTIME_DIR` unset it
+serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
+`/tmp`), as the resolver and the bridge's discovery always did. The help now
+lists both directories; where the socket goes is unchanged.
+
 ### Fixed: imported global audit applicability (#643)
 
 - Include read-only symbol, memory-block and binding provenance in global audits.
