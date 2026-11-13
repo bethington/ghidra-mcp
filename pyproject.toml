@@ -87,7 +87,7 @@ test = [
 # dbgeng bindings for Ghidra's TraceRmi debugger backend (Windows-only bits).
 debugger = [
     "pybag==2.2.16 ; sys_platform == 'win32'",
-    "comtypes==1.4.17 ; sys_platform == 'win32'",
+    "comtypes==1.5.0 ; sys_platform == 'win32'",
     "protobuf>=7.35.1",
 ]
 dev = [
