@@ -31,6 +31,7 @@ from . import render  # noqa: F401
 from . import resources  # noqa: F401
 from . import subscriptions  # noqa: F401
 from . import change_poller  # noqa: F401
+from . import connect  # noqa: F401
 from . import static_tools  # noqa: F401
 from . import facade  # noqa: F401 (5-tool surface; registers ghidra_* on import)
 from . import debugger  # noqa: F401

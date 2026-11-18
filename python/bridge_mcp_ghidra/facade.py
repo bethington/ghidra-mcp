@@ -429,10 +429,12 @@ async def ghidra_connect(project: str) -> str:
     Args:
         project: Project name (or substring) to connect to.
     """
-    from . import static_tools as _st
+    from . import connect
 
+    # A refused selection raises GhidraToolError, so it reaches the client as
+    # isError rather than as a "successful" error dict (#652).
     result = await state.run_blocking_ghidra_call(
-        _st._connect_instance_sync,
+        connect._connect_instance_sync,
         project,
         bind_connection=False,
     )
