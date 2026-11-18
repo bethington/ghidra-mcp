@@ -236,7 +236,7 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
     }
 
     /**
-     * Open a Ghidra project from a .gpr file path (local-only).
+     * Open a local Ghidra project (any form {@link #resolveLocalProject} accepts).
      *
      * @param projectPath Path to the .gpr file (e.g., "/projects/MyProject.gpr")
      * @return true if project was opened successfully
@@ -245,34 +245,128 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
         return openProject(projectPath, null).success;
     }
 
+    /**
+     * Where a caller-supplied local project path points: the directory holding
+     * {@code <name>.gpr} and {@code <name>.rep}, plus the name; or why it
+     * points nowhere. Pure filesystem inspection, no Ghidra state, so the
+     * decision table is testable without an installation.
+     */
+    public static final class LocalProjectRef {
+        public final File parentDir;
+        public final String name;
+        public final String error;
+
+        private LocalProjectRef(File parentDir, String name, String error) {
+            this.parentDir = parentDir;
+            this.name = name;
+            this.error = error;
+        }
+
+        static LocalProjectRef of(File parentDir, String name) {
+            return new LocalProjectRef(parentDir, name, null);
+        }
+
+        static LocalProjectRef fail(String error) {
+            return new LocalProjectRef(null, null, error);
+        }
+
+        public boolean ok() {
+            return error == null;
+        }
+
+        /** The project's {@code .gpr} marker file. Only meaningful when {@link #ok()}. */
+        public File markerFile() {
+            return new File(parentDir, name + ProjectLocator.PROJECT_FILE_SUFFIX);
+        }
+    }
+
+    /**
+     * Resolve a local project path in any of the forms a caller can hold:
+     *
+     * <ul>
+     *   <li>{@code <parent>/<name>.gpr} -- the marker file, what
+     *       {@code /create_project} and {@code /list_projects} return;</li>
+     *   <li>{@code <parent>/<name>.rep} -- the project data directory;</li>
+     *   <li>{@code <parent>/<name>} -- Ghidra's parent-plus-name locator, which
+     *       is what {@code /create_project} returned before #656 and what
+     *       {@code ProjectLocator.toString()} prints. It is not on disk; it
+     *       resolves when {@code <parent>/<name>.gpr} exists;</li>
+     *   <li>a directory holding exactly one {@code .gpr}.</li>
+     * </ul>
+     *
+     * <p>A directory holding several projects is refused with the candidates
+     * listed, never resolved to whichever {@code listFiles} happened to return
+     * first. So is a path that is both a locator and a directory of projects.
+     */
+    public static LocalProjectRef resolveLocalProject(String projectPath) {
+        if (projectPath == null || projectPath.isBlank()) {
+            return LocalProjectRef.fail("Project path required");
+        }
+        String gpr = ProjectLocator.PROJECT_FILE_SUFFIX;
+        String rep = ProjectLocator.PROJECT_DIR_SUFFIX;
+        File f = new File(projectPath.trim()).getAbsoluteFile();
+        String fname = f.getName();
+        File parent = f.getParentFile();
+
+        if (fname.endsWith(gpr) || (fname.endsWith(rep) && f.isDirectory())) {
+            String suffix = fname.endsWith(gpr) ? gpr : rep;
+            String name = fname.substring(0, fname.length() - suffix.length());
+            if (parent == null || !new File(parent, name + gpr).isFile()) {
+                return LocalProjectRef.fail("Project not found: " + new File(parent, name + gpr).getPath());
+            }
+            return LocalProjectRef.of(parent, name);
+        }
+
+        boolean isLocator = parent != null && new File(parent, fname + gpr).isFile();
+        List<File> contained = new ArrayList<>();
+        if (f.isDirectory()) {
+            File[] found = f.listFiles((dir, n) -> n.endsWith(gpr) && new File(dir, n).isFile());
+            if (found != null) {
+                contained.addAll(List.of(found));
+                contained.sort((a, b) -> a.getName().compareTo(b.getName()));
+            }
+        }
+
+        if (isLocator && !contained.isEmpty()) {
+            return LocalProjectRef.fail("Ambiguous project path " + f.getPath() + ": it names the project "
+                + new File(parent, fname + gpr).getPath() + " and is also a directory holding "
+                + describe(contained) + ". Pass the .gpr path of the one you mean.");
+        }
+        if (isLocator) {
+            return LocalProjectRef.of(parent, fname);
+        }
+        if (!f.isDirectory()) {
+            return LocalProjectRef.fail("Project not found: " + f.getPath()
+                + " is not a directory and " + fname + gpr + " does not exist beside it");
+        }
+        if (contained.isEmpty()) {
+            return LocalProjectRef.fail("No .gpr file found in: " + f.getPath());
+        }
+        if (contained.size() > 1) {
+            return LocalProjectRef.fail("Directory " + f.getPath() + " holds " + contained.size()
+                + " Ghidra projects; pass the .gpr path of the one to open: " + describe(contained));
+        }
+        String only = contained.get(0).getName();
+        return LocalProjectRef.of(f, only.substring(0, only.length() - gpr.length()));
+    }
+
+    private static String describe(List<File> gprFiles) {
+        List<String> paths = new ArrayList<>();
+        for (File g : gprFiles) {
+            paths.add(g.getPath());
+        }
+        return paths.toString();
+    }
+
     private OpenProjectResult openLocalProject(String projectPath) {
         try {
-            File projectFile = new File(projectPath);
-
-            // Handle both .gpr file path and directory path
-            File projectDir;
-            String projectName;
-
-            if (projectPath.endsWith(".gpr")) {
-                projectDir = projectFile.getParentFile();
-                projectName = projectFile.getName().replace(".gpr", "");
-            } else {
-                // Assume it's a directory containing the project
-                projectDir = projectFile;
-                // Look for .gpr file in the directory
-                File[] gprFiles = projectDir.listFiles((dir, name) -> name.endsWith(".gpr"));
-                if (gprFiles == null || gprFiles.length == 0) {
-                    Msg.error(this, "No .gpr file found in: " + projectPath);
-                    return OpenProjectResult.fail("No .gpr file found in: " + projectPath);
-                }
-                projectName = gprFiles[0].getName().replace(".gpr", "");
+            LocalProjectRef ref = resolveLocalProject(projectPath);
+            if (!ref.ok()) {
+                Msg.error(this, ref.error);
+                return OpenProjectResult.fail(ref.error);
             }
-
-            if (!projectDir.exists()) {
-                Msg.error(this, "Project directory not found: " + projectDir.getAbsolutePath());
-                return OpenProjectResult.fail(
-                        "Project directory not found: " + projectDir.getAbsolutePath());
-            }
+            File projectDir = ref.parentDir;
+            String projectName = ref.name;
 
             // Close existing project if any
             if (project != null) {
@@ -448,6 +542,14 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
     }
 
     /**
+     * The open project's {@code .gpr} marker file -- the path that reopens it
+     * through {@code /open_project} or {@code --project} -- or null if none is open.
+     */
+    public File getProjectMarkerFile() {
+        return project != null ? project.getProjectLocator().getMarkerFile() : null;
+    }
+
+    /**
      * Creates a new Ghidra project.
      *
      * @param parentDir The parent directory for the new project
@@ -482,22 +584,20 @@ public class HeadlessProgramProvider extends ProjectProgramProvider {
      */
     public boolean deleteProject(String projectPath) {
         try {
-            File projectFile = new File(projectPath);
-            File projectDir;
-            String projectName;
-            if (projectPath.endsWith(".gpr")) {
-                projectDir = projectFile.getParentFile();
-                projectName = projectFile.getName().replace(".gpr", "");
-            } else {
-                projectDir = projectFile.getParentFile() != null ? projectFile.getParentFile() : projectFile;
-                projectName = projectFile.getName();
+            // Same resolver as open, so a path deletes the project it would open --
+            // and a directory of several projects deletes nothing rather than
+            // whichever one came first.
+            LocalProjectRef ref = resolveLocalProject(projectPath);
+            if (!ref.ok()) {
+                Msg.error(this, "Not deleting: " + ref.error);
+                return false;
             }
+            String projectName = ref.name;
+            ProjectLocator locator = new ProjectLocator(ref.parentDir.getAbsolutePath(), projectName);
             // Close if this is the currently open project
-            if (project != null && projectName.equals(project.getName())) {
+            if (project != null && locator.equals(project.getProjectLocator())) {
                 closeProject();
             }
-            ghidra.framework.model.ProjectLocator locator =
-                new ghidra.framework.model.ProjectLocator(projectDir.getAbsolutePath(), projectName);
             // Delete project files (marker file + project directory)
             java.io.File markerFile = locator.getMarkerFile();
             java.io.File projectDirFile = locator.getProjectDir();

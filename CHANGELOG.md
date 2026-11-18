@@ -8,6 +8,31 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: `create_project` returns a path that reopens the project (#656)
+
+Reported by @coygeek. `create_project` returned `path` as `parentDir/name`, which
+is Ghidra's locator form and names nothing on disk — Ghidra writes the siblings
+`name.gpr` and `name.rep` — and `open_project` (and the headless `--project`
+option) read any non-`.gpr` path as a directory to scan, so the documented
+create → open sequence failed with "No .gpr file found".
+
+- **Response change:** `create_project`'s `path` is now the project's `.gpr` file.
+  The response also carries `parent_dir`; `name` is unchanged. The tool
+  description now says what Ghidra creates and what `path` is.
+- `/mcp/instance_info`'s `project_path` reports the `.gpr` file too, on both
+  servers (it printed the same extensionless locator). A transient `ghidra://`
+  view has no marker file and keeps its URL.
+- The headless `open_project`, `delete_project` and `--project` accept the old
+  extensionless value as well, so a caller that saved it keeps working.
+- A directory holding more than one `.gpr` is refused with every candidate listed,
+  instead of opening — or, for `delete_project`, deleting — whichever one the
+  filesystem listed first. A path that is both a project locator and a directory
+  of projects is refused as ambiguous. The resolved project, not just the typed
+  path, must sit inside `GHIDRA_MCP_FILE_ROOT`: the locator form names a sibling
+  of its own path, so `<root>` itself would otherwise reach `<root>.gpr` outside it.
+- `delete_project` given a missing project now errors; it used to report
+  success having deleted nothing.
+
 ### Fixed: imported global audit applicability (#643)
 
 - Include read-only symbol, memory-block and binding provenance in global audits.
