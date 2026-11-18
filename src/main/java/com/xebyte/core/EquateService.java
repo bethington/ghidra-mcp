@@ -56,7 +56,7 @@ final class EquateService {
                 return Response.ok(out);
             });
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -86,7 +86,7 @@ final class EquateService {
                 default -> throw new AssertionError(operation);
             });
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 

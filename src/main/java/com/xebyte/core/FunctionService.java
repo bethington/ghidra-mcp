@@ -3496,7 +3496,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         // Try individual operations (transactions will be closed in finally)
                         fallbackResult = batchRenameVariablesIndividual(func, variableRenames, program);
                     } catch (Exception fallbackE) {
-                        errorRef = "Batch operation failed and fallback also failed: " + e.getMessage();
+                        errorRef = "Batch operation failed and fallback also failed: " + ServiceUtils.failureMessage(e);
                         Msg.error(this, "Both batch and individual rename operations failed", e);
                     }
                 } finally {
