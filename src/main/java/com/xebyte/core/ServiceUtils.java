@@ -556,6 +556,10 @@ public final class ServiceUtils {
      * Ghidra's decompiler contract. The returned interface is already opened on
      * {@code program}; the caller owns its lifecycle and must call
      * {@link DecompInterface#dispose()} when finished.
+     *
+     * @throws DecompilerInitException when the native decompiler cannot start;
+     *         the interface is already disposed and the message carries Ghidra's
+     *         own reason ({@code getLastMessage()})
      */
     public static DecompInterface createConfiguredDecompiler(Program program) {
         return createConfiguredDecompiler(program, null);
@@ -571,13 +575,62 @@ public final class ServiceUtils {
     public static DecompInterface createConfiguredDecompiler(Program program,
             java.util.function.Consumer<DecompileOptions> tune) {
         DecompInterface decomp = new DecompInterface();
-        DecompileOptions opts = new DecompileOptions();
-        opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
-        if (tune != null) tune.accept(opts);
-        decomp.setOptions(opts);
-        decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
-        decomp.openProgram(program);                // openProgram AFTER setOptions
+        try {
+            DecompileOptions opts = new DecompileOptions();
+            opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+            if (tune != null) tune.accept(opts);
+            decomp.setOptions(opts);
+            decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
+        } catch (RuntimeException | Error e) {
+            disposeQuietly(decomp);
+            throw e;
+        }
+        return openOrThrow(decomp, program);           // openProgram AFTER setOptions
+    }
+
+    /**
+     * Open {@code decomp} on {@code program}, or dispose it and throw
+     * {@link DecompilerInitException} carrying Ghidra's {@code getLastMessage()}.
+     *
+     * <p>{@code openProgram} signals a native decompiler that cannot start by
+     * returning {@code false}, not by throwing. Ignoring that left a half-open
+     * interface whose first decompile came back cancelled, so every caller
+     * reported "cancelled" instead of the reason (#654). Package-private so a test
+     * can drive it with a mocked interface; there is no other way in.
+     */
+    static DecompInterface openOrThrow(DecompInterface decomp, Program program) {
+        boolean opened;
+        try {
+            opened = decomp.openProgram(program);
+        } catch (RuntimeException | Error e) {
+            disposeQuietly(decomp);
+            throw e;
+        }
+        if (!opened) {
+            String reason = null;
+            try {
+                reason = decomp.getLastMessage();
+            } catch (RuntimeException ignored) {
+                // The reason is best-effort; the failure itself is not.
+            }
+            disposeQuietly(decomp);
+            String name = null;
+            try {
+                name = program != null ? program.getName() : null;
+            } catch (RuntimeException ignored) {
+                // A closed program can refuse even its name; the message survives without it.
+            }
+            throw new DecompilerInitException(name, reason);
+        }
         return decomp;
+    }
+
+    private static void disposeQuietly(DecompInterface decomp) {
+        try {
+            decomp.dispose();
+        } catch (RuntimeException ignored) {
+            // Disposing an interface whose process never started can throw; it is gone either way.
+        }
     }
 
     // ========================================================================

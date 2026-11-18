@@ -60,6 +60,8 @@ public final class McpHttpServer {
     private UdsHttpServer uds;
     private com.sun.net.httpserver.HttpServer tcp;
     private volatile int tcpPort = -1;
+    /** Where the socket goes. A seam so a test can make the bind fail; see {@link #startUds}. */
+    private Supplier<Path> socketDir = McpHttpServer::defaultSocketDir;
 
     /**
      * @param serverKind     {@code "gui"} or {@code "headless"}, reported by every identity route
@@ -286,19 +288,50 @@ public final class McpHttpServer {
 
     // ------------------------------------------------------------------ listeners
 
-    private void startUds() throws IOException {
-        Path socketDir = resolveSocketDir(
+    private static Path defaultSocketDir() {
+        return resolveSocketDir(
                 System.getenv("XDG_RUNTIME_DIR"),
                 System.getenv("TMPDIR"),
                 System.getProperty("java.io.tmpdir"),
                 System.getProperty("user.name", "unknown"));
+    }
+
+    /** Test seam: put the socket under {@code dir} instead of the resolved socket dir. */
+    void setSocketDirForTest(Path dir) {
+        this.socketDir = () -> dir;
+    }
+
+    /**
+     * Bind the Unix socket. The field is assigned only once {@code start()} has bound:
+     * {@link #isRunning}, {@link #socketPath} and the "nothing came up" check in
+     * {@link #start} all read {@code uds != null} as "a listener exists". Assigning it
+     * before the bind made a failed bind look like a live socket -- the headless server
+     * printed "Serving on" a path nothing listened on and stayed up in socket-only mode,
+     * and the GUI advertised the dead path (#657).
+     */
+    private void startUds() throws IOException {
+        Path socketDir = this.socketDir.get();
         Files.createDirectories(socketDir);
         hardenSocketDir(socketDir);
         cleanStaleSockets(socketDir);
-        uds = new UdsHttpServer(socketDir.resolve("ghidra-" + ProcessHandle.current().pid() + ".sock"), executor);
+        Path socketPath = socketDir.resolve("ghidra-" + ProcessHandle.current().pid() + ".sock");
+        // A local, deliberately shadowing the field: the field is published only once
+        // this one has bound.
+        UdsHttpServer uds = new UdsHttpServer(socketPath, executor);
         // A browser cannot open a Unix socket, so no cross-origin guard here.
         routes.forEach((path, handler) -> uds.createContext(path, guard(handler, false)));
-        uds.start();
+        try {
+            uds.start();
+        } catch (IOException | RuntimeException e) {
+            // Release whatever the half-started server holds (an opened, unbound channel).
+            try {
+                uds.stop();
+            } catch (RuntimeException ignored) {
+                // Cleanup is best-effort; the bind failure is what gets reported.
+            }
+            throw new IOException("Could not bind Unix socket " + socketPath + ": " + e, e);
+        }
+        this.uds = uds;
     }
 
     private void startTcp(Config config) throws IOException {
@@ -327,12 +360,20 @@ public final class McpHttpServer {
             Msg.warn(this, "Port " + config.port() + " was in use; bound " + tcpPort
                     + " instead. The bridge discovers it via /mcp/instance_info.");
         }
-        routes.forEach((path, handler) -> {
-            UdsHttpServer.Handler guarded = guard(handler, true);
-            tcp.createContext(path, sun -> guarded.handle(new SunHttpExchangeAdapter(sun)));
-        });
-        tcp.setExecutor(executor);
-        tcp.start();
+        try {
+            routes.forEach((path, handler) -> {
+                UdsHttpServer.Handler guarded = guard(handler, true);
+                tcp.createContext(path, sun -> guarded.handle(new SunHttpExchangeAdapter(sun)));
+            });
+            tcp.setExecutor(executor);
+            tcp.start();
+        } catch (RuntimeException e) {
+            // Same rule as startUds: a listener that did not start is not reported as one.
+            tcp.stop(0);
+            tcp = null;
+            tcpPort = -1;
+            throw e;
+        }
         Msg.info(this, "GhidraMCP TCP server listening on " + config.bindAddress() + ":" + tcpPort);
     }
 

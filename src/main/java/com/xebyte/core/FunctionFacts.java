@@ -55,6 +55,15 @@ public final class FunctionFacts {
     @FunctionalInterface
     public interface Decompiler {
         DecompileResults decompile(Function function);
+
+        /**
+         * Why no decompile can run at all -- the native decompiler failed to initialise
+         * ({@link DecompilerInitException}) -- or {@code null} when it can. Lets a
+         * {@code null} result say why instead of "decompiler unavailable" (#654).
+         */
+        default String unavailableReason() {
+            return null;
+        }
     }
 
     /** Which fields (null = all) and how much call context and disassembly to include. */
@@ -229,7 +238,7 @@ public final class FunctionFacts {
                 } else {
                     out.put("decompiled_code", null);
                     out.put("decompile_failed", true);
-                    out.put("decompile_error", decompileError(decomp));
+                    out.put("decompile_error", decompileError(decomp, decompiler));
                 }
             }
         }
@@ -240,7 +249,7 @@ public final class FunctionFacts {
             if (high == null || high.getLocalSymbolMap() == null) {
                 out.put("decompiler_symbols", null);
                 out.put("decompile_failed", true);
-                out.put("decompile_error", high == null ? decompileError(decomp) : "No local symbol map");
+                out.put("decompile_error", high == null ? decompileError(decomp, decompiler) : "No local symbol map");
             } else {
                 List<Map<String, Object>> symbols = new ArrayList<>();
                 Iterator<HighSymbol> iterator = high.getLocalSymbolMap().getSymbols();
@@ -666,6 +675,21 @@ public final class FunctionFacts {
     public static boolean requiresTargetDecompile(Set<String> fields) {
         return fields == null || fields.contains("decompiled_code")
             || fields.contains("refs") || fields.contains("decompiler_symbols");
+    }
+
+    /**
+     * As {@link #decompileError(DecompileResults)}, but a missing result is explained by
+     * the decompiler's own {@link Decompiler#unavailableReason()} when it has one -- a
+     * decompiler that never started says so rather than "decompiler unavailable".
+     */
+    static String decompileError(DecompileResults results, Decompiler decompiler) {
+        if (results == null && decompiler != null) {
+            String reason = decompiler.unavailableReason();
+            if (reason != null && !reason.isBlank()) {
+                return reason;
+            }
+        }
+        return decompileError(results);
     }
 
     /** Why a decompile produced no code, in the decompiler's own words when it gave any. */

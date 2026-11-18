@@ -45,6 +45,12 @@ final class RequestScopedDecompiler implements FunctionFacts.Decompiler, AutoClo
     private final int timeoutSeconds;
     private final Map<Address, DecompileResults> byEntry = new HashMap<>();
     private DecompInterface decomp;
+    /**
+     * Why the interface could not be opened, once it could not. Request-wide: a native
+     * decompiler that will not start fails identically for every later entry, so the
+     * remaining entries report this instead of spawning another doomed process each.
+     */
+    private String initFailure;
 
     /**
      * @param opener returns a configured interface already opened on the program, as
@@ -61,12 +67,20 @@ final class RequestScopedDecompiler implements FunctionFacts.Decompiler, AutoClo
         if (byEntry.containsKey(entry)) {
             return byEntry.get(entry);
         }
+        if (initFailure != null) {
+            byEntry.put(entry, null);
+            return null;
+        }
         DecompileResults results = null;
         try {
             if (decomp == null) {
                 decomp = opener.get();
             }
             results = decomp.decompileFunction(function, timeoutSeconds, new ConsoleTaskMonitor());
+        } catch (DecompilerInitException e) {
+            // The opener has already disposed what it created.
+            initFailure = e.getMessage();
+            Msg.warn(this, initFailure);
         } catch (Exception e) {
             Msg.warn(this, "Single-attempt decompile failed for " + function.getName() + ": "
                 + e.getMessage());
@@ -77,6 +91,11 @@ final class RequestScopedDecompiler implements FunctionFacts.Decompiler, AutoClo
         }
         byEntry.put(entry, results);
         return results;
+    }
+
+    @Override
+    public String unavailableReason() {
+        return initFailure;
     }
 
     @Override

@@ -141,13 +141,50 @@ public class FunctionService {
     /** As above, with a hook to adjust decompiler options for this call only. */
     public DecompileResults decompileFunctionNoRetry(Function func, Program program,
             java.util.function.Consumer<ghidra.app.decompiler.DecompileOptions> tune) {
+        return attemptDecompileNoRetry(func, program, tune).results();
+    }
+
+    /**
+     * One single-attempt decompile and, when it produced nothing, why.
+     *
+     * <p>{@code results} is exactly what {@link #decompileFunctionNoRetry} returns.
+     * {@code failure} is non-null only when no results exist at all -- the native
+     * decompiler failed to initialise ({@link DecompilerInitException}) or the call
+     * threw -- which {@code decompileFunctionNoRetry}'s bare {@code null} cannot say.
+     */
+    public record DecompileAttempt(DecompileResults results, String failure) {
+        /** Whether the decompile completed. */
+        public boolean completed() {
+            return results != null && results.decompileCompleted();
+        }
+
+        /**
+         * Why the decompile produced no code: the init/exception failure when there is one,
+         * else the decompiler's own words via {@link FunctionFacts#decompileError}.
+         */
+        public String failureReason() {
+            return failure != null ? failure : FunctionFacts.decompileError(results);
+        }
+    }
+
+    /** {@link #attemptDecompileNoRetry(Function, Program, java.util.function.Consumer)} with default options. */
+    public DecompileAttempt attemptDecompileNoRetry(Function func, Program program) {
+        return attemptDecompileNoRetry(func, program, null);
+    }
+
+    /** As {@link #decompileFunctionNoRetry}, keeping the failure reason (#654). */
+    public DecompileAttempt attemptDecompileNoRetry(Function func, Program program,
+            java.util.function.Consumer<ghidra.app.decompiler.DecompileOptions> tune) {
         DecompInterface decomp = null;
         try {
             decomp = ServiceUtils.createConfiguredDecompiler(program, tune);
-            return decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+            return new DecompileAttempt(
+                decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor()),
+                null);
         } catch (Exception e) {
-            Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + e.getMessage());
-            return null;
+            String msg = ServiceUtils.failureMessage(e);
+            Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + msg);
+            return new DecompileAttempt(null, msg);
         } finally {
             if (decomp != null) {
                 try { decomp.dispose(); } catch (Exception ignored) {}
@@ -198,6 +235,11 @@ public class FunctionService {
                     Msg.warn(this, "Decompilation attempt " + attempt + " failed: " + errorMsg);
                 }
 
+            } catch (DecompilerInitException e) {
+                // A decompiler that cannot start will not start on the next attempt either;
+                // retrying would only spawn the same doomed process twice more (#654).
+                Msg.error(this, e.getMessage());
+                return null;
             } catch (Exception e) {
                 Msg.warn(this, "Decompilation attempt " + attempt + " threw exception: " + e.getMessage());
             } finally {
