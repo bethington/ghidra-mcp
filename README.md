@@ -1046,7 +1046,7 @@ write the path with forward slashes.
 Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 
 - `close_project` - Close the currently open project **(headless only)**
-- `create_project` - Create a new Ghidra project **(headless only)**
+- `create_project` - Create a new Ghidra project and make it the open project **(headless only)**
 - `open_project` - Open an existing Ghidra project (.gpr file or directory)
 
 ### Listing & Enumeration

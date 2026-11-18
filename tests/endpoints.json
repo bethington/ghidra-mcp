@@ -801,7 +801,7 @@
       "servers": [
         "headless"
       ],
-      "description": "Create a new Ghidra project"
+      "description": "Create a new Ghidra project and make it the open project. Ghidra stores a project as two siblings in parentDir: the marker file <name>.gpr and the data directory <name>.rep. The response's path is the .gpr file, which /open_project and the headless server's --project option both accept."
     },
     {
       "path": "/create_property_map",
