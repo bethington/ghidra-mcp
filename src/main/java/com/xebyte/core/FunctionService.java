@@ -3782,8 +3782,17 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                         String requested = spec.get("type");
                         if (requested != null) {
-                            if (requested.startsWith("undefined")) {
-                                throw new Refusal("Rejected undefined type for " + oldName);
+                            // Refuse only undefined -> undefined, the no-op this guard exists
+                            // for. A defined variable may still be given an undefinedN type
+                            // (int -> undefined4) or an undefined pointer (undefined *).
+                            Variable lowTarget = lowTargets.get(oldName);
+                            DataType currentType = lowTarget != null
+                                    ? lowTarget.getDataType()
+                                    : highTargets.get(oldName).getDataType();
+                            String oldType = currentType == null ? null : currentType.getName();
+                            if (NamingConventions.isUndefinedToUndefined(oldType, requested)) {
+                                throw new Refusal("Rejected: " + oldName + " type " + oldType
+                                        + " -> " + requested + " (still undefined)");
                             }
                             DataType type = ServiceUtils.resolveDataType(program.getDataTypeManager(), requested);
                             if (type == null) throw new Refusal("Unknown type '" + requested + "' for " + oldName);
