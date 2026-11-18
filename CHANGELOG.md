@@ -19,6 +19,10 @@ Changes on `dev` after 7.0.0.
   whole batch instead of applying the other entries and reporting an item error.
   Failed batches roll back when the endpoint owns the transaction; errors inside
   an ambient transaction leave the enclosing owner's work intact.
+- The no-op guard in `set_variables` still refuses only undefined -> undefined,
+  judged against the variable's current type. A defined local can be given an
+  `undefinedN` type or an `undefined *`; an intermediate version refused any
+  requested type starting with `undefined`, failing the whole batch.
 - Resolve the exact C spelling `unsigned long long` as a builtin. Verify the
   exact persisted type, width and signedness instead of relying on LP64
   long/long-long rendering. Reject ambiguous `code *` requests that resolve to an enum.
