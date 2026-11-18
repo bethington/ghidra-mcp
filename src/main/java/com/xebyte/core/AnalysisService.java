@@ -1318,7 +1318,9 @@ public class AnalysisService {
             // function worst case), and abandoned retries leak
             // DecompInterface contexts and eventually OOM Ghidra. Single 60s attempt is sufficient for scoring;
             // a clean null return lets the caller record a miss.
-            DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
             if (decompResults != null && decompResults.decompileCompleted()) {
                 decompilationAvailable = true;
                 ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
@@ -1502,6 +1504,11 @@ public class AnalysisService {
             }
 
             data.put("decompilation_available", decompilationAvailable);
+            if (!decompilationAvailable) {
+                // Why the score fell back to the low-level API -- e.g. a native
+                // decompiler that failed to initialise (#654).
+                data.put("decompile_error", decompAttempt.failureReason());
+            }
 
             // Bulk stack-array heuristic: functions with a very high count of
             // generic locals (e.g., data table initializers with 1,000+ decomposed
@@ -1993,7 +2000,9 @@ public class AnalysisService {
             // pathological functions and gives MCP handlers no way to
             // fail fast. A clean miss here is preferable to a 6-minute
             // thread stall.
-            DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
             if (decompResults != null && decompResults.decompileCompleted() &&
                 decompResults.getDecompiledFunction() != null) {
                 String decompiledCode = decompResults.getDecompiledFunction().getC();
@@ -2014,6 +2023,11 @@ public class AnalysisService {
                         data.put("decompiled_code_withheld", variantIssue);
                     }
                 }
+            } else {
+                // Same keys get_functions uses. Without them a decompiler that never
+                // started was indistinguishable from a field nobody asked for (#654).
+                data.put("decompile_failed", true);
+                data.put("decompile_error", decompAttempt.failureReason());
             }
 
             // Include xrefs
@@ -3895,7 +3909,9 @@ public class AnalysisService {
             // matching change in analyze_function_complete above —
             // retrying pathological functions at 60→120→180s wedges
             // the HTTP thread pool for 6+ minutes per function.
-            DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
             if (decompResults != null && decompResults.decompileCompleted() &&
                 decompResults.getDecompiledFunction() != null) {
                 String decompiledCode = decompResults.getDecompiledFunction().getC();
@@ -3916,6 +3932,11 @@ public class AnalysisService {
                         data.put("decompiled_code_withheld", variantIssue);
                     }
                 }
+            } else {
+                // Same keys get_functions uses. Without them a decompiler that never
+                // started was indistinguishable from a field nobody asked for (#654).
+                data.put("decompile_failed", true);
+                data.put("decompile_error", decompAttempt.failureReason());
             }
 
             // Callees with ordinal and documentation status
@@ -4201,11 +4222,12 @@ public class AnalysisService {
                 return Response.err("No function contains address: " + addressStr);
             }
 
-            DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-            if (decompResults == null || !decompResults.decompileCompleted()) {
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
+            if (!decompAttempt.completed()) {
                 return Response.err("Decompile failed for function " + func.getName()
-                    + (decompResults != null && decompResults.getErrorMessage() != null
-                        ? ": " + decompResults.getErrorMessage() : ""));
+                    + ": " + decompAttempt.failureReason());
             }
             HighFunction hf = decompResults.getHighFunction();
             if (hf == null) {
@@ -4582,14 +4604,14 @@ public class AnalysisService {
                    description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
             @Param(value = "program", defaultValue = "") Program program) {
 
-        DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-        if (decompResults == null || !decompResults.decompileCompleted()) {
-            // Surface the underlying decompiler error so callers can diagnose
-            // (matches the convention used elsewhere in this file).
-            String detail = decompResults != null ? decompResults.getErrorMessage() : null;
-            String msg = "Decompilation failed for " + func.getName();
-            if (detail != null && !detail.isEmpty()) msg += ": " + detail;
-            return Response.err(msg);
+        FunctionService.DecompileAttempt decompAttempt =
+            functionService.attemptDecompileNoRetry(func, program);
+        DecompileResults decompResults = decompAttempt.results();
+        if (!decompAttempt.completed()) {
+            // Surface the underlying decompiler error -- or the reason it never
+            // started (#654) -- so callers can diagnose.
+            return Response.err("Decompilation failed for " + func.getName()
+                + ": " + decompAttempt.failureReason());
         }
         HighFunction hf = decompResults.getHighFunction();
         if (hf == null) {

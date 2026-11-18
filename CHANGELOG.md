@@ -80,6 +80,35 @@ create → open sequence failed with "No .gpr file found".
 - `delete_project` given a missing project now errors; it used to report
   success having deleted nothing.
 
+### Fixed: a decompiler that cannot start says so instead of "cancelled" (#654)
+
+`DecompInterface.openProgram` reports a native decompiler that cannot start
+(missing natives, an unsupported platform, a source install) by returning
+`false`, and that result was ignored. The half-open interface's first decompile
+came back cancelled, so `get_functions` reported `decompile_error: "cancelled"`
+and `force_decompile` gave no reason at all. `createConfiguredDecompiler` — the
+one place a decompiler is created — now disposes the interface and throws
+`DecompilerInitException` carrying Ghidra's `getLastMessage()`. The error reads
+"Decompiler failed to initialise for <program>: <reason>" in `get_functions`
+(`decompile_error`, opened once per request rather than once per entry),
+`force_decompile`, `analyze_function_complete` / `analyze_for_documentation`
+(which now add `decompile_failed` + `decompile_error` instead of silently
+omitting `decompiled_code`), `analyze_function_completeness` (`decompile_error`
+beside `decompilation_available: false`), `analyze_dataflow` and
+`get_function_pcode`; the retrying decompile path stops after the first such
+failure. Reported by @coygeek.
+
+### Fixed: a Unix socket that fails to bind is no longer reported as serving (#657)
+
+`McpHttpServer` assigned its UDS listener before the bind, so a failed bind left
+it looking live: the "nothing came up" check never fired, `socketPath()`
+returned a path nothing listened on, and the headless server printed
+"Serving on <socket>" and stayed up in socket-only mode with no listener. The
+listener is now recorded only after it binds (a failed one is cleaned up). A
+socket-only start fails as designed; with TCP enabled the server stays up on
+TCP, logs a warning naming the socket path and the cause, and reports only the
+TCP listener. Reported by @coygeek.
+
 ### Fixed: imported global audit applicability (#643)
 
 - Include read-only symbol, memory-block and binding provenance in global audits.

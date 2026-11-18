@@ -450,8 +450,19 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         registerEndpoints();
         http.start(new McpHttpServer.Config(true, tcp, bindAddress, port, 1, 10));
         running = true;
-        System.out.println("Serving on " + http.socketPath()
-                + (tcp ? " and " + bindAddress + ":" + http.tcpPort() : ""));
+        // start() throws when nothing came up, so at least one of these exists. Name only
+        // the listeners that actually bound: a socket that failed to bind is reported as
+        // such rather than printed as a path nothing listens on (#657).
+        java.nio.file.Path socket = http.socketPath();
+        String tcpListener = http.tcpPort() > 0 ? bindAddress + ":" + http.tcpPort() : null;
+        if (socket != null && tcpListener != null) {
+            System.out.println("Serving on " + socket + " and " + tcpListener);
+        } else if (socket != null) {
+            System.out.println("Serving on " + socket);
+        } else {
+            System.out.println("Serving on " + tcpListener
+                + " only: the Unix socket did not bind (see the warning above)");
+        }
         if (com.xebyte.core.SecurityConfig.getInstance().isAuthEnabled()) {
             System.out.println("Auth: enabled (GHIDRA_MCP_AUTH_TOKEN)");
         }
