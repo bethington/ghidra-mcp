@@ -16,6 +16,7 @@ import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
 import ghidra.program.model.data.PointerDataType;
+import ghidra.program.model.data.Undefined8DataType;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.classfinder.ClassSearcher;
 import ghidra.util.task.TaskMonitor;
@@ -145,6 +146,38 @@ public class FunctionServiceSynthesizedVariableGhidraTest {
         assertEquals(0, function.getLocalVariables().length);
         assertNull(service.findSymbolByName(high(), "pLoadedResult"));
         assertEquals("[RE] Keep this existing plate.", function.getComment());
+    }
+
+    // The guard refuses undefined -> undefined, the no-op it exists for. It must
+    // not refuse a defined local being given an undefinedN type: a startsWith
+    // check on the requested type did, and took the whole atomic batch with it.
+    // An analysed program's data type manager holds the undefinedN types it uses;
+    // a fresh ProgramBuilder program does not, so add the one these tests request.
+    private void addUndefined8() {
+        builder.withTransaction(() -> program.getDataTypeManager().addDataType(Undefined8DataType.dataType, null));
+    }
+
+    @Test public void definedLocalCanBeGivenAnUndefinedType() {
+        String name = synthesizedName();
+        addUndefined8();
+        HighSymbol before = service.findSymbolByName(high(), name);
+        assertFalse(before.getDataType().getName(), before.getDataType().getName().startsWith("undefined"));
+        Map<String, Object> result = data(service.setVariables(function,
+            JsonHelper.toJson(Map.of(name, Map.of("type", "undefined8"))), program));
+        assertEquals(result.toString(), true, result.get("success"));
+        assertEquals(1, result.get("types_set"));
+        assertEquals("undefined8", stored(function, name).getDataType().getName());
+    }
+
+    @Test public void undefinedToUndefinedIsStillRefused() {
+        String name = synthesizedName();
+        addUndefined8();
+        data(service.setVariables(function,
+            JsonHelper.toJson(Map.of(name, Map.of("type", "undefined8"))), program));
+        Response again = service.setVariables(function,
+            JsonHelper.toJson(Map.of(name, Map.of("type", "undefined8"))), program);
+        assertTrue(again.toJson(), again instanceof Response.Err);
+        assertTrue(again.toJson(), again.toJson().contains("still undefined"));
     }
 
     @Test public void successfulSingleRetypeMustMatchFreshDecompiler() {
