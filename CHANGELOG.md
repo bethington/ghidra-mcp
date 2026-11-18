@@ -15,6 +15,7 @@ only the bridge calls.
 version); see "Ghidra 12.2 and Java 25 are now the supported target" below.
 
 **Compatibility notes.** A few responses changed shape:
+
 - `create_project` returns the `.gpr` path.
 - `/list_class_members` reports `total` instead of `total_members`.
 - `create_folder` no longer takes `program`.
