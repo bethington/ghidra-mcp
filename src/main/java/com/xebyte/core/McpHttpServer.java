@@ -212,11 +212,30 @@ public final class McpHttpServer {
         info.put("version", VersionInfo.getVersion());
         info.put("endpoint_count", endpointCount);
         info.put("project", project != null ? project.getName() : "unknown");
-        info.put("project_path", project != null ? project.getProjectLocator().toString() : "");
+        info.put("project_path", projectPath(project));
         info.put("programs", programs);
         info.putAll(instanceExtras.get());
         info.put("tcp_port", tcpPort);
         return info;
+    }
+
+    /**
+     * {@code instance_info.project_path}: the project's {@code .gpr} marker file, the path
+     * both servers' {@code /open_project} and the headless {@code --project} option accept.
+     * Not {@code ProjectLocator.toString()}, which prints Ghidra's parent-plus-name locator
+     * ({@code <parent>/<name>}) -- a path that exists nowhere on disk (#656). A transient
+     * project (a {@code ghidra://} view with no local storage) has no marker file, so it
+     * keeps the locator's display string, which is then its URL.
+     */
+    public static String projectPath(ghidra.framework.model.Project project) {
+        if (project == null) {
+            return "";
+        }
+        ghidra.framework.model.ProjectLocator locator = project.getProjectLocator();
+        if (locator == null) {
+            return "";
+        }
+        return locator.isTransient() ? locator.toString() : locator.getMarkerFile().getAbsolutePath();
     }
 
     private static void collectPrograms(ghidra.framework.model.DomainFolder folder,
