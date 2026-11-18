@@ -235,11 +235,13 @@ class TestConnectInstanceFailures(unittest.TestCase):
                 side_effect=RuntimeError("HTTP 503"),
             ),
         ):
-            data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("diablo2"))
 
-        self.assertIn("Schema fetch failed", data["error"])
-        self.assertIn("HTTP 503", data["error"])
-        self.assertEqual(data["socket"], "/tmp/d2.sock")
+        message = str(raised.exception)
+        self.assertIn("Schema fetch failed", message)
+        self.assertIn("HTTP 503", message)
+        self.assertIn("/tmp/d2.sock", message)
 
     def test_substring_project_match_is_accepted_after_exact_match_fails(self):
         """connect_instance("diablo") should find the "diablo2" project --
@@ -308,10 +310,11 @@ class TestConnectInstanceFailures(unittest.TestCase):
             patch.object(bridge.registry, "_fetch_schema") as fetch,
             patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
         ):
-            data = json.loads(asyncio.run(bridge.connect_instance("anything")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("anything"))
 
-        self.assertIn("Refusing to connect to invalid TCP URL", data["error"])
-        self.assertIn("evil.example.com", data["error"])
+        self.assertIn("Refusing to connect to invalid TCP URL", str(raised.exception))
+        self.assertIn("evil.example.com", str(raised.exception))
         fetch.assert_not_called()
 
     def test_tcp_failure_resets_transport_state(self):
@@ -323,7 +326,7 @@ class TestConnectInstanceFailures(unittest.TestCase):
         with (
             isolated_bridge() as bridge,
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
-            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value=None),
+            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090"),
             patch.object(
                 bridge.registry,
                 "_fetch_schema",
@@ -332,13 +335,14 @@ class TestConnectInstanceFailures(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
         ):
             bridge.state._transport_mode = "none"
-            data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("diablo2"))
 
             self.assertEqual(bridge.state._transport_mode, "none")
             self.assertIsNone(bridge.state._active_tcp)
 
-        self.assertIn("No instance matching 'diablo2'", data["error"])
-        self.assertEqual(data["available"], [])
+        self.assertIn("No instance matching 'diablo2'", str(raised.exception))
+        self.assertIn("connection refused", str(raised.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -350,9 +354,10 @@ class TestListToolGroups(unittest.TestCase):
     def test_errors_without_a_connection(self):
         with isolated_bridge() as bridge:
             bridge.state._full_schema = []
-            data = json.loads(bridge.list_tool_groups())
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                bridge.list_tool_groups()
 
-        self.assertIn("connect_instance", data["error"])
+        self.assertIn("connect_instance", str(raised.exception))
 
     def test_reports_counts_loaded_and_default_flags(self):
         defs = [
@@ -386,9 +391,10 @@ class TestLoadToolGroup(unittest.TestCase):
     def test_errors_without_a_connection(self):
         with isolated_bridge() as bridge:
             bridge.state._full_schema = []
-            data = json.loads(asyncio.run(bridge.load_tool_group("function")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.load_tool_group("function"))
 
-        self.assertIn("connect_instance", data["error"])
+        self.assertIn("connect_instance", str(raised.exception))
 
     def test_loads_group_registers_tools_and_notifies(self):
         defs = [
@@ -469,10 +475,11 @@ class TestLoadToolGroup(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
             seed_schema(bridge, defs, loaded_groups=set())
-            data = json.loads(asyncio.run(bridge.load_tool_group("nope")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.load_tool_group("nope"))
 
-        self.assertIn("No tools found for group 'nope'", data["error"])
-        self.assertEqual(data["available_groups"], ["stg_alpha", "stg_beta"])
+        self.assertIn("No tools found for group 'nope'", str(raised.exception))
+        self.assertIn("Available groups: stg_alpha, stg_beta.", str(raised.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +491,11 @@ class TestUnloadToolGroup(unittest.TestCase):
     def test_default_group_is_protected(self):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = {"stg_alpha"}
-            data = json.loads(asyncio.run(bridge.unload_tool_group("stg_alpha")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.unload_tool_group("stg_alpha"))
 
-        self.assertIn("Cannot unload default group", data["error"])
-        self.assertEqual(data["default_groups"], ["stg_alpha"])
+        self.assertIn("Cannot unload default group", str(raised.exception))
+        self.assertIn("Default groups: stg_alpha.", str(raised.exception))
 
     def test_unloading_removes_tools_and_notifies(self):
         defs = [
@@ -534,9 +542,10 @@ class TestCheckTools(unittest.TestCase):
 
     def test_blank_input_is_rejected(self):
         with isolated_bridge() as bridge:
-            data = json.loads(asyncio.run(bridge.check_tools("  , ,, ")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.check_tools("  , ,, "))
 
-        self.assertIn("comma-separated", data["error"])
+        self.assertIn("comma-separated", str(raised.exception))
 
     def test_classifies_static_loaded_unloaded_and_unknown(self):
         defs = [
@@ -589,9 +598,10 @@ class TestSearchTools(unittest.TestCase):
 
     def test_blank_query_is_rejected(self):
         with isolated_bridge() as bridge:
-            data = json.loads(asyncio.run(bridge.search_tools("   ")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.search_tools("   "))
 
-        self.assertIn("search keywords", data["error"])
+        self.assertIn("search keywords", str(raised.exception))
 
     def test_name_hits_outrank_description_hits(self):
         with isolated_bridge() as bridge:

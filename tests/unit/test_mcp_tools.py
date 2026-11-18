@@ -97,11 +97,16 @@ class TestToolGroupManagement(unittest.TestCase):
         self.assertIn("unload_tool_group", tools)
 
     def test_list_tool_groups_returns_json(self):
-        from bridge_mcp_ghidra import list_tool_groups
+        from bridge_mcp_ghidra import dispatch, list_tool_groups
 
-        result = json.loads(list_tool_groups())
-        # Either an error (no schema) or a groups list
-        self.assertTrue("error" in result or "groups" in result)
+        # Either a groups list, or (no schema) a raised tool error -- never an
+        # error dict returned as a success (#652).
+        try:
+            result = json.loads(list_tool_groups())
+        except dispatch.GhidraToolError as e:
+            self.assertIn("connect_instance", str(e))
+        else:
+            self.assertIn("groups", result)
 
     def test_core_groups_defined(self):
         from bridge_mcp_ghidra import CORE_GROUPS
@@ -111,11 +116,11 @@ class TestToolGroupManagement(unittest.TestCase):
 
     def test_unload_core_group_blocked(self):
         import asyncio
-        from bridge_mcp_ghidra import unload_tool_group
+        from bridge_mcp_ghidra import dispatch, unload_tool_group
 
-        result = json.loads(asyncio.run(unload_tool_group("function")))
-        self.assertIn("error", result)
-        self.assertIn("default", result["error"].lower())
+        with self.assertRaises(dispatch.GhidraToolError) as raised:
+            asyncio.run(unload_tool_group("function"))
+        self.assertIn("default", str(raised.exception).lower())
 
     def test_load_group_with_schema(self):
         """Loading a group after register_tools_from_schema should work."""
@@ -260,6 +265,9 @@ class TestConnectInstance(unittest.TestCase):
                     "discover_instances",
                     return_value=[{"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}],
                 ),
+                # Pin the UDS path: on Windows CPython (no AF_UNIX) a socket-only
+                # match would otherwise fall through to the TCP default.
+                mock.patch.object(bridge.transport, "uds_supported", return_value=True),
                 mock.patch.object(
                     bridge.transport,
                     "do_request",
