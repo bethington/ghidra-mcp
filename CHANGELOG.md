@@ -25,7 +25,8 @@ Changes on `dev` after 7.0.0.
   requested type starting with `undefined`, failing the whole batch.
 - Resolve the exact C spelling `unsigned long long` as a builtin. Verify the
   exact persisted type, width and signedness instead of relying on LP64
-  long/long-long rendering. Reject ambiguous `code *` requests that resolve to an enum.
+  long/long-long rendering. Reject `code *` unless it resolves to a pointer to a
+  function definition (it used to bind to an unrelated `Code` enum).
 
 ### Fixed: `connect_instance` failures are MCP tool errors (#652)
 
@@ -161,7 +162,12 @@ ignored.
 - A password set by `svrAdmin -reset` expires after 24 hours unless the user changes it, which an
   unattended server cannot be prompted to do. It is now stored as permanent on connect.
 
-### Fixed — facade mode compatibility (#527)
+### Added — facade tool surface (#527)
+
+`--expose facade` (or `GHIDRA_MCP_EXPOSE=facade`) shows only five stable tools —
+`ghidra_status`, `ghidra_connect`, `ghidra_search`, `ghidra_describe` and
+`ghidra_call` — for clients that cannot handle a changing tool list. `hybrid`
+shows both surfaces; `full` stays the default and is unchanged.
 
 - Keep the full tool surface as the default; register the five facade tools only
   for explicit facade/hybrid mode. Preserve the current CLI options and resource
@@ -174,11 +180,20 @@ ignored.
 
 ### Fixed: builds and runs on Ghidra 12.2
 
-Ghidra 12.2 needs Java 25 and moved or removed four APIs GhidraMCP used, so on
-12.2 `get_functions`, `get_language_metadata` and `delete_data_type` failed at
-runtime and the build did not compile. The build now targets the Java level the
-installed Ghidra declares, using any JDK at least that new, and the code calls only
-APIs present in both 12.1 and 12.2.
+Ghidra 12.2 needs Java 25 and moved or removed four APIs that GhidraMCP and its
+bundled scripts used, so on 12.2 `get_functions`, `get_language_metadata` and
+`delete_data_type` failed at runtime and the build did not compile. The Gradle
+build now compiles for the Java level the installed Ghidra declares, with any JDK
+at least that new, and the source uses only APIs present in both 12.1 and 12.2,
+so a Gradle build against 12.1 still works. The released extension targets 12.2
+(see below).
+
+### Fixed: `save_program` cannot wedge the HTTP pool waiting for analysis
+
+Before saving, the server waits for pending auto-analysis, and Ghidra's wait has
+no timeout: if the analysis tool never runs the wait command, the save blocks
+forever, and enough of them occupy all three HTTP threads. The wait is now
+bounded at 20 seconds, after which the save goes ahead.
 
 ### Changed: Ghidra 12.2 and Java 25 are now the supported target
 
@@ -203,8 +218,9 @@ Deploy now writes the plugin class and upgrades markers left by earlier deploys.
 
 ### Added — decompiler symbols, stack locals and equates (#550, #551)
 
-- `get_functions(fields=decompiler_symbols)` returns SSA/register symbols with
-  their name, type and storage, reusing the call's decompiler. Metadata-only
+- `get_functions(fields=decompiler_symbols)` returns the decompiler's local
+  symbols (parameters, stack locals, SSA/register temporaries) with their name,
+  type and storage, reusing the call's decompiler. Metadata-only
   field selections still do not decompile.
 - `set_variables` can create stack locals with a `Stack[offset]` entry and
   `{name, type, create: true, replace: false}`. Naming/type checks run before
@@ -213,21 +229,23 @@ Deploy now writes the plugin class and upgrades markers left by earlier deploys.
   back the whole batch.
 - `list_program_items(kind=equates)` lists definitions and optional references
   using the existing paginated envelope. `set_equate(action=apply|remove|rename)`
-  is the single writer. All mutations use the shared write lock and transaction;
+  is the single equate tool. All mutations use the shared write lock and transaction;
   negative scalars match, and applying a new name replaces the operand's old
   equate for that value. Invalid selections and safety-cap violations make no
-  changes. Definition changes invalidate every interested function in the program.
+  changes. Every `set_equate` call invalidates every function resource the client
+  has read in that program.
 - Schema recordings no longer mistake identifier suffixes such as
   `program_status:` for Windows drive prefixes and corrupt escaped JSON.
 - The six separate tools proposed during 7.1 development are folded into these
   existing readers/writer surfaces before release; they were not in 7.0.0.
-  Original contributions by @sagasm; consolidation and regression fixes follow
-  the maintainer review. Contributor commits are retained.
+  Original contributions by @sagasm, credited as co-author on the squash commit;
+  consolidation and regression fixes follow the maintainer review.
 
 ### Fixed — integer and object-array parameters no longer bind lossily
 
-- Integer parameters reject fractional, out-of-range and missing required values
-  instead of truncating them or binding 0. An empty value (`?limit=`) still means
+- `int` parameters reject fractional, out-of-range and missing required values
+  instead of truncating them or binding 0 (`Integer` and `long` parameters are
+  unchanged). An empty value (`?limit=`) still means
   "not given" and uses the parameter's default.
 - Object-array parameters reject entries that are not objects instead of
   silently dropping them.
@@ -251,10 +269,10 @@ The bridge now serves functions and decompilation trees as MCP resources:
 | `ghidra://program/{program}/index` | Program summary |
 | `ghidra://program/{program}/functions` | `{name, address}` index (capped) |
 | `ghidra://function/{program}/{address}` | The function, rendered as Markdown |
-| `ghidra://function/{program}/by-name/{name}` | Redirect to the address URI |
+| `ghidra://function/{program}/by-name/{name}` | Resolves the name to its address URI (`canonical_uri`) |
 | `ghidra://search/{program}/functions/{pattern}` | Name search |
 | `ghidra://program/{program}/changes` | Change token and per-transport delivery caveats |
-| `ghidra://decompile-tree/{id}` | A tree's status, config and search hints |
+| `ghidra://decompile-tree/{tree_id}` | A tree's status, config and search hints |
 
 - **URIs are keyed by address, never by name.** Renaming is the common write, and MCP
   has no rename notification, so a name-keyed URI would strand a client's cache.
@@ -264,6 +282,8 @@ The bridge now serves functions and decompilation trees as MCP resources:
   `/save_program` above all, which follows nearly every write and would otherwise drop the
   whole cache. `notifications/resources/updated` is sent before the write's response,
   because streamable HTTP drops anything addressed to a request whose response has gone.
+  TYPE writes are the exception: `/find_type_users` can take seconds, so their
+  notifications follow the response on the session's standalone stream.
   `--stateless-http` refuses `resources/subscribe`, and `--json-response` warns that
   notifications cannot be delivered.
 - **`/get_change_token`** returns `<saved time>:<session epoch>:<modification number>`;
@@ -282,7 +302,7 @@ The bridge now serves functions and decompilation trees as MCP resources:
 A program's decompiled C as a file tree an agent searches with its own Grep, Read and
 Glob, so "which functions touch this MMIO page" is one search instead of one tool call per
 function. `decompile_tree_create` registers a tree without sweeping it;
-`decompile_tree_run(action=start|stop)` runs the sweep, which returns in milliseconds;
+`decompile_tree_run(action=start|stop)` queues or cancels the sweep and returns in milliseconds;
 `decompile_tree_status` (read-only, so usable in plan mode) and `STATUS.md` on disk report
 progress; `decompile_tree_configure`, `decompile_tree_pin_module` and
 `decompile_tree_delete` manage it. `/decompile_tree_refresh` is an internal route: it
@@ -368,13 +388,14 @@ project. Discovery checks both transports and deduplicates listeners of the same
 instance; TCP probes send the configured authentication token. Existing auto-connect
 selection is unchanged when no selector is supplied.
 
-### Changed — empty boolean env values mean unset
+### Changed — one parser for bridge boolean values
 
-`GHIDRA_MCP_LAZY=` (and other bool bridge/session spellings) used to
-parse as false because `""` sat in the falsey set. Empty or whitespace now means unset and
-keeps the key's default — the same rule `GHIDRA_MCP_LAZY` already used. Known
+Bridge boolean env values and flags (`GHIDRA_MCP_LAZY`, `GHIDRA_DEBUGGER_TOOLS`, tool
+`dry_run` flags) go through one `parse_bool` helper. Empty or whitespace means unset and
+keeps the default everywhere, the rule `GHIDRA_MCP_LAZY` already followed. A value with
+surrounding whitespace now parses (`" true "` used to read as false in tool flags). Known
 `1/true/yes/on` and `0/false/no/off` spellings are unchanged; each caller still chooses how
-unknown non-empty values behave (default / error / warn) through one `parse_bool` helper.
+an unknown non-empty value behaves (default / error / warn).
 
 ### Changed — deploy tiers treat `success: false` / `status: rejected` as failures
 
@@ -413,7 +434,7 @@ message, the response names the exception class instead of the literal `"null"`.
 ### Changed — write success envelopes go through `Response.success` (+ extras)
 
 Hand-built `{status:"success", message:…}` maps now use `Response.success` /
-`successWithWarnings`. `/rename_variable` always returns that one envelope;
+`successWithWarnings`. The per-variable fallback inside `/rename_variables` always builds that one envelope;
 `warnings` is present only when non-empty. Structured extras still follow
 `status`/`message` (some tools previously put `message` last).
 
@@ -421,7 +442,8 @@ Hand-built `{status:"success", message:…}` maps now use `Response.success` /
 
 `/get_struct_layout` and `/get_enum_values` used to say
 `Data type is not a structure: X` / `Data type is not an enumeration: X` when the name
-resolved to the wrong kind. They now match the write tools:
+resolved to the wrong kind. They now use one quoted form, the one the structure write tools
+already used:
 `Data type 'X' is not a structure` / `Data type 'X' is not an enumeration`. Not-found text
 is unchanged (`Structure not found: X` / `Enumeration not found: X`).
 
@@ -431,15 +453,16 @@ Tool parameters are typed as what they name. `AnnotationScanner` reads the calle
 before and resolves it per call, so programs opened later are found. A name that resolves to
 nothing is answered with the message tools used to return themselves, and the tool never runs.
 
-- **Programs.** 146 tools take the open `Program` ("No program loaded.", "Program not found: …").
-  About 100 compatibility overloads that took a program name, or none, are gone. Three things
+- **Programs.** About 150 tools take the open `Program` ("No program loaded.", "Program not found: …").
+  About 60 compatibility overloads that took a program name, or none, are gone, along with the
+  plugin's 20 pass-through wrappers. Three things
   follow from resolving every program the same way: `switch_program` finds a program the way any
   tool does (it used to match only programs already open); `run_ghidra_script` and
   `run_script_inline` report an unknown program before the scripts-allowed check; and
   `create_folder` lost its `program` parameter, which it never read.
 - **Addresses.** Most address parameters take an `Address` parsed against that program; a bad
   one is refused with the parse error.
-- **Functions.** 27 tools take the `Function` a reference names: its name, its entry address or
+- **Functions.** 30 tools take the `Function` a reference names: its name, its entry address or
   any address inside it ("Function not found: …"). 16 of them (`disassemble_function`,
   `get_function_hash`, the prototype, variable and no-return setters, among others) used to
   demand the exact entry address. Only `delete_function` and `create_function` still want an
@@ -462,7 +485,7 @@ thread, instead of going through `executeWrite`. On the headless server that ski
 that serializes writes, so comments, labels, bookmarks, memory blocks, the image base, variable
 renames and types, prototypes and the documentation merge could interleave with any other write.
 They all go through `executeWrite` now, and `WritesTakeTheWriteLockTest` fails on a transaction
-opened inside `runOnUi` or `executeRead`.
+opened directly inside an `executeRead` lambda.
 
 - **A tool's own "cannot do that" is a refusal, not an error.** No function there, nothing to
   disassemble: the write rolls back, the caller gets the message, and neither server logs a
@@ -496,9 +519,8 @@ instead of through `Atomic*` holders; responses are unchanged.
 
 ## v7.0.0 - 2026-10-21 — major: tool consolidation, JSON response contract, MCP conformance suite, an offline test tier, and a release gate that can actually block
 
-**219 tools** — 215 served by the GUI plugin, 200 by the headless server, 196
-by both. 218 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
-only the bridge calls. The advertised surface went from 272 → 251 in the first consolidation
+**209 tools** — 205 served by the GUI plugin, 190 by the headless server, 186
+by both. The advertised surface went from 272 → 251 in the first consolidation
 cycle, then 253 after `/list_shadowed_globals` and `/batch_get_comments` (the
 7.0.0-rc.1 catalog). After rc.1 it went to 245 once `/get_functions` replaced
 nine function readers, 215 after the listing, xref, tag, utility and GUI-cursor
@@ -506,15 +528,18 @@ folds, 211 once both servers shared one set of program-operation names
 (`/load_program`, `/load_program_from_project`, `/project/info` and headless
 `/health` retired), 209 once version control and the CodeBrowser tools
 became shared services (`/server/version_control/checkin` and
-`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, 209 once `/apply_documentation` replaced
-`/apply_function_documentation` and `/batch_apply_documentation` (53 tools
-removed and 9 added since rc.1, every one named in
-[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)),
-218 with the decompilation tree, `/partition_program` and `/find_type_users`, and
-**219** with `/get_change_token`.
+`/tool/launch_codebrowser` retired), 210 with `/set_memory_block`, and **209**
+once `/apply_documentation` replaced `/apply_function_documentation` and
+`/batch_apply_documentation` (53 tools removed and 9 added since rc.1, every one
+named in
+[`MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md)).
+The decompilation tree, `/partition_program`, `/find_type_users` and
+`/get_change_token` came after 7.0.0; see Unreleased.
 
-Entries further down quote the catalog as it stood when they landed (251, 253,
-the 235-tool schema recording); the figures above are the current ones.
+Entries further down were written as each change landed, so they quote the
+catalog as it stood then (251, 253, the 235-tool schema recording) and some
+describe a state a later 7.0.0 entry changed; those carry a "Superseded later in
+7.0.0" note. The figures above are what 7.0.0 shipped.
 
 > **Scope note.** Entries describing `fun-doc/` and `scripts/fid/` were
 > removed from this section on 2026-09-18. Both moved to the `d2-game-exe`
@@ -780,7 +805,9 @@ The duplicate `/server/version_control/checkin` route is retired; use `/checkin_
 CodeBrowser launch via project open options) instead of a separate launch route.
 
 **Batch documentation** — `/batch_apply_documentation` is served by
-`DocumentationBatchService` on both servers.
+`DocumentationBatchService` on both servers. (Superseded later in 7.0.0: both
+documentation writers became `/apply_documentation` on `DocumentationApplyService`,
+and `DocumentationBatchService` is gone.)
 
 **Project archive and GZF/GAR** — export, import, archive, and restore project routes are
 served by `ProjectLifecycleService` on the GUI as well as headless (catalog `servers`:
@@ -1002,7 +1029,7 @@ resolvers disagreed about what a reference meant.
 ### Changed — fewer listing, xref, tag, and utility tools
 
 Further consolidation on the same 7.0.0 line: one search tool, one program
-listing tool, bulk xrefs as a parameter, tags carried on function reads, seventeen
+listing tool, bulk xrefs as a parameter, tags carried on function reads, fifteen
 small tools folded into siblings, version identity on `/mcp/health`, and one GUI
 cursor tool.
 
@@ -1050,10 +1077,9 @@ cursor tool.
 | `list_property_maps` | `list_properties` |
 | `debugger/step_into`, `debugger/step_over`, `debugger/step_out` | `debugger/step(kind=…)` |
 
-`apply_function_documentation` and `batch_apply_documentation` stay separate tools
-in 7.0.0. Merging them into one `apply_documentation` was deferred; the shared
-`DocumentationBatchService` wiring it waited on has since landed (see the
-shared-services entry above).
+`apply_function_documentation` and `batch_apply_documentation` were left out of
+this pass; a later 7.0.0 change merged them into `apply_documentation` (see
+"`apply_documentation` replaces both documentation writers" above).
 
 ### Fixed — writes that lost work or reported success for what did not happen ([#569](https://github.com/bethington/ghidra-mcp/pull/569))
 
@@ -1071,7 +1097,8 @@ shared-services entry above).
 - **`dry_run` is refused where a rollback cannot undo the effect.** It is implemented as a
   rolled-back program transaction, but was offered to every write tool:
   `checkin_program(dry_run=true)` checked in for real. `@McpTool(dryRun = false)` marks the
-  35 tools whose effect is elsewhere (save, close, open, check-in, project and file
+  tools whose effect is elsewhere (35 when this landed; the tools later moved into
+  shared services declare it too) (save, close, open, check-in, project and file
   operations, scripts, analysis, the debugger, archive posts); the scanner refuses before
   anything runs.
 - **Headless saves before it closes.** Closing a modified program on shutdown or project
@@ -1141,15 +1168,6 @@ Measured against the spec and against what real clients do with each field.
   `/mcp` or `/sse` `OPTIONS` probe. It does not start a session, call a tool,
   or mutate Ghidra/project state. Health-route selection is checked against
   the `servers` field in `tests/endpoints.json`.
-
-- **Decompiler variable endpoints** in `FunctionService`: `/list_decompiler_variables`
-  and `/apply_local_variable` (POST) — read local variable names/types from the
-  decompiler output and apply renames/retypes to a function's variables.
-- **Equate management tools** in `ListingService`: `/list_equates`,
-  `/apply_equate`, `/remove_equate`, `/rename_equate` — enumerate, apply (to
-  operands matching a scalar value), delete, and rename named constants
-  (equates). Includes the `OperandHit` helper record plus `collectScalarOperands`
-  / `parseEquateValue` utilities used to locate operand matches.
 
 ### Fixed — `/delete_function` threw `ConcurrentModificationException` on any tagged function, and dry-run made it worse
 
@@ -1728,7 +1746,8 @@ mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Te
 ```
 
 Surefire's `*` does not cross the package separator, so `GarArchiveRestoreTest`
-(9 tests) and `GzfExportImportTest` (5 tests) — both in package `com.xebyte` —
+(9 tests) and `GzfExportImportTest` (5 tests) — both in package `com.xebyte`, and
+renamed later in 7.0.0 to `ProjectArchiveTest` and `ProjectGzfTest` —
 were never selected. They are the path-traversal and exact-name guards added in
 PR #264: the ones that pin that a caller cannot escape `parent_dir`, cannot
 smuggle a traversal `project_name`, and that `exportProgramToGzf` resolves a
@@ -1739,7 +1758,7 @@ Measured rather than assumed: the surefire reports published by CI run
 `35343488609` at `0cf545b1` name **59 executed classes**, and neither of those
 two is among them.
 
-Both classes moved to `com.xebyte.offline`, beside `HeadlessPathsTest`, which
+Both classes moved to `com.xebyte.offline`, beside `HeadlessPathsTest` (later `SafePathsTest`), which
 tests the same #264 surface from the package CI already selects. The offline
 Java tier goes from 535 to **549 tests across 56 classes**, all green.
 
@@ -1823,8 +1842,8 @@ The specified schema produces a constraint that has too many states for serving
 
 So the old default did not degrade those clients, it broke them outright, and no
 client-side configuration could work around a server that only ever offered the
-full set. The bridge now loads `listing,function,program` (57 endpoints plus the
-8 static tools) on connect and registers the rest on demand. This is also the
+full set. The bridge now loads `listing,function,program` (57 endpoints at the
+time, plus the 8 static tools) on connect and registers the rest on demand. This is also the
 concrete half of the "too many tools for agents" complaint in
 [#307](https://github.com/bethington/ghidra-mcp/issues/307) /
 [#245](https://github.com/bethington/ghidra-mcp/issues/245) /
@@ -1889,7 +1908,7 @@ Each was independently re-verified against the source before being touched.
 | --- | --- | --- |
 | `/run_ghidra_script` | `capture_output` | `false` omits `console_output` and reports `output_captured: false`. A **failed** script keeps its output either way, so the flag can never lose an error. |
 | `/rename_variables` | `force_individual` | `true` dispatches straight to the per-variable path instead of running the batch path anyway. `GhidraMCPPlugin.batchApplyDocumentation` had been passing `true` and silently getting batch mode. |
-| `/server/version_control/add` | `keepCheckedOut` | Passed through to `DomainFile.addToVersionControl` instead of a hardcoded `false`, and echoed as `keep_checked_out`. GUI mode only — the headless route is a repository-verification stub that does not add anything. |
+| `/server/version_control/add` | `keepCheckedOut` | Passed through to `DomainFile.addToVersionControl` instead of a hardcoded `false`, and echoed as `keep_checked_out`. GUI mode only at the time — the headless route was a repository-verification stub; later in 7.0.0 both servers add for real through `VersionControlService`. |
 
 **Removed** (nothing implemented them, and implementing them means designing a
 feature, not flipping a flag). These change the published tool surface, so
@@ -1916,9 +1935,9 @@ miscounting was reachable without the new flag.
 
 **Regression cover.** `DeadParameterTest` (offline) fails on any `@McpTool`
 parameter whose identifier is never referenced in the method that declares it.
-It carries a short, reason-annotated allowlist of six parameters that are still
+It carries a short, reason-annotated allowlist of five parameters that are still
 inert — `/list_data_items_by_xrefs#format` (a documented no-op kept for
-compatibility) plus five that are a genuine backlog — and a companion test that
+compatibility) plus four that are a genuine backlog — and a companion test that
 fails when an allowlist entry is finally wired up, so the list cannot outlive
 its own justification.
 
@@ -1936,7 +1955,7 @@ removed**: every operation the deleted tools performed is reachable through the
 survivor. Because 7.0.0 is the breaking boundary, this is a clean break with no
 backward-compatibility aliases. Full rationale and the behavior evidence behind
 each merge are in
-[`docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md`](docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md);
+[`docs/project-management/TOOL_AUDIT_AND_CONSOLIDATION.md`](docs/project-management/archive/TOOL_AUDIT_AND_CONSOLIDATION.md);
 the old→new call-site contract is in
 [`docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md`](docs/project-management/MIGRATION_7.0.0_TOOL_CONSOLIDATION.md).
 
@@ -2036,6 +2055,8 @@ Every in-repo caller (the bridge, `tools/setup`, the scripts, the deploy gate,
 the tests) is migrated. `tests/performance/test_response_contract_callers.py`
 guards against a caller that reads a reshaped endpoint without unwrapping it —
 added after two rounds of the sweep each missed sites the previous one had not.
+(That guard lived under `tests/performance/` and left with fun-doc in `10960f76`;
+it is not in 7.0.0.)
 
 One shape bug this exposed and fixed: parameters can now declare that an empty
 string is *meaningful*, rather than treating empty as absent. Clearing a comment
@@ -2075,7 +2096,8 @@ experiment, for example:
   them: `analyze_data_region.include_assembly_patterns`,
   `detect_array_bounds.analyze_loop_bounds`, `detect_array_bounds.analyze_indexing`,
   `get_assembly_context.include_patterns`, and
-  `run_ghidra_script.capture_output`. Each is now described as such rather than
+  `run_ghidra_script.capture_output`. (Superseded later in 7.0.0: `capture_output`
+  is wired and the other four are removed — see "Dead parameters".) Each is now described as such rather than
   as a switch that does something.
 
 One existing description was wrong rather than missing and is corrected:
@@ -2259,7 +2281,7 @@ bookkeeping, "saved" being distinct from "committed" on a shared project, the
 `bsim` password reaching each child on stdin and never argv, and `add_binary`
 verifying its ARTIFACT because `analyzeHeadless` exits 0 when a script throws.
 
-`--cov-fail-under` goes **55 → 67** against a measured 69.22% — a ~2 point
+`--cov-fail-under` goes **55 → 67** (raised to 70 later in 7.0.0) against a measured 69.22% — a ~2 point
 margin, deliberately not the ~0.5 point knife-edge that caused the outage. The
 comment block in `.github/workflows/tests.yml` now records the whole history so
 the number is not re-derived from scratch next time.
@@ -2314,6 +2336,7 @@ declares an alias that collides with another parameter's canonical name.
 
 Note for consumers: `tests/conformance/snapshots/mcp_schema.snap` predates this
 and will need refreshing against a deployed build before it reflects the aliases.
+(Done later in 7.0.0: the shipped snapshot carries them.)
 
 ### Setup: `preflight` resolves the launcher your MCP client has to spawn (#441)
 
@@ -2334,7 +2357,7 @@ place when the spawn still fails, which is worse than not checking at all. A
 missing console script never fails preflight — `uv run` does not install one.
 
 Every client-config example in the repo (`README.md` quick start, the macOS
-Cursor/Claude config, the Autohand invocation, and the repo's own `.mcp.json`)
+Cursor/Claude config, the Autohand invocation, and `.mcp.json.example`)
 now uses an absolute `command` path, and a new troubleshooting entry covers
 `spawn uv ENOENT` directly. Reported by @Arshad-Kamal on Fedora.
 
@@ -2342,17 +2365,18 @@ now uses an absolute `command` path, and a new troubleshooting entry covers
 
 For clients that gate tools through a narrow allowlist, `README.md` now
 documents a **closed** four-tool read-only set — `get_metadata`,
-`list_methods`, `get_entry_points`, `decompile_function` — plus the ordered
+`find_functions`, `get_entry_points`, `get_functions` — plus the ordered
 next additions. The point is that an allowlist without a discovery tool is
 self-defeating: the agent cannot enumerate functions through MCP, so it falls
 back to `curl`-ing the HTTP API directly and the allowlist buys nothing.
-`list_methods` is the addition that closes the loop over the three tools
-suggested in #441 (all of which exist under exactly those names).
+`find_functions` is the addition that closes the loop over the three tools
+suggested in #441 (`get_metadata`, `get_entry_points` and `decompile_function`,
+the last since folded into `get_functions`).
 
 The section also notes that tool **groups** come from the `category` on the
-Java `@McpTool` annotation as published at `/mcp/schema` — not the `category`
-column in `tests/endpoints.json`, which is separately maintained and disagrees
-for 63 of the 201 annotated endpoints.
+Java `@McpTool` annotation as published at `/mcp/schema`. (When this was
+written the catalog's `category` column disagreed for 63 endpoints; the
+category fix above made it follow the annotations.)
 
 #### A refusal is not a golden
 
@@ -2421,7 +2445,9 @@ using the wrong method, an invented endpoint, or a query parameter in the JSON
 body still gets 200. This one refuses. `@Param(value = "program")` defaults to
 `ParamSource.QUERY`, and a `program` sent in the body is ignored by the plugin,
 which then writes to whatever program is *current* — so that case is now a 400
-at the wire instead of a silently successful wrong-binary write. Verified by
+at the wire instead of a silently successful wrong-binary write. (Superseded
+later in 7.0.0: the plugin now finds a body `program` too; the fake's 400 stays
+as a convention check.) Verified by
 injection: dropping the `source` field in `schema._parse_schema` leaves all 560
 unit tests green and fails the offline tier.
 
@@ -2471,7 +2497,7 @@ listing mutation in the suite whose whole contract is that it never writes.
 **`/get_function_labels` sending `address` was NOT a breach.** `@Param(value =
 "name")` there declares `aliases = {"function", "address", "function_address"}`
 and `AnnotationScanner` honours every one at dispatch — but
-`ParamDescriptor.toJson` never emits them, so `/mcp/schema` advertises only the
+`ParamDescriptor.toJson` did not emit them (fixed later in 7.0.0), so `/mcp/schema` advertised only the
 canonical name and any consumer reasoning from the schema calls a valid alias
 unknown. `tests/offline/param_aliases.py` reads the annotations directly to
 close that gap for the offline tier; the test still moved to the canonical
@@ -2543,6 +2569,12 @@ frozen. An endpoint with no recording returns a body stamped
 
 ### The GUI and headless servers do not serve the same routes, and now the catalog says so
 
+> **Superseded later in 7.0.0.** The counts and route lists below are from when
+> this landed. 7.0.0 ships 209 endpoints: 186 on both servers, 19 GUI-only, 4
+> headless-only. `/check_connection`, `/mcp/health` and `/mcp/instance_info` are
+> served the same way by both servers, `/health` is retired, and `list_instances`
+> finds headless servers.
+
 `tests/endpoints.json` records a `servers` array per endpoint — `["gui"]`,
 `["headless"]`, or both. **212 of 253 endpoints are on both servers; 27 are
 GUI-only and 14 are headless-only.** Calling one against the wrong server
@@ -2573,7 +2605,7 @@ What the split turns out to be:
 - The 11 shared services take a `ThreadingStrategy` precisely so one `@McpTool`
   serves both modes, which is why nothing here needed a per-tool annotation.
 
-Consequences worth knowing if you run headless:
+Consequences at the time, for headless users (both fixed later in 7.0.0):
 
 - **`/mcp/health` and `/mcp/instance_info` are GUI-only.** The headless
   equivalent of the first is `/health`; the second has no headless equivalent at
@@ -2668,7 +2700,7 @@ load-bearing: removing it turns 7 passing tests into 7 errors.
 - **`get_comment` silently omitted comment kinds** — it now emits all five.
 - **`move_file` / `move_folder` were unreachable outside one mode.**
 - **`list_project_files`, `create_folder`, and `delete_file` failed in headless mode with `"requires GUI mode"`.**
-  Now routed through `resolveProject()` to operate across GUI, FrontEnd, and headless modes alike.
+  Now routed through the open project to operate across GUI, FrontEnd, and headless modes alike.
   Headless `delete_file` closes the program it deletes by **exact** path: the first cut
   went through `close_program`'s substring matcher, which would also close (and, headless,
   discard the unsaved edits of) any open program whose path merely contained the target.
@@ -2880,6 +2912,10 @@ printing an unqualified "passed" over a step that quietly did not run.
 
 ### Release workflows: stale references left by the `fun-doc` move-out
 
+> **Superseded later in 7.0.0** by the generated benchmark fixture ("The release
+> gate works again", above): all eight deploy tiers run from this repository
+> again, and the guard and checklist changes below no longer apply.
+
 Auditing every workflow that runs on a tag or a release event, ahead of cutting
 v7.0.0, found references to files that left the repository weeks earlier.
 
@@ -2977,7 +3013,8 @@ documentation quality gate was decorative for its whole life.
 - **`continue-on-error` is gone.** The job stays advisory by being absent from
   `build-status`'s `needs` — a Markdown violation now shows a real red X and
   blocks nothing. Softening a finding and hiding a broken tool were the same
-  switch, which is why it went.
+  switch, which is why it went. (Changed later in 7.0.0: `markdown-lint` now
+  gates `build-status`, and `TestMarkdownLintConfig` asserts that it does.)
 - **2,598 violations across 91 files → 0.** Fixed, not suppressed: 2,483 by
   `--fix` (blank lines around headings/lists/fences/tables, table pipe
   spacing, trailing punctuation in headings, bare URLs), and 115 by hand,
