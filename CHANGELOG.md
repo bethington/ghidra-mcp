@@ -66,9 +66,10 @@ create → open sequence failed with "No .gpr file found".
   view has no marker file and keeps its URL.
 - The headless `open_project`, `delete_project` and `--project` accept the old
   extensionless value as well, so a caller that saved it keeps working.
-- A directory holding more than one `.gpr` is refused with every candidate listed,
-  instead of opening — or, for `delete_project`, deleting — whichever one the
-  filesystem listed first. A path that is both a project locator and a directory
+- A directory holding more than one `.gpr` is refused with every candidate listed.
+  `open_project` used to open whichever one the filesystem listed first;
+  `delete_project` never looked inside the directory, but treated the path as a
+  locator and deleted any `<dir>.gpr` / `<dir>.rep` beside it. A path that is both a project locator and a directory
   of projects is refused as ambiguous. The resolved project, not just the typed
   path, must sit inside `GHIDRA_MCP_FILE_ROOT`: the locator form names a sibling
   of its own path, so `<root>` itself would otherwise reach `<root>.gpr` outside it.
