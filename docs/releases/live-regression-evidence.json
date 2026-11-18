@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "7.0.0",
+  "version": "7.1.0",
   "tier": "release",
   "tiers_run": [
     "release"
   ],
   "result": "passed",
-  "source_fingerprint": "d3f1534b2ae6ff311d7a0b17cbc141f473caaeae1266469ac5c78e9362e46a80",
+  "source_fingerprint": "d80c1d2e09823b3da11a16c905e3facdc3edf477a57ccb9dc5f664cba6b8a6dd",
   "fingerprinted_paths": [
     "src/main/java",
     "python/bridge_mcp_ghidra",
@@ -17,5 +17,5 @@
     "build.gradle"
   ],
   "ghidra_version": "12.2",
-  "recorded_utc": "2026-11-02T06:13:03Z"
+  "recorded_utc": "2026-11-18T19:30:17Z"
 }

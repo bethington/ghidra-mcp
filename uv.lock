@@ -662,7 +662,7 @@ wheels = [
 
 [[package]]
 name = "ghidra-mcp-bridge"
-version = "7.0.0"
+version = "7.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

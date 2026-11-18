@@ -208,8 +208,39 @@ def test_build_rules_covers_all_expected_files(tmp_path: Path):
         "README.md",
         "AGENTS.md",
         "docs/releases/README.md",
+        "uv.lock",
     }
     assert expected.issubset(paths), f"Missing files: {expected - paths}"
+
+
+def test_apply_version_bump_preserves_crlf(tmp_path: Path):
+    from tools.setup.version_bump import apply_version_bump
+
+    path = tmp_path / "pyproject.toml"
+    original = f'[project]\r\nname = "ghidra-mcp-bridge"\r\nversion = "{OLD}"\r\n'.encode()
+    path.write_bytes(original)
+
+    apply_version_bump(tmp_path, NEW, old_version=OLD)
+
+    assert path.read_bytes() == original.replace(OLD.encode(), NEW.encode())
+
+
+def test_apply_version_bump_updates_uv_lock_bridge_entry_only(tmp_path: Path):
+    from tools.setup.version_bump import apply_version_bump
+
+    lock = tmp_path / "uv.lock"
+    lock.write_bytes(
+        (
+            f'[[package]]\r\nname = "other"\r\nversion = "{OLD}"\r\n\r\n'
+            f'[[package]]\r\nname = "ghidra-mcp-bridge"\r\nversion = "{OLD}"\r\n'
+        ).encode()
+    )
+
+    apply_version_bump(tmp_path, NEW, old_version=OLD)
+
+    text = lock.read_bytes().decode()
+    assert f'name = "ghidra-mcp-bridge"\r\nversion = "{NEW}"' in text
+    assert f'name = "other"\r\nversion = "{OLD}"' in text
 
 
 def test_build_rules_are_all_valid_regex(tmp_path: Path):
