@@ -1445,6 +1445,7 @@ public final class ServiceUtils {
             case "unsigned int": return UnsignedIntegerDataType.dataType;
             case "unsigned short": return UnsignedShortDataType.dataType;
             case "unsigned long": return UnsignedLongDataType.dataType;
+            case "unsigned long long": return UnsignedLongLongDataType.dataType;
             case "unsigned char": return UnsignedCharDataType.dataType;
             case "signed char": return SignedByteDataType.dataType;
             default:           return null;

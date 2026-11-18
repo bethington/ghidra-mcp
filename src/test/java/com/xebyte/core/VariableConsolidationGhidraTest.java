@@ -136,12 +136,14 @@ public class VariableConsolidationGhidraTest {
 
     @Test public void oldObjectAndPositionalTypeMappingsStillWork() throws Exception {
         local("nOriginal", -8);
+        service = spy(service);
         Response object = service.setVariables(function, "{\"nOriginal\":{\"type\":\"uint\"}}", program);
         assertFalse(object.toJson(), object instanceof Response.Err);
         assertEquals("uint", function.getStackFrame().getVariableContaining(-8).getDataType().getName());
         Response positional = service.setVariables(function, "{\"nOriginal\":[null,\"int\"]}", program);
         assertFalse(positional.toJson(), positional instanceof Response.Err);
         assertEquals("int", function.getStackFrame().getVariableContaining(-8).getDataType().getName());
+        verify(service, never()).decompileFunctionNoRetry(any(Function.class), any(Program.class));
     }
 
     @Test public void emptyParameterSlotCannotCreateParameterOrEnableCustomStorage() {
