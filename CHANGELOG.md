@@ -8,6 +8,33 @@ Complete version history for the Ghidra MCP Server project.
 
 Changes on `dev` after 7.0.0.
 
+### Fixed: `connect_instance` failures are MCP tool errors (#652)
+
+A refused `connect_instance` — no instance matching the project, a failed schema
+fetch, an invalid URL, a cancelled commit — came back as a successful result
+whose text was `{"error": ...}`, so a client branching on `isError` saw the
+selection succeed. Every failure now raises, and the client receives
+`isError: true` with the same message (the list of available projects is now
+part of the message text). The other bridge tools that refused with an error
+payload — `list_tool_groups` and `load_tool_group` with nothing connected or an
+unknown group, `unload_tool_group` on a default group, and `check_tools` /
+`search_tools` with empty input — do the same. Successful results are unchanged.
+Reported by @coygeek.
+
+### Fixed: `connect_instance` checks the project on a configured URL (#655)
+
+With `GHIDRA_MCP_URL` set, pinned or not, `connect_instance(project=X)`
+connected to that URL without asking which project it had open, reported
+`connected: true`, and the next call answered from a different project. The
+same happened on the `127.0.0.1:8089` fallback after the port scan found no
+match. Before connecting to either, the bridge now reads the server's
+`/mcp/instance_info` and connects only if its project matches by the same rule
+as local discovery (exact name, else substring), recording that project as the
+connected one. A mismatch is refused, and so is a server that cannot say —
+unreachable, no `/mcp/instance_info`, or no project open — with a message
+naming the URL and what it reported. Discovery order and `GHIDRA_MCP_PIN_URL`
+are unchanged. Reported by @coygeek.
+
 ### Fixed: imported global audit applicability (#643)
 
 - Include read-only symbol, memory-block and binding provenance in global audits.

@@ -459,10 +459,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
@@ -487,16 +487,18 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
 
-            result = asyncio.run(bridge.connect_instance("wanted"))
+            # A refused selection is a tool error (isError), not a success
+            # carrying an error dict (#652).
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("wanted"))
 
-        data = json.loads(result)
-        self.assertIn("error", data)
-        self.assertIn("No instance matching 'wanted'", data["error"])
-        self.assertEqual(data["available"], ["other", "also_other"])
+        message = str(raised.exception)
+        self.assertIn("No instance matching 'wanted'", message)
+        self.assertIn("Available: other, also_other.", message)
         scan.assert_not_called()
 
     def test_uds_match_connects_via_uds_when_supported(self):
@@ -539,10 +541,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.transport, "uds_supported", return_value=False),
             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
@@ -575,10 +577,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.transport, "uds_supported", return_value=False),
             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8093") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
