@@ -4,9 +4,25 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
-Changes on `dev` after 7.0.0.
+**220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by
+both. 219 are advertised as MCP tools; `/decompile_tree_refresh` is an HTTP route
+only the bridge calls.
+
+**Requires Ghidra 12.2 and Java 25.** Shared projects need two one-time steps on
+12.2 (trust the server's TLS certificate, upgrade programs to the new database
+version); see "Ghidra 12.2 and Java 25 are now the supported target" below.
+
+**Compatibility notes.** A few responses changed shape:
+
+- `create_project` returns the `.gpr` path.
+- `/list_class_members` reports `total` instead of `total_members`.
+- `create_folder` no longer takes `program`.
+- `set_variables` rolls back a whole named-only batch on any failure.
+- The structure/enum wrong-kind refusals and several error texts are reworded.
+
+Each change is described in its entry below.
 
 ### Fixed: recovered variable type persistence (#642)
 
@@ -187,6 +203,15 @@ build now compiles for the Java level the installed Ghidra declares, with any JD
 at least that new, and the source uses only APIs present in both 12.1 and 12.2,
 so a Gradle build against 12.1 still works. The released extension targets 12.2
 (see below).
+
+### Fixed: `bump-version` keeps line endings and updates `uv.lock`
+
+`python -m tools.setup bump-version` read files with universal newlines and
+wrote them back with LF, so a CRLF file (`pyproject.toml`) showed every line
+changed for a one-line version edit. It also never touched `uv.lock`, which
+records the bridge's own version, so after a bump the lock still named the old
+version and `uv lock --check` failed until someone ran `uv lock`. Both are fixed and
+covered in `tests/unit/test_version_bump.py`.
 
 ### Fixed: `save_program` cannot wedge the HTTP pool waiting for analysis
 

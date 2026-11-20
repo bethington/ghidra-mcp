@@ -1599,7 +1599,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 | -------- | ------- |
-| **Version** | 7.0.0 |
+| **Version** | 7.1.0 |
 | **MCP Tools** | 220 catalog entries (219 agent-visible tools) |
 | **GUI Endpoints** | 216 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 201 (GhidraMCPHeadlessServer) |

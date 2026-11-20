@@ -211,12 +211,13 @@ PINNED: list[tuple[str, str, int, str]] = [
         GUI,
         "GUI plugin",
     ),
-    # ---- Release index (the Unreleased entry) ---------------------------
-    # Shipped entries (7.0.0's "209 tools" among them) are history, like
-    # CHANGELOG.md, and keep the figures they shipped with.
+    # ---- Release index (the current entry: Unreleased, or the latest release) --
+    # Older entries (7.0.0's "209 tools" among them) are history, like
+    # CHANGELOG.md, and keep the figures they shipped with. Only the current
+    # entry says "The catalog stands at".
     (
         "docs/releases/README.md",
-        r"### Unreleased\s+The catalog stands at \*\*(\d+) tools\*\*",
+        r"### (?:Unreleased|v\d+\.\d+\.\d+ \(Latest\))[^\n]*\s+The catalog stands at \*\*(\d+) tools\*\*",
         TOTAL,
         "whole catalog",
     ),
