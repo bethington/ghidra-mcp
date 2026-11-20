@@ -9,10 +9,14 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### Unreleased
+### v7.1.0 (Latest) — Ghidra 12.2, decompiler symbols and equates, function resources, the decompilation tree
 
 The catalog stands at **220 tools** — 216 served by the GUI plugin, 201 by the headless
-server, 197 by both:
+server, 197 by both. **Requires Ghidra 12.2 and Java 25**; shared projects need a
+one-time TLS trust and database upgrade (see the README). Alongside the fixes listed
+in [CHANGELOG.md](../../CHANGELOG.md) (connect_instance errors and project checks,
+create_project paths, decompiler start-up failures, unbound Unix sockets, variable
+type persistence), it adds:
 
 - **Decompiler symbols and stack locals** from @sagasm (#550):
   `get_functions(fields=decompiler_symbols)` reads SSA/register storage, and
@@ -31,7 +35,7 @@ server, 197 by both:
 - **`find_type_users`** lists the functions whose decompilation uses a type or one
   field of it.
 
-### v7.0.0 (unreleased) — tool consolidation, JSON response contract, conformance suite, an offline test tier
+### v7.0.0 — tool consolidation, JSON response contract, conformance suite, an offline test tier
 
 **Major release, breaking.** The first consolidation pass took the advertised
 surface from **272 to 251 tools**: five rename tools collapse into

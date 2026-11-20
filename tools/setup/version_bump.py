@@ -50,6 +50,13 @@ def build_rules(
             rf'(?m)^(version = "){escaped_old}(")',
             rf"\g<1>{new_version}\g<2>",
         ),
+        # uv.lock records the bridge's own version. Left behind, `uv lock --check`
+        # fails and every non-frozen `uv run` rewrites the lock.
+        ReplacementRule(
+            repo_root / "uv.lock",
+            rf'(name = "ghidra-mcp-bridge"\r?\nversion = "){escaped_old}(")',
+            rf"\g<1>{new_version}\g<2>",
+        ),
         # Bridge package __version__ fallback (used when running from source).
         ReplacementRule(
             repo_root / "python/bridge_mcp_ghidra/__init__.py",
@@ -131,7 +138,10 @@ def apply_version_bump(
             print(f"SKIP (not found): {rule.file_path.relative_to(repo_root)}")
             continue
 
-        original = rule.file_path.read_text(encoding="utf-8")
+        # Read the bytes, not read_text(): universal-newline decoding turns CRLF into
+        # LF, and writing that back rewrites every line of a CRLF file (pyproject.toml
+        # in this repo) for a one-line version change.
+        original = rule.file_path.read_bytes().decode("utf-8")
         updated = re.sub(rule.pattern, rule.replacement, original)
 
         relative_path = rule.file_path.relative_to(repo_root)
