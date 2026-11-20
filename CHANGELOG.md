@@ -126,6 +126,15 @@ socket-only start fails as designed; with TCP enabled the server stays up on
 TCP, logs a warning naming the socket path and the cause, and reports only the
 TCP listener. Reported by @coygeek.
 
+### Fixed: explicit bridge backend selection (#640)
+
+- Honor a nonblank `GHIDRA_MCP_URL` before instance discovery and keep startup
+  retries and request reconnection pinned to that listener. When a startup project
+  is also specified, verify it at the configured URL.
+- Keep retrying when schema registration produces no usable tools, preserving
+  facade mode's cache-only connections. Failed attachment restores the prior
+  catalog, and a late retry cannot overwrite a completed manual connection.
+
 ### Fixed: imported global audit applicability (#643)
 
 - Include read-only symbol, memory-block and binding provenance in global audits.

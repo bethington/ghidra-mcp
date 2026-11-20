@@ -275,7 +275,7 @@ def discover_active_tcp_instance() -> dict | None:
 def find_project_instances(project: str, instances: list[dict]) -> list[dict]:
     """Find a unique project across transports, preferring UDS for one process."""
     matches = [dict(i) for i in instances if i.get("project") == project]
-    configured_url = os.getenv("GHIDRA_MCP_URL")
+    configured_url = (os.getenv("GHIDRA_MCP_URL") or "").strip()
     tcp_instances = []
     if configured_url:
         if not validation.validate_server_url(configured_url):
