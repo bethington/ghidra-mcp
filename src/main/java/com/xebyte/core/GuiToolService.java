@@ -82,12 +82,9 @@ public class GuiToolService {
                 }
                 tools.add(row);
             }
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("tools", tools);
-            out.put("count", tools.size());
-            return Response.ok(out);
+            return ServiceUtils.listed("tools", tools);
         } catch (Exception e) {
-            return Response.err("Failed to list tools: " + messageOf(e));
+            return ServiceUtils.fail("list tools", e);
         }
     }
 
@@ -128,6 +125,7 @@ public class GuiToolService {
                 return Response.err(ServiceUtils.getLastParseError());
             }
 
+            // GoToService drives a CodeBrowser window — must hop to the Swing thread.
             AtomicBoolean moved = new AtomicBoolean(false);
             SwingUtilities.invokeAndWait(() -> moved.set(goTo.goTo(target)));
             if (!moved.get()) {
@@ -142,11 +140,7 @@ public class GuiToolService {
             }
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Failed to navigate: " + messageOf(e));
+            return ServiceUtils.fail("navigate", e);
         }
-    }
-
-    private static String messageOf(Exception e) {
-        return e.getMessage() != null ? e.getMessage() : e.toString();
     }
 }

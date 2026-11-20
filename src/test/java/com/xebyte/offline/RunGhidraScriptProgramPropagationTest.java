@@ -15,16 +15,11 @@ import java.util.regex.Pattern;
  * run_ghidra_script, which always runs for the current program."</em>
  *
  * <p>The API signature has always accepted a {@code program} @Param. The
- * bug was that {@code runGhidraScriptWithCapture} resolved the requested
- * program into a local {@code Program program} variable, then invoked the
- * <strong>2-argument</strong> {@code runGhidraScript(scriptPath, args)}
- * overload — which drops the program and falls back to whatever
- * {@code currentProgram} is in the session context (typically the focused
- * CodeBrowser). The 3-argument overload
- * {@code runGhidraScript(scriptPath, args, programName)} threads the name
- * through {@code ServiceUtils.getProgramOrError} → {@code GhidraState}
- * → the script's {@code currentProgram} global, which is what the
- * operator actually wants.
+ * bug was that {@code runGhidraScriptWithCapture} dropped the resolved
+ * program and invoked a 2-argument {@code runGhidraScript(scriptPath, args)}
+ * overload — which falls back to whatever {@code currentProgram} is in the
+ * session. The Program-typed overload threads the resolved program into
+ * {@code GhidraState} → the script's {@code currentProgram} global.
  *
  * <p>This test is intentionally a source-level static check rather than
  * an integration test: the underlying behavior depends on Ghidra's
@@ -78,16 +73,14 @@ public class RunGhidraScriptProgramPropagationTest extends TestCase {
         String src = readSource();
         String body = extractAnnotatedMethodBody(src, "/run_ghidra_script");
 
-        // The 4-arg runGhidraScript call must be present and must include
-        // programName plus timeoutSeconds. We require the literal `programName` token because
-        // the @Param is named that way and it's the parameter the operator
-        // actually controls.
+        // The 4-arg runGhidraScript call must forward the resolved Program
+        // plus timeoutSeconds.
         Pattern timeoutAwareCall = Pattern.compile(
-                "runGhidraScript\\s*\\(\\s*[^,]+,\\s*[^,]+,\\s*programName\\s*,\\s*timeoutSeconds\\s*\\)",
+                "runGhidraScript\\s*\\(\\s*[^,]+,\\s*[^,]+,\\s*program\\s*,\\s*timeoutSeconds\\s*\\)",
                 Pattern.MULTILINE | Pattern.DOTALL);
         assertTrue(
                 "runGhidraScriptWithCapture must call the timeout-aware runGhidraScript "
-                        + "and pass `programName` plus `timeoutSeconds` — without it, "
+                        + "and pass `program` plus `timeoutSeconds` — without it, "
                         + "the script executes against the session currentProgram "
                         + "instead of the operator's requested program.",
                 timeoutAwareCall.matcher(body).find());
@@ -120,24 +113,25 @@ public class RunGhidraScriptProgramPropagationTest extends TestCase {
                 fail("Found a 2-arg runGhidraScript(...) call inside "
                         + "runGhidraScriptWithCapture: " + call
                         + " — this drops the operator's program parameter. "
-                        + "Use the 3-arg form with programName.");
+                        + "Use the Program-typed overload with program.");
             }
         }
     }
 
-    public void testRunGhidraScriptWithCaptureValidatesProgramEarly() throws IOException {
+    public void testRunGhidraScriptWithCaptureTakesResolvedProgram() throws IOException {
         String src = readSource();
         String body = extractAnnotatedMethodBody(src, "/run_ghidra_script");
+        int at = src.indexOf("path = \"/run_ghidra_script\"");
+        int open = src.indexOf('{', at);
+        String signature = src.substring(at, open);
 
-        // We want the fail-fast `pe.hasError()` check so a missing program
-        // surfaces a clean error before we burn time searching for the
-        // script file. This is the existing UX contract; if a refactor
-        // ever drops the early check, the user gets a worse error later.
+        // The scanner resolves @Param("program") Program before the tool runs;
+        // the tool must declare that typed parameter and forward it.
         assertTrue(
-                "runGhidraScriptWithCapture should call ServiceUtils.getProgramOrError "
-                        + "and short-circuit on pe.hasError() before doing the script search.",
-                body.contains("getProgramOrError")
-                        && body.contains("pe.hasError()"));
+                "runGhidraScriptWithCapture must take a Program program parameter "
+                        + "so the scanner resolves it before script search.",
+                signature.contains("Program program")
+                        && !body.contains("getProgramOrError"));
     }
 
     public void testRunGhidraScriptInitializesAndRefreshesHeadlessScriptBundleBeforeProviderLookup()

@@ -73,6 +73,7 @@ class TestGetToolDispatch(unittest.TestCase):
 
         # None values should be filtered out
         mock_get.assert_called_once_with("/find_functions", params=None)
+        self.assertEqual(result, '{"data": []}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_no_params(self, mock_get):
@@ -85,6 +86,7 @@ class TestGetToolDispatch(unittest.TestCase):
         result = fn()
 
         mock_get.assert_called_once_with("/mcp/health", params=None)
+        self.assertEqual(result, '{"version": "4.2.0"}')
 
 
 class TestPostToolDispatch(unittest.TestCase):
@@ -109,6 +111,7 @@ class TestPostToolDispatch(unittest.TestCase):
         mock_post.assert_called_once_with(
             "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
+        self.assertEqual(result, '{"success": true}')
 
     @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_filters_none_values(self, mock_post):

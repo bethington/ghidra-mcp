@@ -97,6 +97,21 @@
       "node_id": "tests/integration/test_readonly_endpoints.py::TestStringsAndData::test_list_program_items_data_items",
       "cause": "recording_gap",
       "reason": "asserts kind=data_items echoes back; /list_program_items has one recording, taken with kind=segments (test_list_program_items_segments answers from it). A second kind needs a second recording, which one-response-per-endpoint cannot hold."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestPartitionProgram::test_response_shape_and_totals",
+      "cause": "recording_gap",
+      "reason": "asserts /partition_program response shape (partitions, strategies, totals). No conformance snapshot exists for this endpoint; the fake synthesizes a body that proves nothing about Ghidra. Re-record against a live server to unblock."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFindTypeUsers::test_unknown_type_returns_error",
+      "cause": "recording_gap",
+      "reason": "asserts /find_type_users refuses an unknown type_name. No conformance snapshot exists; the fake synthesizes a success-shaped body. Needs a recorded refusal (or a live server)."
+    },
+    {
+      "node_id": "tests/integration/test_readonly_endpoints.py::TestFindTypeUsers::test_known_type_returns_functions_and_timed_out",
+      "cause": "recording_gap",
+      "reason": "asserts /find_type_users returns functions[] and timed_out for a resolvable type. No conformance snapshot exists; the fake synthesizes a body without those fields. Re-record against a live server to unblock."
     }
   ]
 }

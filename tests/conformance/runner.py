@@ -49,7 +49,8 @@ _VOLATILE = [
     (re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?'), '<HOST>'),
     (re.compile(r'\b(?:localhost|127\.0\.0\.1)(?::\d+)?'), '<HOST>'),
     # Absolute host paths differ per machine; the trailing filename is what matters.
-    (re.compile(r'[A-Za-z]:[\\/](?:[^"\\/:*?<>|\r\n]+[\\/])*'), '<PATH>/'),
+    # Require a real drive boundary and consume doubled separators in JSON strings.
+    (re.compile(r'(?<![\w])[A-Za-z]:[\\/]+(?:[^"\\/:*?<>|\r\n]+[\\/]+)*'), '<PATH>/'),
 ]
 
 

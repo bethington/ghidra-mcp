@@ -13,6 +13,7 @@ loop with a 0.
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -221,7 +222,9 @@ def test_probe_returns_status_and_a_bounded_decoded_body(monkeypatch):
         seen["timeout"] = timeout
         return FakeResponse()
 
-    monkeypatch.setattr(health.urllib.request, "urlopen", fake_urlopen)
+    from tools import mcp_http
+
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", fake_urlopen)
 
     status, body = health._probe("http://h/check_connection", 3.0)
 
@@ -255,7 +258,9 @@ def test_doctor_request_uses_a_larger_but_bounded_catalog_body_cap(monkeypatch):
         seen["authorization"] = request.get_header("Authorization")
         return FakeResponse()
 
-    monkeypatch.setattr(health.urllib.request, "urlopen", fake_urlopen)
+    from tools import mcp_http
+
+    monkeypatch.setattr(mcp_http.urllib.request, "urlopen", fake_urlopen)
 
     status, body, headers = health._probe_request(
         "http://h/mcp/schema",
@@ -527,14 +532,71 @@ def test_doctor_rejects_credentials_and_queries_before_any_probe():
 def test_doctor_handles_transport_failure_without_raising_or_echoing_error():
     responses = _healthy_doctor_responses()
     responses[0] = OSError("Bearer secret-token")
-    fake_probe, _calls = _doctor_responses(responses)
+    fake_probe, calls = _doctor_responses(responses)
 
     report = health.run_doctor(retries=1, probe=fake_probe, sleep_fn=lambda _delay: None)
 
     connection = next(check for check in report["checks"] if check["name"] == "plugin_connection")
     assert report["ok"] is False
+    assert report["http_healthy"] is False
     assert connection["reason"] == "transport_error:OSError"
     assert "secret-token" not in json.dumps(report)
+    assert [urlsplit(call[0]).path for call in calls] == ["/check_connection"]
+
+
+def test_doctor_stops_after_failed_plugin_connection_without_later_probes():
+    """A dead listener must not pay the retry budget four times."""
+
+    slept: list[float] = []
+    fake_probe, calls = _doctor_responses([OSError("connection refused")] * 3)
+
+    report = health.run_doctor(
+        mcp_url="http://127.0.0.1:8081/mcp",
+        retries=3,
+        retry_delay=2.0,
+        probe=fake_probe,
+        sleep_fn=slept.append,
+    )
+
+    assert report["ok"] is False
+    assert report["http_healthy"] is False
+    assert [check["name"] for check in report["checks"]] == ["url", "plugin_connection"]
+    assert report["checks"][1]["attempts"] == 3
+    assert [urlsplit(call[0]).path for call in calls] == ["/check_connection"] * 3
+    assert slept == [2.0, 2.0]
+    assert "listener" in report["recommended_next_action"]
+
+
+def test_doctor_stops_after_rejected_plugin_connection_status():
+    fake_probe, calls = _doctor_responses([(500, "nope", {})])
+
+    report = health.run_doctor(
+        retries=1,
+        probe=fake_probe,
+        sleep_fn=lambda _delay: None,
+    )
+
+    assert report["ok"] is False
+    assert [check["name"] for check in report["checks"]] == ["url", "plugin_connection"]
+    assert [urlsplit(call[0]).path for call in calls] == ["/check_connection"]
+
+
+def test_doctor_does_not_retry_an_active_connection_refusal():
+    slept: list[float] = []
+    refused = urllib.error.URLError(ConnectionRefusedError(111, "refused"))
+    fake_probe, calls = _doctor_responses([refused, OSError("should not run")])
+
+    report = health.run_doctor(
+        retries=10,
+        retry_delay=2.0,
+        probe=fake_probe,
+        sleep_fn=slept.append,
+    )
+
+    assert report["checks"][1]["attempts"] == 1
+    assert report["checks"][1]["details"]["retryable"] is False
+    assert slept == []
+    assert len(calls) == 1
 
 
 def test_doctor_alias_and_json_mode_use_the_same_report(monkeypatch, capsys):

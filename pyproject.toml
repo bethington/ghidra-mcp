@@ -1,6 +1,6 @@
 [project]
 name = "ghidra-mcp-bridge"
-version = "7.0.0"
+version = "7.1.0"
 description = "GhidraMCP bridge — a thin MCP↔HTTP multiplexer exposing Ghidra reverse-engineering tools to AI clients."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -87,7 +87,7 @@ test = [
 # dbgeng bindings for Ghidra's TraceRmi debugger backend (Windows-only bits).
 debugger = [
     "pybag==2.2.16 ; sys_platform == 'win32'",
-    "comtypes==1.4.17 ; sys_platform == 'win32'",
+    "comtypes==1.5.0 ; sys_platform == 'win32'",
     "protobuf>=7.35.1",
 ]
 dev = [
@@ -149,6 +149,15 @@ filterwarnings = [
 [tool.black]
 line-length = 120
 target-version = ["py310"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# Pyflakes only — keep unused-import / undefined-name / etc. at zero.
+# Do not widen this select list without an intentional cleanup of the new class.
+select = ["F"]
 
 [tool.uv]
 # The bridge package is the project's distribution; install it editable.

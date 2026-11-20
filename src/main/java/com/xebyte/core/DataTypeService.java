@@ -4,6 +4,9 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.symbol.Namespace;
+import ghidra.program.model.symbol.SymbolType;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.program.model.symbol.SymbolTable;
@@ -18,11 +21,7 @@ import ghidra.util.InvalidNameException;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.task.ConsoleTaskMonitor;
 
-import javax.swing.SwingUtilities;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -118,10 +117,8 @@ public class DataTypeService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        DataTypeManager dtm = pe.program().getDataTypeManager();
+            @Param(value = "program", defaultValue = "") Program program) {
+        DataTypeManager dtm = program.getDataTypeManager();
         String needle = pattern == null ? "" : pattern.toLowerCase();
 
         if (categories) {
@@ -208,10 +205,7 @@ public class DataTypeService {
     @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getTypeSize(
             @Param(value = "type_name", description = "Data type name") String typeName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -229,35 +223,22 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getTypeSize(String typeName) {
-        return getTypeSize(typeName, null);
-    }
-
     /**
      * Get the layout of a structure
      */
     @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getStructLayout(
             @Param(value = "struct_name", description = "Structure name") String structName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Struct name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
-        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-        if (dataType == null) {
-            return Response.err("Structure not found: " + structName);
+        final Structure struct;
+        try {
+            struct = ServiceUtils.requireStructure(dtm, structName);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
-
-        if (!(dataType instanceof Structure)) {
-            return Response.err("Data type is not a structure: " + structName);
-        }
-
-        Structure struct = (Structure) dataType;
         List<Map<String, Object>> fields = new ArrayList<>();
         for (DataTypeComponent component : struct.getDefinedComponents()) {
             Map<String, Object> field = new LinkedHashMap<>();
@@ -276,35 +257,22 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getStructLayout(String structName) {
-        return getStructLayout(structName, null);
-    }
-
     /**
      * Get all values in an enumeration
      */
     @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getEnumValues(
             @Param(value = "enum_name", description = "Enum name") String enumName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (enumName == null || enumName.isEmpty()) return Response.err("Enum name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
-        DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, enumName);
-
-        if (dataType == null) {
-            return Response.err("Enumeration not found: " + enumName);
+        final ghidra.program.model.data.Enum enumType;
+        try {
+            enumType = ServiceUtils.requireEnum(dtm, enumName);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
-
-        if (!(dataType instanceof ghidra.program.model.data.Enum)) {
-            return Response.err("Data type is not an enumeration: " + enumName);
-        }
-
-        ghidra.program.model.data.Enum enumType = (ghidra.program.model.data.Enum) dataType;
         List<Map<String, Object>> values = new ArrayList<>();
         for (String valueName : enumType.getNames()) {
             long value = enumType.getValue(valueName);
@@ -321,66 +289,41 @@ public class DataTypeService {
         return Response.ok(out);
     }
 
-    // Backward compatibility overload
-    public Response getEnumValues(String enumName) {
-        return getEnumValues(enumName, null);
-    }
-
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
     @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response getValidDataTypes(
             @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-
-        try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    // Common builtin types
-                    List<String> builtinTypes = List.of(
-                        "void", "byte", "char", "short", "int", "long", "longlong",
-                        "float", "double", "pointer", "bool",
-                        "undefined", "undefined1", "undefined2", "undefined4", "undefined8",
-                        "uchar", "ushort", "uint", "ulong", "ulonglong",
-                        "sbyte", "sword", "sdword", "sqword",
-                        "word", "dword", "qword"
-                    );
-
-                    List<String> windowsTypes = List.of(
-                        "BOOL", "BOOLEAN", "BYTE", "CHAR", "DWORD", "QWORD", "WORD",
-                        "HANDLE", "HMODULE", "HWND", "LPVOID", "PVOID",
-                        "LPCSTR", "LPSTR", "LPCWSTR", "LPWSTR",
-                        "SIZE_T", "ULONG", "USHORT"
-                    );
-
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "builtin_types", builtinTypes,
-                        "windows_types", windowsTypes
-                    )));
-                } catch (Exception e) {
-                    responseRef.set(Response.err(e.getMessage()));
-                }
-            });
-
-            if (responseRef.get() != null) {
-                return responseRef.get();
-            }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        return Response.err("Unknown failure");
+            @Param(value = "program", defaultValue = "") Program program) {
+        return buildValidDataTypesResponse();
     }
 
-    // Backward compatibility overload
-    public Response getValidDataTypes(String category) {
-        return getValidDataTypes(category, null);
+    private Response buildValidDataTypesResponse() {
+        try {
+            List<String> builtinTypes = List.of(
+                "void", "byte", "char", "short", "int", "long", "longlong",
+                "float", "double", "pointer", "bool",
+                "undefined", "undefined1", "undefined2", "undefined4", "undefined8",
+                "uchar", "ushort", "uint", "ulong", "ulonglong",
+                "sbyte", "sword", "sdword", "sqword",
+                "word", "dword", "qword"
+            );
+
+            List<String> windowsTypes = List.of(
+                "BOOL", "BOOLEAN", "BYTE", "CHAR", "DWORD", "QWORD", "WORD",
+                "HANDLE", "HMODULE", "HWND", "LPVOID", "PVOID",
+                "LPCSTR", "LPSTR", "LPCWSTR", "LPWSTR",
+                "SIZE_T", "ULONG", "USHORT"
+            );
+
+            return Response.ok(JsonHelper.mapOf(
+                "builtin_types", builtinTypes,
+                "windows_types", windowsTypes
+            ));
+        } catch (Exception e) {
+            return ServiceUtils.fail(e);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -390,15 +333,15 @@ public class DataTypeService {
     /**
      * Create a new structure data type with specified fields
      */
-    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype", access = ToolAccess.WRITE)
+    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype", access = ToolAccess.WRITE)
     public Response createStruct(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New structure type name, for example ConfigEntry or SkillTableEntry") String name,
             @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
-                   description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]") String fieldsJson,
+                   description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]") String fieldsJson,
             @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
                    description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) {
             return Response.err("Structure name is required");
         }
@@ -419,14 +362,6 @@ public class DataTypeService {
                             + "...)"));
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicBoolean successFlag = new AtomicBoolean(false);
-        final AtomicInteger createdSize = new AtomicInteger(0);
-        final AtomicInteger fieldCount = new AtomicInteger(0);
-
         try {
             // Parse the fields JSON (simplified parsing for basic structure)
             // Expected format: [{"name":"field1","type":"int"},{"name":"field2","type":"char"}]
@@ -436,7 +371,7 @@ public class DataTypeService {
                 return Response.err(badFieldsFormatHint(
                         "No valid fields parsed — every field must have name and type"));
             }
-            fieldCount.set(fields.size());
+            final int fieldCount = fields.size();
 
             DataTypeManager dtm = program.getDataTypeManager();
 
@@ -481,11 +416,11 @@ public class DataTypeService {
             final int structInitSize = requiredSize;
             final boolean hasOffsetsFinal = hasOffsets;
 
-            // Create the structure under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock
-            // (headless) with transaction commit/rollback handled centrally.
+            // Create the structure through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
+            final Response created;
             try {
-                threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
+                created = threadingStrategy.executeWrite(program, "Create Structure: " + name, () -> {
                     ghidra.program.model.data.StructureDataType struct =
                         new ghidra.program.model.data.StructureDataType(name, structInitSize);
 
@@ -506,9 +441,13 @@ public class DataTypeService {
                     // Add the structure to the data type manager
                     DataType createdStruct = dtm.addDataType(struct, null);
 
-                    successFlag.set(true);
-                    createdSize.set(createdStruct.getLength());
-                    return null;
+                    Map<String, Object> extras = new LinkedHashMap<>();
+                    extras.put("name", name);
+                    extras.put("field_count", fieldCount);
+                    extras.put("size", createdStruct.getLength());
+                    return Response.success("Successfully created structure '" + name + "' with "
+                            + fieldCount + " fields, total size: " + createdStruct.getLength() + " bytes",
+                            extras);
                 });
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -517,39 +456,17 @@ public class DataTypeService {
             }
 
             // executeWrite already flushed events; keep the post-create settle.
-            if (successFlag.get()) {
-                try {
-                    Thread.sleep(50);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
 
+            return created;
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             return Response.err(msg);
         }
-
-        if (!successFlag.get()) {
-            return Response.err("Unknown failure");
-        }
-        Map<String, Object> resultMap = new LinkedHashMap<>();
-        resultMap.put("status", "success");
-        resultMap.put("message", "Successfully created structure '" + name + "' with "
-                + fieldCount.get() + " fields, total size: " + createdSize.get() + " bytes");
-        resultMap.put("name", name);
-        resultMap.put("field_count", fieldCount.get());
-        resultMap.put("size", createdSize.get());
-        return Response.ok(resultMap);
-    }
-
-    // Backward compatibility overload
-    public Response createStruct(String name, String fieldsJson) {
-        return createStruct(name, fieldsJson, false, null);
-    }
-
-    public Response createStruct(String name, String fieldsJson, String programName) {
-        return createStruct(name, fieldsJson, false, programName);
     }
 
     /**
@@ -562,18 +479,14 @@ public class DataTypeService {
                                + "name already exists — delete it first or choose another name.") String name,
             @Param(value = "values", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON object mapping member name to integer value, e.g. "
-                               + "{\"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal "
+                               + "{ \"UNIT_PLAYER\": 0, \"UNIT_MONSTER\": 1}. Values may be numbers, decimal "
                                + "strings, or 0x-prefixed hex strings; floats and non-numeric strings are "
                                + "rejected. Member names are checked for UPPERCASE_SNAKE_CASE and any "
                                + "complaint comes back as a warning, not a failure.") String valuesJson,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "4",
                    description = "Storage width of the enum in BYTES — 1, 2, 4 or 8 only (default 4). "
                                + "Anything else is rejected.") int size,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) {
             return Response.err("Enumeration name is required");
         }
@@ -605,9 +518,8 @@ public class DataTypeService {
                 return Response.err("Enumeration with name '" + name + "' already exists");
             }
 
-            // Create the enumeration under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock (headless)
-            // with transaction commit/rollback handled centrally.
+            // Create the enumeration through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
             try {
                 return threadingStrategy.executeWrite(program, "Create Enumeration: " + name, () -> {
                     ghidra.program.model.data.EnumDataType enumDt =
@@ -626,27 +538,18 @@ public class DataTypeService {
                         enumWarnings.addAll(NamingConventions.validateEnumMemberName(memberName));
                     }
 
-                    Map<String, Object> resultMap = new LinkedHashMap<>();
-                    resultMap.put("status", "success");
-                    resultMap.put("message", "Successfully created enumeration '" + name + "' with " + values.size() +
-                                   " values, size: " + size + " bytes");
-                    if (!enumWarnings.isEmpty()) {
-                        resultMap.put("warnings", enumWarnings);
-                    }
-                    return Response.ok(resultMap);
+                    return Response.successWithWarnings(
+                            "Successfully created enumeration '" + name + "' with " + values.size() +
+                                   " values, size: " + size + " bytes",
+                            enumWarnings);
                 });
             } catch (Exception e) {
-                return Response.err("Error creating enumeration: " + e.getMessage());
+                return Response.err("Error creating enumeration: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error parsing values JSON: " + e.getMessage());
+            return Response.err("Error parsing values JSON: " + ServiceUtils.failureMessage(e));
         }
-    }
-
-    // Backward compatibility overload
-    public Response createEnum(String name, String valuesJson, int size) {
-        return createEnum(name, valuesJson, size, null);
     }
 
     /**
@@ -665,21 +568,15 @@ public class DataTypeService {
                                + "cannot be resolved is skipped and reported under fields_skipped instead "
                                + "of failing the call. Names get the project's Hungarian prefix applied "
                                + "automatically.") String fieldsJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("Union name is required");
         if (fieldsJson == null || fieldsJson.isEmpty()) return Response.err("Fields JSON is required");
 
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-        AtomicInteger componentCount = new AtomicInteger(0);
-        List<Map<String, Object>> fieldsAdded = new ArrayList<>();
-        List<Map<String, Object>> fieldsSkipped = new ArrayList<>();
+        record UnionCreateOutcome(int componentCount, List<Map<String, Object>> fieldsAdded,
+                                  List<Map<String, Object>> fieldsSkipped) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Create union", () -> {
+            UnionCreateOutcome outcome = threadingStrategy.executeWrite(program, "Create union", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
                 UnionDataType union = new UnionDataType(name);
 
@@ -687,10 +584,12 @@ public class DataTypeService {
                 List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
 
                 if (fields.isEmpty()) {
-                    errorMessage.set(badFieldsFormatHint(
+                    throw new Refusal(badFieldsFormatHint(
                             "No valid fields parsed — every field must have name and type"));
-                    return null;
                 }
+
+                List<Map<String, Object>> fieldsAdded = new ArrayList<>();
+                List<Map<String, Object>> fieldsSkipped = new ArrayList<>();
 
                 // Process each field for the union (use resolveDataType like structs do)
                 for (FieldDefinition field : fields) {
@@ -705,30 +604,21 @@ public class DataTypeService {
                 }
 
                 dtm.addDataType(union, DataTypeConflictHandler.REPLACE_HANDLER);
-                componentCount.set(union.getNumComponents());
-                success.set(true);
-                return null;
+                return new UnionCreateOutcome(union.getNumComponents(), fieldsAdded, fieldsSkipped);
             });
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("name", name);
+            extras.put("fields_added", outcome.fieldsAdded());
+            if (!outcome.fieldsSkipped().isEmpty()) extras.put("fields_skipped", outcome.fieldsSkipped());
+            extras.put("field_count", outcome.componentCount());
+            return Response.success(
+                    "Union '" + name + "' created successfully with " + outcome.componentCount() + " fields",
+                    extras);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error creating union: " + e.getMessage());
+            return Response.err("Error creating union: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("message", "Union '" + name + "' created successfully with " + componentCount.get() + " fields");
-        out.put("name", name);
-        out.put("fields_added", fieldsAdded);
-        if (!fieldsSkipped.isEmpty()) out.put("fields_skipped", fieldsSkipped);
-        out.put("field_count", componentCount.get());
-        return Response.ok(out);
-    }
-
-    // Backward compatibility overload
-    public Response createUnion(String name, String fieldsJson) {
-        return createUnion(name, fieldsJson, null);
     }
 
     /**
@@ -742,15 +632,9 @@ public class DataTypeService {
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "Name for the copy. The clone is independent — later edits to "
                                + "source_type do not follow it.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (sourceType == null || sourceType.isEmpty()) return Response.err("Source type is required");
         if (newName == null || newName.isEmpty()) return Response.err("New name is required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Clone data type", () -> {
@@ -758,34 +642,23 @@ public class DataTypeService {
                 DataType source = ServiceUtils.findDataTypeByNameInAllCategories(dtm, sourceType);
 
                 if (source == null) {
-                    errorMessage.set("Source type not found: " + sourceType);
-                    return null;
+                    throw new Refusal("Source type not found: " + sourceType);
                 }
 
                 DataType cloned = source.clone(dtm);
                 cloned.setName(newName);
 
                 dtm.addDataType(cloned, DataTypeConflictHandler.REPLACE_HANDLER);
-                success.set(true);
                 return null;
             });
+            return Response.success(
+                    "Data type '" + sourceType + "' cloned as '" + newName + "'",
+                    JsonHelper.mapOf("source_type", sourceType, "new_name", newName));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error cloning data type: " + e.getMessage());
+            return Response.err("Error cloning data type: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Data type '" + sourceType + "' cloned as '" + newName + "'",
-                "source_type", sourceType,
-                "new_name", newName));
-    }
-
-    // Backward compatibility overload
-    public Response cloneDataType(String sourceType, String newName) {
-        return cloneDataType(sourceType, newName, null);
     }
 
     /**
@@ -811,7 +684,7 @@ public class DataTypeService {
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "1",
                    description = "Array only: number of ELEMENTS, not bytes — total size is length x "
                                + "sizeof(base_type). Must be positive.") int length,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         String derived = kind == null ? "" : kind.trim().toLowerCase();
         if (!List.of("typedef", "array", "pointer").contains(derived)) {
             return Response.err("kind must be typedef, array or pointer");
@@ -820,21 +693,13 @@ public class DataTypeService {
         boolean named = name != null && !name.isEmpty();
         if (derived.equals("typedef") && !named) return Response.err("Typedef name is required");
         if (derived.equals("array") && length <= 0) return Response.err("Array length must be positive");
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-        AtomicReference<String> createdName = new AtomicReference<>();
-
         try {
-            threadingStrategy.executeWrite(program, "Create " + derived + " type", () -> {
+            String createdName = threadingStrategy.executeWrite(program, "Create " + derived + " type", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType base = "void".equals(baseType) && derived.equals("pointer")
                     ? VoidDataType.dataType : ServiceUtils.resolveDataType(dtm, baseType);
                 if (base == null) {
-                    errorMessage.set("Could not resolve base type: " + baseType);
-                    return null;
+                    throw new Refusal("Could not resolve base type: " + baseType);
                 }
                 DataType built = switch (derived) {
                     case "typedef" -> new TypedefDataType(name, base);
@@ -844,26 +709,23 @@ public class DataTypeService {
                 if (named && !derived.equals("typedef")) {
                     built.setName(name);
                 }
-                createdName.set(dtm.addDataType(built, DataTypeConflictHandler.REPLACE_HANDLER).getName());
-                return null;
+                return dtm.addDataType(built, DataTypeConflictHandler.REPLACE_HANDLER).getName();
             });
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("kind", derived);
+            extras.put("name", createdName);
+            extras.put("base_type", baseType);
+            if (derived.equals("array")) {
+                extras.put("length", length);
+            }
+            return Response.success(
+                    "Created " + derived + " type '" + createdName + "' on '" + baseType + "'",
+                    extras);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error creating " + derived + " type: " + e.getMessage());
+            return Response.err("Error creating " + derived + " type: " + ServiceUtils.failureMessage(e));
         }
-
-        if (errorMessage.get() != null || createdName.get() == null) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("kind", derived);
-        out.put("name", createdName.get());
-        out.put("base_type", baseType);
-        if (derived.equals("array")) {
-            out.put("length", length);
-        }
-        out.put("message", "Created " + derived + " type '" + createdName.get() + "' on '" + baseType + "'");
-        return Response.ok(out);
     }
 
     /**
@@ -879,39 +741,33 @@ public class DataTypeService {
                                + "names). Required — pass `void` for no return value.") String returnType,
             @Param(value = "parameters", source = ParamSource.BODY,
                    description = "JSON array of parameter objects, e.g. "
-                               + "[{\"name\":\"dwId\",\"type\":\"uint\"},{\"name\":\"pUnit\",\"type\":\"void *\"}]. "
+                               + "[{ \"name\":\"dwId\", \"type\":\"uint\"},{ \"name\":\"pUnit\", \"type\":\"void *\"}]. "
                                + "Only the TYPES are used: parameter names are discarded and the created "
                                + "signature has unnamed arguments. Parsing is a plain comma/colon split, so "
                                + "a type containing a comma or a colon does not survive it, and a parameter "
                                + "whose type cannot be resolved is dropped silently.") String parametersJson,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("Function name is required");
         if (returnType == null || returnType.isEmpty()) return Response.err("Return type is required");
 
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-        AtomicReference<String> createdName = new AtomicReference<>();
-        AtomicInteger paramCount = new AtomicInteger(0);
-        List<String> warnings = new ArrayList<>();
+        record FunctionSignatureOutcome(String createdName, int paramCount, List<String> warnings) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Create function signature", () -> {
+            FunctionSignatureOutcome outcome = threadingStrategy.executeWrite(program, "Create function signature", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
+                List<String> warnings = new ArrayList<>();
 
                 // Resolve return type
                 DataType returnDataType = ServiceUtils.resolveDataType(dtm, returnType);
                 if (returnDataType == null) {
-                    errorMessage.set("Return type not found: " + returnType);
-                    return null;
+                    throw new Refusal("Return type not found: " + returnType);
                 }
 
                 // Create function definition
                 FunctionDefinitionDataType funcDef = new FunctionDefinitionDataType(name);
                 funcDef.setReturnType(returnDataType);
 
+                int paramCount = 0;
                 // Parse parameters if provided
                 if (parametersJson != null && !parametersJson.isEmpty()) {
                     try {
@@ -936,7 +792,7 @@ public class DataTypeService {
                         if (!params.isEmpty()) {
                             funcDef.setArguments(params.toArray(new ParameterDefinition[0]));
                         }
-                        paramCount.set(params.size());
+                        paramCount = params.size();
                     } catch (Exception e) {
                         // If JSON parsing fails, continue without parameters
                         warnings.add("Could not parse parameters, continuing without them");
@@ -944,30 +800,21 @@ public class DataTypeService {
                 }
 
                 DataType addedFuncDef = dtm.addDataType(funcDef, DataTypeConflictHandler.REPLACE_HANDLER);
-                createdName.set(addedFuncDef.getName());
-                success.set(true);
-                return null;
+                return new FunctionSignatureOutcome(addedFuncDef.getName(), paramCount, warnings);
             });
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("name", outcome.createdName());
+            extras.put("return_type", returnType);
+            extras.put("parameter_count", outcome.paramCount());
+            if (!outcome.warnings().isEmpty()) extras.put("warnings", outcome.warnings());
+            return Response.success(
+                    "Successfully created function signature: " + outcome.createdName(),
+                    extras);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error creating function signature: " + e.getMessage());
+            return Response.err("Error creating function signature: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("message", "Successfully created function signature: " + createdName.get());
-        out.put("name", createdName.get());
-        out.put("return_type", returnType);
-        out.put("parameter_count", paramCount.get());
-        if (!warnings.isEmpty()) out.put("warnings", warnings);
-        return Response.ok(out);
-    }
-
-    // Backward compatibility overload
-    public Response createFunctionSignature(String name, String returnType, String parametersJson) {
-        return createFunctionSignature(name, returnType, parametersJson, null);
     }
 
     // -----------------------------------------------------------------------
@@ -984,7 +831,7 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "type_name", source = ParamSource.BODY,
                    description = "Type to apply at the address. Any name the resolver understands: a "
                                + "built-in (uint, char *), an existing struct/enum/typedef name, a pointer "
@@ -998,15 +845,12 @@ public class DataTypeService {
                                + "then fails with a conflict if anything overlaps. Clearing is also what "
                                + "arms the guard that refuses a write which would destroy named "
                                + "neighbours.") boolean clearExisting,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Address is required");
         }
 
@@ -1015,11 +859,6 @@ public class DataTypeService {
         }
 
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
-            Address address = ServiceUtils.parseAddress(program, addressStr);
-            if (address == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dataType = ServiceUtils.resolveDataType(dtm, typeName);
 
@@ -1033,8 +872,8 @@ public class DataTypeService {
             List<String> enforcementWarnings = new ArrayList<>();
 
             // Check if address is in a valid memory block
-            if (!program.getMemory().contains(address)) {
-                return Response.err("Address is not in program memory: " + addressStr);
+            if (!program.getMemory().contains(addr)) {
+                return Response.err("Address is not in program memory: " + addr.toString());
             }
 
             // Hungarian-vs-name cross-check (option A enforcement gate).
@@ -1048,7 +887,7 @@ public class DataTypeService {
             // and would be over-zealous to re-check on type writes against
             // grandfathered names.
             SymbolTable preCheckSymTable = program.getSymbolTable();
-            Symbol preCheckSym = preCheckSymTable.getPrimarySymbol(address);
+            Symbol preCheckSym = preCheckSymTable.getPrimarySymbol(addr);
             if (preCheckSym != null) {
                 String existingName = preCheckSym.getName();
                 if (existingName != null && existingName.startsWith("g_")) {
@@ -1058,7 +897,7 @@ public class DataTypeService {
                         Map<String, Object> rejection = JsonHelper.mapOf(
                                 "status", "rejected",
                                 "error", "prefix_type_mismatch",
-                                "address", addressStr,
+                                "address", addr.toString(),
                                 "current_name", existingName,
                                 "rejected_type", typeName,
                                 "message", preCheckResult.message,
@@ -1084,13 +923,12 @@ public class DataTypeService {
             // collides and nothing is destroyed.
             if (clearExisting) {
                 Response evictionReject = evictionRejection(
-                        program, address, dataType, 0, false, typeName);
+                        program, addr, dataType, 0, false, typeName);
                 if (evictionReject != null) return evictionReject;
             }
 
-            // Apply the data type under the injected threading strategy so the
-            // mutation runs on the EDT (GUI) or under the global write lock (headless)
-            // with transaction commit/rollback handled centrally.
+            // Apply the data type through executeWrite: the server's write lock, with
+            // transaction commit/rollback handled centrally.
             try {
                 return threadingStrategy.executeWrite(program, "Apply Data Type: " + typeName, () -> {
                     // Clear existing code/data if requested. Unconditional over the
@@ -1109,12 +947,12 @@ public class DataTypeService {
                     // freed the range. clearCodeUnits is a documented no-op over a
                     // range with nothing defined, so this is safe to call unconditionally.
                     if (clearExisting) {
-                        listing.clearCodeUnits(address,
-                            address.add(Math.max(dataType.getLength() - 1, 0)), false);
+                        listing.clearCodeUnits(addr,
+                            addr.add(Math.max(dataType.getLength() - 1, 0)), false);
                     }
 
                     // Apply the data type
-                    Data data = listing.createData(address, dataType);
+                    Data data = listing.createData(addr, dataType);
 
                     // Validate size matches expectation
                     int expectedSize = dataType.getLength();
@@ -1122,46 +960,39 @@ public class DataTypeService {
 
                     if (actualSize != expectedSize) {
                         Msg.warn(this, String.format("Size mismatch: expected %d bytes but applied %d bytes at %s",
-                                                     expectedSize, actualSize, addressStr));
+                                                     expectedSize, actualSize, addr.toString()));
                     }
 
-                    Map<String, Object> out = new LinkedHashMap<>();
-                    out.put("status", "success");
-                    out.put("message", "Successfully applied data type '" + typeName + "' at "
-                            + addressStr + " (size: " + actualSize + " bytes)");
-                    out.put("type_name", typeName);
-                    out.put("address", addressStr);
-                    out.put("size", actualSize);
+                    Map<String, Object> extras = new LinkedHashMap<>();
+                    extras.put("type_name", typeName);
+                    extras.put("address", addr.toString());
+                    extras.put("size", actualSize);
 
                     // Add value information if available
                     if (data != null && data.getValue() != null) {
-                        out.put("value", data.getValue().toString());
+                        extras.put("value", data.getValue().toString());
                     }
                     if (!enforcementWarnings.isEmpty()) {
-                        out.put("warnings", enforcementWarnings);
+                        extras.put("warnings", enforcementWarnings);
                     }
 
-                    return Response.ok(out);
+                    return Response.success(
+                            "Successfully applied data type '" + typeName + "' at "
+                            + addr.toString() + " (size: " + actualSize + " bytes)",
+                            extras);
                 });
             } catch (Exception e) {
-                return Response.err("Error applying data type: " + e.getMessage());
+                return Response.err("Error applying data type: " + ServiceUtils.failureMessage(e));
             }
 
         } catch (Exception e) {
-            return Response.err("Error processing request: " + e.getMessage());
+            return Response.err("Error processing request: " + ServiceUtils.failureMessage(e));
         }
     }
 
-    /** Four-arg overload preserving the pre-v5.11.2 signature. */
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting,
-                                   String programName) {
-        return applyDataType(addressStr, typeName, clearExisting, programName, null);
-    }
+    
 
-    // Backward compatibility overload
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        return applyDataType(addressStr, typeName, clearExisting, null, null);
-    }
+
 
     /**
      * Delete a data type from the program
@@ -1176,15 +1007,10 @@ public class DataTypeService {
                                + "the type.") String typeName,
             @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
                    description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
+        String errorMessage = null;
 
         try {
             threadingStrategy.executeWrite(program, "Delete data type", () -> {
@@ -1192,52 +1018,39 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
                 if (dataType == null) {
-                    errorMessage.set("Data type not found: " + typeName);
-                    return null;
+                    throw new Refusal("Data type not found: " + typeName);
                 }
 
                 // Check if type is in use (simplified check)
                 // Note: Ghidra will prevent deletion if type is in use during remove operation
 
-                boolean deleted = dtm.remove(dataType, null);
-                if (deleted) {
-                    success.set(true);
-                } else {
-                    errorMessage.set("Failed to delete data type '" + typeName
+                boolean deleted = dtm.remove(dataType);
+                if (!deleted) {
+                    throw new Refusal("Failed to delete data type '" + typeName
                             + "' (may be in use). Try resolve_duplicate_type if a /Demangler 1-byte stub blocks a full struct.");
                 }
                 return null;
             });
+            return Response.success(
+                    "Data type '" + typeName + "' deleted successfully",
+                    JsonHelper.mapOf("type_name", typeName));
+        } catch (Refusal r) {
+            errorMessage = r.getMessage();
         } catch (Exception e) {
-            errorMessage.set("Error deleting data type: " + e.getMessage());
+            errorMessage = "Error deleting data type: " + ServiceUtils.failureMessage(e);
         }
 
-        if (!success.get() && resolveDemanglerDuplicate) {
-            Map<String, Object> resolved = resolveDuplicateTypeData(typeName, true, programName);
+        if (resolveDemanglerDuplicate) {
+            Map<String, Object> resolved = resolveDuplicateTypeData(typeName, true, program);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("status", "error");
             out.put("type_name", typeName);
-            out.put("message", errorMessage.get());
+            out.put("message", errorMessage);
             out.put("resolve_duplicate_attempt", resolved);
             return Response.ok(out);
         }
 
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Data type '" + typeName + "' deleted successfully",
-                "type_name", typeName));
-    }
-
-    // Backward compatibility overload
-    public Response deleteDataType(String typeName) {
-        return deleteDataType(typeName, false, null);
-    }
-
-    public Response deleteDataType(String typeName, String programName) {
-        return deleteDataType(typeName, false, programName);
+        return Response.err(errorMessage);
     }
 
     /**
@@ -1258,34 +1071,16 @@ public class DataTypeService {
                    description = "Replacement field name. Leave empty to keep the current name and only "
                                + "retype. The project's Hungarian prefix is applied automatically from the "
                                + "field's type, so the stored name can differ from what you send.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if ((fieldName == null || fieldName.isEmpty()) && (newName == null || newName.isEmpty())) {
             return Response.err("Field name or offset is required");
         }
 
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
-
         try {
             threadingStrategy.executeWrite(program, "Modify struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    errorMessage.set("Structure not found: " + structName);
-                    return null;
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    errorMessage.set("Data type '" + structName + "' is not a structure");
-                    return null;
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 DataTypeComponent targetComponent = null;
 
                 // Support offset-based lookup: "offset:16" or "offset:0x10"
@@ -1297,36 +1092,31 @@ public class DataTypeService {
                                 : Integer.parseInt(offsetStr);
                         targetComponent = struct.getComponentAt(targetOffset);
                         if (targetComponent == null) {
-                            errorMessage.set("No field at offset " + targetOffset + " in structure '" + structName + "'");
-                            return null;
+                            throw new Refusal("No field at offset " + targetOffset + " in structure '" + structName + "'");
                         }
                     } catch (NumberFormatException e) {
-                        errorMessage.set("Invalid offset format: " + fieldName + ". Use 'offset:16' or 'offset:0x10'");
-                        return null;
+                        throw new Refusal("Invalid offset format: " + fieldName + ". Use 'offset:16' or 'offset:0x10'");
                     }
                 } else if (fieldName != null && !fieldName.isEmpty()) {
                     // Find by field name — exact, else unique Hungarian-stem match (BUG-2).
                     int ord = resolveFieldOrdinal(struct, fieldName);
                     if (ord == -2) {
-                        errorMessage.set("Field '" + fieldName + "' is ambiguous in '" + structName
+                        throw new Refusal("Field '" + fieldName + "' is ambiguous in '" + structName
                               + "' — multiple fields share that stem; use the exact name from get_struct_layout");
-                        return null;
                     }
                     if (ord >= 0) targetComponent = struct.getComponent(ord);
                 }
 
                 if (targetComponent == null) {
-                    errorMessage.set("Field '" + fieldName + "' not found in structure '" + structName
+                    throw new Refusal("Field '" + fieldName + "' not found in structure '" + structName
                             + "'. For unnamed fields, use 'offset:N' (e.g., 'offset:16' or 'offset:0x10')");
-                    return null;
                 }
 
                 // If new type is specified, change the field type
                 if (newType != null && !newType.isEmpty()) {
                     DataType newDataType = ServiceUtils.resolveDataType(dtm, newType);
                     if (newDataType == null) {
-                        errorMessage.set("New data type not found: " + newType);
-                        return null;
+                        throw new Refusal("New data type not found: " + newType);
                     }
                     struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
                 }
@@ -1339,29 +1129,21 @@ public class DataTypeService {
                     targetComponent.setFieldName(fixedName);
                 }
 
-                success.set(true);
                 return null;
             });
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("struct_name", structName);
+            extras.put("field_name", fieldName);
+            if (newType != null && !newType.isEmpty()) extras.put("new_type", newType);
+            if (newName != null && !newName.isEmpty()) extras.put("new_name", newName);
+            return Response.success(
+                    "Successfully modified field '" + fieldName + "' in structure '" + structName + "'",
+                    extras);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error modifying struct field: " + e.getMessage());
+            return Response.err("Error modifying struct field: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("message", "Successfully modified field '" + fieldName + "' in structure '" + structName + "'");
-        out.put("struct_name", structName);
-        out.put("field_name", fieldName);
-        if (newType != null && !newType.isEmpty()) out.put("new_type", newType);
-        if (newName != null && !newName.isEmpty()) out.put("new_name", newName);
-        return Response.ok(out);
-    }
-
-    // Backward compatibility overload
-    public Response modifyStructField(String structName, String fieldName, String newType, String newName) {
-        return modifyStructField(structName, fieldName, newType, newName, null);
     }
 
     /**
@@ -1382,9 +1164,7 @@ public class DataTypeService {
                    description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Allow shrink even when defined fields extend past new_size (clips trailing layout).") boolean force,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1393,61 +1173,39 @@ public class DataTypeService {
             return Response.err("new_size must be positive");
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
-        final int[] oldLenOut = new int[1];
+        record ResizeStructOutcome(int oldSize, String message) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Resize structure: " + name, () -> {
+            ResizeStructOutcome outcome = threadingStrategy.executeWrite(program, "Resize structure: " + name, () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
-                if (dataType == null) {
-                    result.append("Structure not found: ").append(name);
-                    return null;
-                }
-                if (!(dataType instanceof Structure)) {
-                    result.append("Data type '").append(name).append("' is not a structure");
-                    return null;
-                }
-
-                Structure struct = (Structure) dataType;
-                oldLenOut[0] = struct.getLength();
+                Structure struct = ServiceUtils.requireStructure(dtm, name);
+                int oldLen = struct.getLength();
                 String clipError = validateStructResize(struct, newSize, force);
                 if (clipError != null) {
-                    result.append(clipError);
-                    return null;
+                    throw new Refusal(clipError);
                 }
 
-                if (!preserveFields && force && newSize < oldLenOut[0]) {
+                if (!preserveFields && force && newSize < oldLen) {
                     clearStructComponentsFromOffset(struct, newSize);
                 }
 
                 struct.setLength(newSize);
-                success.set(true);
-                result.append("Resized '").append(name).append("' from ")
-                        .append(oldLenOut[0]).append(" to ").append(struct.getLength()).append(" bytes");
-                return null;
+                String message = "Resized '" + name + "' from "
+                        + oldLen + " to " + struct.getLength() + " bytes";
+                return new ResizeStructOutcome(oldLen, message);
             });
-        } catch (IllegalArgumentException e) {
-            result.append("Resize failed: ").append(e.getMessage())
-                    .append(". Use force=true or recreate_struct with an explicit fields array.");
-        } catch (Exception e) {
-            result.append("Error resizing structure: ").append(e.getMessage());
-        }
-
-        if (success.get()) {
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
+            return Response.success(outcome.message(), JsonHelper.mapOf(
                     "name", name,
-                    "old_size", oldLenOut[0],
-                    "new_size", newSize,
-                    "message", result.toString()));
+                    "old_size", outcome.oldSize(),
+                    "new_size", newSize));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (IllegalArgumentException e) {
+            return Response.err("Resize failed: " + ServiceUtils.failureMessage(e)
+                    + ". Use force=true or recreate_struct with an explicit fields array.");
+        } catch (Exception e) {
+            return Response.err("Error resizing structure: " + ServiceUtils.failureMessage(e));
         }
-        return result.length() > 0 ? Response.err(result.toString()) : Response.err("Failed to resize structure");
     }
 
     /**
@@ -1473,9 +1231,7 @@ public class DataTypeService {
                    description = "Delete a 1-byte placeholder/Demangler stub before recreate (default true).") boolean replacePlaceholder,
             @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
                    description = "Delete an existing full-sized struct before recreate (fails if referenced).") boolean force,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name is required");
@@ -1483,10 +1239,6 @@ public class DataTypeService {
         if (fieldsJson == null || fieldsJson.isEmpty()) {
             return Response.err(badFieldsFormatHint("fields JSON is required"));
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         DataTypeManager dtm = program.getDataTypeManager();
         DataType existing = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
@@ -1510,24 +1262,17 @@ public class DataTypeService {
                 deletedOriginal = true;
             } else if (force) {
                 originalBackup = existing.copy(dtm);
-                AtomicBoolean deleted = new AtomicBoolean(false);
-                StringBuilder delMsg = new StringBuilder();
                 try {
                     threadingStrategy.executeWrite(program, "Recreate struct delete", () -> {
-                        deleted.set(dtm.remove(existing, null));
-                        if (deleted.get()) {
-                            delMsg.append("Removed existing type before recreate");
-                        } else {
-                            delMsg.append("Could not delete '").append(name)
-                                    .append("' (may be in use)");
+                        if (dtm.remove(existing)) {
+                            return null;
                         }
-                        return null;
+                        throw new Refusal("Could not delete '" + name + "' (may be in use)");
                     });
+                } catch (Refusal r) {
+                    return Response.err(r.getMessage());
                 } catch (Exception e) {
-                    return Response.err("Delete before recreate failed: " + e.getMessage());
-                }
-                if (!deleted.get()) {
-                    return Response.err(delMsg.toString());
+                    return ServiceUtils.fail("Delete before recreate", e);
                 }
                 deletedOriginal = true;
             } else {
@@ -1537,7 +1282,7 @@ public class DataTypeService {
             }
         }
 
-        Response created = createStruct(name, fieldsJson, false, programName);
+        Response created = createStruct(name, fieldsJson, false, program);
 
         // Verify the create actually landed; if not, restore the original we deleted so the
         // operation is net-zero rather than destructive.
@@ -1571,7 +1316,7 @@ public class DataTypeService {
             return created;
         }
 
-        Response resized = resizeStruct(name, size, true, true, programName);
+        Response resized = resizeStruct(name, size, true, true, program);
 
         if (resized instanceof Response.Err) {
             return Response.err("Created struct but post-create resize failed: "
@@ -1592,18 +1337,13 @@ public class DataTypeService {
                                + "category is searched for that name.") String typeName,
             @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
                    description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (typeName == null || typeName.isEmpty()) {
             return Response.err("type_name is required");
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
-        Map<String, Object> data = resolveDuplicateTypeData(typeName, deleteDemanglerStub, programName);
+        Map<String, Object> data = resolveDuplicateTypeData(typeName, deleteDemanglerStub, program);
         if ("not_found".equals(data.get("situation"))) {
             return Response.err("No data type named '" + typeName + "'");
         }
@@ -1623,14 +1363,7 @@ public class DataTypeService {
      * deletion_failed}.</p>
      */
     private Map<String, Object> resolveDuplicateTypeData(String typeName, boolean deleteDemanglerStub,
-                                                          String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) {
-            return JsonHelper.mapOf("type_name", typeName, "situation", "not_found",
-                    "message", "No data type named '" + typeName + "'");
-        }
-        Program program = pe.program();
-
+                                                          Program program) {
         DataTypeManager dtm = program.getDataTypeManager();
         List<DataType> matches = findAllTypesBySimpleName(dtm, typeName);
         if (matches.isEmpty()) {
@@ -1780,24 +1513,24 @@ public class DataTypeService {
 
     boolean deletePlaceholderType(Program program, DataType dataType, String logicalName,
                                          StringBuilder result) {
-        AtomicBoolean success = new AtomicBoolean(false);
         try {
-            threadingStrategy.executeWrite(program, "Delete placeholder type " + logicalName, () -> {
+            String message = threadingStrategy.executeWrite(program, "Delete placeholder type " + logicalName, () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                boolean deleted = dtm.remove(dataType, null);
+                boolean deleted = dtm.remove(dataType);
                 if (deleted) {
-                    result.append("Removed placeholder '").append(dataType.getPathName()).append("'");
-                    success.set(true);
-                } else {
-                    result.append("Could not remove '").append(dataType.getPathName())
-                            .append("' (in use or locked)");
+                    return "Removed placeholder '" + dataType.getPathName() + "'";
                 }
-                return null;
+                throw new Refusal("Could not remove '" + dataType.getPathName()
+                        + "' (in use or locked)");
             });
+            result.append(message);
+            return true;
+        } catch (Refusal r) {
+            result.append(r.getMessage());
         } catch (Exception e) {
             result.append("Error: ").append(e.getMessage());
         }
-        return success.get();
+        return false;
     }
 
     /**
@@ -1821,10 +1554,7 @@ public class DataTypeService {
                                + "A non-negative offset OVERWRITES whatever occupies that range rather than "
                                + "shifting later fields, and grows the struct when it lies at or past the "
                                + "current end.") int offset,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
         if (fieldType == null || fieldType.isEmpty()) return Response.err("Field type is required");
@@ -1832,30 +1562,15 @@ public class DataTypeService {
         // Apply configured struct-field naming policy.
         fieldName = NamingConventions.applyStructFieldNamingPolicy(fieldName, fieldType);
 
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
         final String finalFieldName = fieldName;
 
         try {
             threadingStrategy.executeWrite(program, "Add struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    errorMessage.set("Structure not found: " + structName);
-                    return null;
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    errorMessage.set("Data type '" + structName + "' is not a structure");
-                    return null;
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 DataType newFieldType = ServiceUtils.resolveDataType(dtm, fieldType);
                 if (newFieldType == null) {
-                    errorMessage.set("Field data type not found: " + fieldType);
-                    return null;
+                    throw new Refusal("Field data type not found: " + fieldType);
                 }
 
                 if (offset >= 0) {
@@ -1875,29 +1590,21 @@ public class DataTypeService {
                     struct.add(newFieldType, finalFieldName, null);
                 }
 
-                success.set(true);
                 return null;
             });
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("struct_name", structName);
+            extras.put("field_name", finalFieldName);
+            extras.put("field_type", fieldType);
+            if (offset >= 0) extras.put("offset", offset);
+            return Response.success(
+                    "Successfully added field '" + finalFieldName + "' to structure '" + structName + "'",
+                    extras);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error adding struct field: " + e.getMessage());
+            return Response.err("Error adding struct field: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("message", "Successfully added field '" + finalFieldName + "' to structure '" + structName + "'");
-        out.put("struct_name", structName);
-        out.put("field_name", finalFieldName);
-        out.put("field_type", fieldType);
-        if (offset >= 0) out.put("offset", offset);
-        return Response.ok(out);
-    }
-
-    // Backward compatibility overload
-    public Response addStructField(String structName, String fieldName, String fieldType, int offset) {
-        return addStructField(structName, fieldName, fieldType, offset, null);
     }
 
     /**
@@ -1939,65 +1646,35 @@ public class DataTypeService {
             @Param(value = "field_name", source = ParamSource.BODY,
                    description = "Field to remove. Matched exactly first, then by Hungarian stem, so the "
                                + "name you originally sent still works after auto-prefixing changed it.") String fieldName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
         if (fieldName == null || fieldName.isEmpty()) return Response.err("Field name is required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Remove struct field", () -> {
                 DataTypeManager dtm = program.getDataTypeManager();
-                DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, structName);
-
-                if (dataType == null) {
-                    errorMessage.set("Structure not found: " + structName);
-                    return null;
-                }
-
-                if (!(dataType instanceof Structure)) {
-                    errorMessage.set("Data type '" + structName + "' is not a structure");
-                    return null;
-                }
-
-                Structure struct = (Structure) dataType;
+                Structure struct = ServiceUtils.requireStructure(dtm, structName);
                 int targetOrdinal = resolveFieldOrdinal(struct, fieldName);
 
                 if (targetOrdinal == -2) {
-                    errorMessage.set("Field '" + fieldName + "' is ambiguous in '" + structName
+                    throw new Refusal("Field '" + fieldName + "' is ambiguous in '" + structName
                           + "' — multiple fields share that stem; use the exact name from get_struct_layout");
-                    return null;
                 }
                 if (targetOrdinal == -1) {
-                    errorMessage.set("Field '" + fieldName + "' not found in structure '" + structName + "'");
-                    return null;
+                    throw new Refusal("Field '" + fieldName + "' not found in structure '" + structName + "'");
                 }
 
                 struct.delete(targetOrdinal);
-                success.set(true);
                 return null;
             });
+            return Response.success(
+                    "Successfully removed field '" + fieldName + "' from structure '" + structName + "'",
+                    JsonHelper.mapOf("struct_name", structName, "field_name", fieldName));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error removing struct field: " + e.getMessage());
+            return Response.err("Error removing struct field: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully removed field '" + fieldName + "' from structure '" + structName + "'",
-                "struct_name", structName,
-                "field_name", fieldName));
-    }
-
-    // Backward compatibility overload
-    public Response removeStructField(String structName, String fieldName) {
-        return removeStructField(structName, fieldName, null);
     }
 
     /**
@@ -2011,15 +1688,9 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "Destination category as a /-separated path, e.g. /MyTypes/Network. It "
                                + "is created, with any missing parents, if it does not exist.") String categoryPath,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Move data type to category", () -> {
@@ -2027,8 +1698,7 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
                 if (dataType == null) {
-                    errorMessage.set("Data type not found: " + typeName);
-                    return null;
+                    throw new Refusal("Data type not found: " + typeName);
                 }
 
                 CategoryPath catPath = new CategoryPath(categoryPath);
@@ -2037,26 +1707,16 @@ public class DataTypeService {
                 // Move the data type
                 dataType.setCategoryPath(catPath);
 
-                success.set(true);
                 return null;
             });
+            return Response.success(
+                    "Successfully moved data type '" + typeName + "' to category '" + categoryPath + "'",
+                    JsonHelper.mapOf("type_name", typeName, "category_path", categoryPath));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error moving data type: " + e.getMessage());
+            return Response.err("Error moving data type: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully moved data type '" + typeName + "' to category '" + categoryPath + "'",
-                "type_name", typeName,
-                "category_path", categoryPath));
-    }
-
-    // Backward compatibility overload
-    public Response moveDataTypeToCategory(String typeName, String categoryPath) {
-        return moveDataTypeToCategory(typeName, categoryPath, null);
     }
 
     /**
@@ -2075,18 +1735,11 @@ public class DataTypeService {
                    description = "Current type name; may be bare (Foo) or category-qualified (/MyCat/Foo)") String oldName,
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "New type name. Must be unique within the type's category.") String newName,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // Argument guards run before the program lookup so a malformed call
         // reports the actual problem instead of "No program loaded".
         if (oldName == null || oldName.isEmpty()) return Response.err("Old name is required");
         if (newName == null || newName.isEmpty()) return Response.err("New name is required");
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<String> errorMessage = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Rename data type", () -> {
@@ -2094,21 +1747,18 @@ public class DataTypeService {
                 DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, oldName);
 
                 if (dataType == null) {
-                    errorMessage.set("Data type not found: " + oldName);
-                    return null;
+                    throw new Refusal("Data type not found: " + oldName);
                 }
 
                 // Built-in types (int, char, ...) are owned by the built-in
                 // manager, not the program; setName would either fail or
                 // corrupt the shared archive.
                 if (dataType instanceof BuiltInDataType) {
-                    errorMessage.set("Cannot rename built-in data type: " + oldName);
-                    return null;
+                    throw new Refusal("Cannot rename built-in data type: " + oldName);
                 }
 
                 if (newName.equals(dataType.getName())) {
-                    errorMessage.set("Data type '" + oldName + "' already has that name");
-                    return null;
+                    throw new Refusal("Data type '" + oldName + "' already has that name");
                 }
 
                 // A same-named sibling in the destination category would make
@@ -2116,34 +1766,27 @@ public class DataTypeService {
                 // auto-uniquify to Foo.conflict.
                 Category category = dtm.getCategory(dataType.getCategoryPath());
                 if (category != null && category.getDataType(newName) != null) {
-                    errorMessage.set("A data type named '" + newName
+                    throw new Refusal("A data type named '" + newName
                           + "' already exists in category '"
                           + dataType.getCategoryPath().getPath() + "'");
-                    return null;
                 }
 
                 try {
                     dataType.setName(newName);
                 } catch (InvalidNameException | DuplicateNameException e) {
-                    errorMessage.set("Error renaming data type: " + e.getMessage());
-                    return null;
+                    throw new Refusal("Error renaming data type: " + e.getMessage());
                 }
 
-                success.set(true);
                 return null;
             });
+            return Response.success(
+                    "Successfully renamed data type '" + oldName + "' to '" + newName + "'",
+                    JsonHelper.mapOf("old_name", oldName, "new_name", newName));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Error renaming data type: " + e.getMessage());
+            return Response.err("Error renaming data type: " + ServiceUtils.failureMessage(e));
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully renamed data type '" + oldName + "' to '" + newName + "'",
-                "old_name", oldName,
-                "new_name", newName));
     }
 
     // -----------------------------------------------------------------------
@@ -2160,10 +1803,7 @@ public class DataTypeService {
                                + "applicability at that address (memory range/alignment/conflicts). Accepts "
                                + "0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00).") String addressStr,
             @Param(value = "type_name", description = "Data type name (bare names resolve across all categories)") String typeName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -2236,7 +1876,7 @@ public class DataTypeService {
             out.put("warnings", warnings);
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Error validating data type: " + e.getMessage());
+            return Response.err("Error validating data type: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -2251,106 +1891,77 @@ public class DataTypeService {
     @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype", access = ToolAccess.READ_ONLY)
     public Response validateFunctionPrototype(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "prototype", description = "Function prototype") String prototype,
             @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
+        return validateFunctionPrototypeAt(program, func.getEntryPoint(), func.getName(), prototype, callingConvention);
+    }
 
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-
+    private Response validateFunctionPrototypeAt(Program program, Address addr, String functionAddress,
+                                                 String prototype, String callingConvention) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", false,
-                            "error", "No function at address: " + functionAddress
-                        )));
-                        return;
-                    }
-
-                    // Basic validation - check if prototype string is parseable
-                    if (prototype == null || prototype.trim().isEmpty()) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", false,
-                            "error", "Empty prototype"
-                        )));
-                        return;
-                    }
-
-                    // Check for common issues
-                    List<String> warnings = new ArrayList<>();
-
-                    // Check for return type
-                    if (!prototype.contains("(")) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", false,
-                            "error", "Invalid prototype format - missing parentheses"
-                        )));
-                        return;
-                    }
-
-                    // Validate calling convention if provided
-                    if (callingConvention != null && !callingConvention.isEmpty()) {
-                        String[] validConventions = {"__cdecl", "__stdcall", "__fastcall", "__thiscall", "default"};
-                        boolean validConv = false;
-                        for (String valid : validConventions) {
-                            if (callingConvention.equalsIgnoreCase(valid)) {
-                                validConv = true;
-                                break;
-                            }
-                        }
-                        if (!validConv) {
-                            warnings.add("Unknown calling convention: " + callingConvention);
-                        }
-                    }
-
-                    if (!warnings.isEmpty()) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", true,
-                            "warnings", warnings
-                        )));
-                    } else {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", true
-                        )));
-                    }
-                } catch (Exception e) {
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "valid", false,
-                        "error", e.getMessage()
-                    )));
-                }
-            });
-
-            if (responseRef.get() != null) {
-                return responseRef.get();
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) {
+                return Response.ok(JsonHelper.mapOf(
+                    "valid", false,
+                    "error", "No function at address: " + functionAddress
+                ));
             }
+
+            // Basic validation - check if prototype string is parseable
+            if (prototype == null || prototype.trim().isEmpty()) {
+                return Response.ok(JsonHelper.mapOf(
+                    "valid", false,
+                    "error", "Empty prototype"
+                ));
+            }
+
+            // Check for common issues
+            List<String> warnings = new ArrayList<>();
+
+            // Check for return type
+            if (!prototype.contains("(")) {
+                return Response.ok(JsonHelper.mapOf(
+                    "valid", false,
+                    "error", "Invalid prototype format - missing parentheses"
+                ));
+            }
+
+            // Validate calling convention if provided
+            if (callingConvention != null && !callingConvention.isEmpty()) {
+                String[] validConventions = {"__cdecl", "__stdcall", "__fastcall", "__thiscall", "default"};
+                boolean validConv = false;
+                for (String valid : validConventions) {
+                    if (callingConvention.equalsIgnoreCase(valid)) {
+                        validConv = true;
+                        break;
+                    }
+                }
+                if (!validConv) {
+                    warnings.add("Unknown calling convention: " + callingConvention);
+                }
+            }
+
+            if (!warnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf(
+                    "valid", true,
+                    "warnings", warnings
+                ));
+            }
+            return Response.ok(JsonHelper.mapOf(
+                "valid", true
+            ));
         } catch (Exception e) {
             return Response.ok(JsonHelper.mapOf(
                 "valid", false,
                 "error", e.getMessage()
             ));
         }
-
-        return Response.ok(JsonHelper.mapOf("valid", false, "error", "Unknown failure"));
-    }
-
-    // Backward compatibility overload
-    public Response validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
-        return validateFunctionPrototype(functionAddress, prototype, callingConvention, null);
     }
 
     /**
@@ -2365,10 +1976,7 @@ public class DataTypeService {
                    description = "Accepted but ignored: parsing is always C through Ghidra's CParser "
                                + "whatever you pass. Kept so existing callers that send it keep "
                                + "working.") String format,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (source == null || source.isEmpty()) return Response.err("source is required");
 
         final DataTypeManager dtm = program.getDataTypeManager();
@@ -2385,7 +1993,7 @@ public class DataTypeService {
                 } catch (ghidra.app.util.cparser.C.ParseException e) {
                     error = e.getMessage();
                 } catch (Exception e) {
-                    error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    error = ServiceUtils.failureMessage(e);
                 }
                 int after = dtm.getDataTypeCount(true);
                 String msgs = parser.getParseMessages();
@@ -2400,13 +2008,8 @@ public class DataTypeService {
                     "messages", msgs));
             });
         } catch (Exception e) {
-            return Response.err("import failed: " + e.getMessage());
+            return ServiceUtils.fail("import", e);
         }
-    }
-
-    // Backward compatibility overload (pre-program-param callers)
-    public Response importDataTypes(String source, String format) {
-        return importDataTypes(source, format, null);
     }
 
     // -----------------------------------------------------------------------
@@ -2421,10 +2024,7 @@ public class DataTypeService {
             @Param(value = "category_path", source = ParamSource.BODY,
                    description = "New category as a /-separated path, e.g. /MyTypes/Network. Missing "
                                + "parent categories are created too.") String categoryPath,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
 
         try {
@@ -2433,19 +2033,12 @@ public class DataTypeService {
                 CategoryPath catPath = new CategoryPath(categoryPath);
                 Category category = dtm.createCategory(catPath);
 
-                return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully created category: " + category.getCategoryPathName()
-                ));
+                return Response.success(
+                        "Successfully created category: " + category.getCategoryPathName());
             });
         } catch (Exception e) {
-            return Response.err("Error creating category: " + e.getMessage());
+            return Response.err("Error creating category: " + ServiceUtils.failureMessage(e));
         }
-    }
-
-    // Backward compatibility overload
-    public Response createDataTypeCategory(String categoryPath) {
-        return createDataTypeCategory(categoryPath, null);
     }
 
     /**
@@ -2483,7 +2076,7 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "struct_name", source = ParamSource.BODY,
                    description = "Optional label for the structure being analysed. It does NOT select the "
                                + "type — that comes from the data already applied at `address` — and is only "
@@ -2491,148 +2084,130 @@ public class DataTypeService {
             @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10",
                    description = "How many referencing functions to decompile: 1 to 100, default 10. A "
                                + "value outside that range is REJECTED, not clamped.") int maxFunctionsToAnalyze,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return Response.err("maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
                    " and " + MAX_FUNCTIONS_TO_ANALYZE);
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+        
 
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        return analyzeStructFieldUsageAt(program, addr, addr.toString(), structName, maxFunctionsToAnalyze);
+    }
 
-        final AtomicReference<Response> responseRef = new AtomicReference<>();
-
-        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
+    private Response analyzeStructFieldUsageAt(Program program, Address addr, String addressStr,
+                                               String structName, int maxFunctionsToAnalyze) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    // Get data at address to determine structure
-                    Data data = program.getListing().getDataAt(addr);
-                    DataType dataType = (data != null) ? data.getDataType() : null;
+            // Get data at address to determine structure
+            Data data = program.getListing().getDataAt(addr);
+            DataType dataType = (data != null) ? data.getDataType() : null;
 
-                    if (dataType == null || !(dataType instanceof Structure)) {
-                        responseRef.set(Response.err("No structure data type found at " + addressStr));
-                        return;
-                    }
+            if (dataType == null || !(dataType instanceof Structure)) {
+                return Response.err("No structure data type found at " + addressStr);
+            }
 
-                    Structure struct = (Structure) dataType;
+            Structure struct = (Structure) dataType;
 
-                    // MAJOR FIX #5: Validate structure size
-                    DataTypeComponent[] components = struct.getComponents();
-                    if (components.length > MAX_STRUCT_FIELDS) {
-                        responseRef.set(Response.err("Structure too large (" + components.length +
-                                   " fields). Maximum " + MAX_STRUCT_FIELDS + " fields supported."));
-                        return;
-                    }
+            // MAJOR FIX #5: Validate structure size
+            DataTypeComponent[] components = struct.getComponents();
+            if (components.length > MAX_STRUCT_FIELDS) {
+                return Response.err("Structure too large (" + components.length +
+                           " fields). Maximum " + MAX_STRUCT_FIELDS + " fields supported.");
+            }
 
-                    String actualStructName = (structName != null && !structName.isEmpty()) ? structName : struct.getName();
+            String actualStructName = (structName != null && !structName.isEmpty()) ? structName : struct.getName();
 
-                    // Get all xrefs to this address
-                    ReferenceManager refMgr = program.getReferenceManager();
-                    ReferenceIterator refIter = refMgr.getReferencesTo(addr);
+            // Get all xrefs to this address
+            ReferenceManager refMgr = program.getReferenceManager();
+            ReferenceIterator refIter = refMgr.getReferencesTo(addr);
 
-                    Set<Function> functionsToAnalyze = new HashSet<>();
-                    while (refIter.hasNext() && functionsToAnalyze.size() < maxFunctionsToAnalyze) {
-                        Reference ref = refIter.next();
-                        Function func = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
-                        if (func != null) {
-                            functionsToAnalyze.add(func);
-                        }
-                    }
-
-                    // Decompile all functions and analyze field usage
-                    Map<Integer, FieldUsageInfo> fieldUsageMap = new HashMap<>();
-                    DecompInterface decomp = null;
-
-                    // CRITICAL FIX #2: Resource management with try-finally
-                    try {
-                        decomp = ServiceUtils.createConfiguredDecompiler(program);
-
-                        long analysisStart = System.currentTimeMillis();
-                        Msg.info(this, "Analyzing struct at " + addressStr + " with " + functionsToAnalyze.size() + " functions");
-
-                        for (Function func : functionsToAnalyze) {
-                            try {
-                                DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS,
-                                                                                   new ConsoleTaskMonitor());
-                                if (results != null && results.decompileCompleted()) {
-                                    String decompiledCode = results.getDecompiledFunction().getC();
-                                    analyzeFieldUsageInCode(decompiledCode, struct, fieldUsageMap, addr.toString());
-                                } else {
-                                    Msg.warn(this, "Failed to decompile function: " + func.getName());
-                                }
-                            } catch (Exception e) {
-                                // Continue with other functions if one fails
-                                Msg.error(this, "Error decompiling function " + func.getName() + ": " + e.getMessage());
-                            }
-                        }
-
-                        long analysisTime = System.currentTimeMillis() - analysisStart;
-                        Msg.info(this, "Field analysis completed in " + analysisTime + "ms, found " +
-                                 fieldUsageMap.size() + " fields with usage data");
-
-                    } finally {
-                        // CRITICAL FIX #2: Always dispose of DecompInterface
-                        if (decomp != null) {
-                            decomp.dispose();
-                        }
-                    }
-
-                    // Build response with field analysis
-                    Map<String, Object> fieldUsage = new LinkedHashMap<>();
-                    for (int i = 0; i < components.length; i++) {
-                        DataTypeComponent component = components[i];
-                        int offset = component.getOffset();
-
-                        Map<String, Object> fieldInfo = new LinkedHashMap<>();
-                        fieldInfo.put("field_name", component.getFieldName());
-                        fieldInfo.put("field_type", component.getDataType().getName());
-                        fieldInfo.put("offset", offset);
-                        fieldInfo.put("size", component.getLength());
-
-                        FieldUsageInfo usageInfo = fieldUsageMap.get(offset);
-                        if (usageInfo != null) {
-                            fieldInfo.put("access_count", usageInfo.accessCount);
-                            fieldInfo.put("suggested_names", new ArrayList<>(usageInfo.suggestedNames));
-                            fieldInfo.put("usage_patterns", new ArrayList<>(usageInfo.usagePatterns));
-                        } else {
-                            fieldInfo.put("access_count", 0);
-                            fieldInfo.put("suggested_names", new ArrayList<>());
-                            fieldInfo.put("usage_patterns", new ArrayList<>());
-                        }
-
-                        fieldUsage.put(String.valueOf(offset), fieldInfo);
-                    }
-
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "struct_address", addressStr,
-                        "struct_name", actualStructName,
-                        "struct_size", struct.getLength(),
-                        "functions_analyzed", functionsToAnalyze.size(),
-                        "field_usage", fieldUsage
-                    )));
-                } catch (Exception e) {
-                    responseRef.set(Response.err(e.getMessage()));
+            Set<Function> functionsToAnalyze = new HashSet<>();
+            while (refIter.hasNext() && functionsToAnalyze.size() < maxFunctionsToAnalyze) {
+                Reference ref = refIter.next();
+                Function func = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
+                if (func != null) {
+                    functionsToAnalyze.add(func);
                 }
-            });
+            }
+
+            // Decompile all functions and analyze field usage
+            Map<Integer, FieldUsageInfo> fieldUsageMap = new HashMap<>();
+            DecompInterface decomp = null;
+
+            // CRITICAL FIX #2: Resource management with try-finally
+            try {
+                decomp = ServiceUtils.createConfiguredDecompiler(program);
+
+                long analysisStart = System.currentTimeMillis();
+                Msg.info(this, "Analyzing struct at " + addressStr + " with " + functionsToAnalyze.size() + " functions");
+
+                for (Function func : functionsToAnalyze) {
+                    try {
+                        DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS,
+                                                                           new ConsoleTaskMonitor());
+                        if (results != null && results.decompileCompleted()) {
+                            String decompiledCode = results.getDecompiledFunction().getC();
+                            analyzeFieldUsageInCode(decompiledCode, struct, fieldUsageMap, addr.toString());
+                        } else {
+                            Msg.warn(this, "Failed to decompile function: " + func.getName());
+                        }
+                    } catch (Exception e) {
+                        // Continue with other functions if one fails
+                        Msg.error(this, "Error decompiling function " + func.getName() + ": " + e.getMessage());
+                    }
+                }
+
+                long analysisTime = System.currentTimeMillis() - analysisStart;
+                Msg.info(this, "Field analysis completed in " + analysisTime + "ms, found " +
+                         fieldUsageMap.size() + " fields with usage data");
+
+            } finally {
+                // CRITICAL FIX #2: Always dispose of DecompInterface
+                if (decomp != null) {
+                    decomp.dispose();
+                }
+            }
+
+            // Build response with field analysis
+            Map<String, Object> fieldUsage = new LinkedHashMap<>();
+            for (int i = 0; i < components.length; i++) {
+                DataTypeComponent component = components[i];
+                int offset = component.getOffset();
+
+                Map<String, Object> fieldInfo = new LinkedHashMap<>();
+                fieldInfo.put("field_name", component.getFieldName());
+                fieldInfo.put("field_type", component.getDataType().getName());
+                fieldInfo.put("offset", offset);
+                fieldInfo.put("size", component.getLength());
+
+                FieldUsageInfo usageInfo = fieldUsageMap.get(offset);
+                if (usageInfo != null) {
+                    fieldInfo.put("access_count", usageInfo.accessCount);
+                    fieldInfo.put("suggested_names", new ArrayList<>(usageInfo.suggestedNames));
+                    fieldInfo.put("usage_patterns", new ArrayList<>(usageInfo.usagePatterns));
+                } else {
+                    fieldInfo.put("access_count", 0);
+                    fieldInfo.put("suggested_names", new ArrayList<>());
+                    fieldInfo.put("usage_patterns", new ArrayList<>());
+                }
+
+                fieldUsage.put(String.valueOf(offset), fieldInfo);
+            }
+
+            return Response.ok(JsonHelper.mapOf(
+                "struct_address", addressStr,
+                "struct_name", actualStructName,
+                "struct_size", struct.getLength(),
+                "functions_analyzed", functionsToAnalyze.size(),
+                "field_usage", fieldUsage
+            ));
         } catch (Exception e) {
-            Msg.error(this, "Thread synchronization error in analyzeStructFieldUsage", e);
-            return Response.err("Thread synchronization error: " + e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        return responseRef.get();
     }
 
-    // Backward compatibility overload
-    public Response analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
-        return analyzeStructFieldUsage(addressStr, structName, maxFunctionsToAnalyze, null);
-    }
+
 
     /**
      * Analyze decompiled code to extract field usage patterns
@@ -2729,97 +2304,77 @@ public class DataTypeService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String structAddressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Size of the structure in BYTES, or 0 (the default) to take the size "
                                + "from the data already applied at struct_address. Must be 0 to 65536.") int structSize,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+        
 
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, structAddressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        return suggestFieldNamesAt(program, addr, addr.toString());
+    }
 
-        final AtomicReference<Response> responseRef = new AtomicReference<>();
-
-        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
+    private Response suggestFieldNamesAt(Program program, Address addr, String structAddressStr) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    Msg.info(this, "Generating field name suggestions for structure at " + structAddressStr);
+            Msg.info(this, "Generating field name suggestions for structure at " + structAddressStr);
 
-                    // Get data at address
-                    Data data = program.getListing().getDataAt(addr);
-                    DataType dataType = (data != null) ? data.getDataType() : null;
+            // Get data at address
+            Data data = program.getListing().getDataAt(addr);
+            DataType dataType = (data != null) ? data.getDataType() : null;
 
-                    if (dataType == null || !(dataType instanceof Structure)) {
-                        responseRef.set(Response.err("No structure data type found at " + structAddressStr));
-                        return;
-                    }
+            if (dataType == null || !(dataType instanceof Structure)) {
+                return Response.err("No structure data type found at " + structAddressStr);
+            }
 
-                    Structure struct = (Structure) dataType;
+            Structure struct = (Structure) dataType;
 
-                    // MAJOR FIX #5: Validate structure size
-                    DataTypeComponent[] components = struct.getComponents();
-                    if (components.length > MAX_STRUCT_FIELDS) {
-                        responseRef.set(Response.err("Structure too large: " + components.length +
-                                   " fields (max " + MAX_STRUCT_FIELDS + ")"));
-                        return;
-                    }
+            // MAJOR FIX #5: Validate structure size
+            DataTypeComponent[] components = struct.getComponents();
+            if (components.length > MAX_STRUCT_FIELDS) {
+                return Response.err("Structure too large: " + components.length +
+                           " fields (max " + MAX_STRUCT_FIELDS + ")");
+            }
 
-                    List<Map<String, Object>> suggestions = new ArrayList<>();
-                    for (DataTypeComponent component : components) {
-                        Map<String, Object> suggestion = new LinkedHashMap<>();
-                        suggestion.put("offset", component.getOffset());
-                        suggestion.put("current_name", component.getFieldName());
-                        suggestion.put("field_type", component.getDataType().getName());
+            List<Map<String, Object>> suggestions = new ArrayList<>();
+            for (DataTypeComponent component : components) {
+                Map<String, Object> suggestion = new LinkedHashMap<>();
+                suggestion.put("offset", component.getOffset());
+                suggestion.put("current_name", component.getFieldName());
+                suggestion.put("field_type", component.getDataType().getName());
 
-                        // Generate suggestions based on type and patterns
-                        List<String> nameSuggestions = generateFieldNameSuggestions(component);
+                // Generate suggestions based on type and patterns
+                List<String> nameSuggestions = generateFieldNameSuggestions(component);
 
-                        // Ensure we always have fallback suggestions
-                        if (nameSuggestions.isEmpty()) {
-                            nameSuggestions.add(component.getFieldName() + "Value");
-                            nameSuggestions.add(component.getFieldName() + "Data");
-                        }
-
-                        suggestion.put("suggested_names", nameSuggestions);
-                        suggestion.put("confidence", "medium");  // Placeholder confidence level
-                        suggestions.add(suggestion);
-                    }
-
-                    Msg.info(this, "Generated suggestions for " + components.length + " fields");
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "struct_address", structAddressStr,
-                        "struct_name", struct.getName(),
-                        "struct_size", struct.getLength(),
-                        "suggestions", suggestions
-                    )));
-
-                } catch (Exception e) {
-                    Msg.error(this, "Error in suggestFieldNames", e);
-                    responseRef.set(Response.err(e.getMessage()));
+                // Ensure we always have fallback suggestions
+                if (nameSuggestions.isEmpty()) {
+                    nameSuggestions.add(component.getFieldName() + "Value");
+                    nameSuggestions.add(component.getFieldName() + "Data");
                 }
-            });
+
+                suggestion.put("suggested_names", nameSuggestions);
+                suggestion.put("confidence", "medium");  // Placeholder confidence level
+                suggestions.add(suggestion);
+            }
+
+            Msg.info(this, "Generated suggestions for " + components.length + " fields");
+            return Response.ok(JsonHelper.mapOf(
+                "struct_address", structAddressStr,
+                "struct_name", struct.getName(),
+                "struct_size", struct.getLength(),
+                "suggestions", suggestions
+            ));
         } catch (Exception e) {
-            Msg.error(this, "Thread synchronization error in suggestFieldNames", e);
-            return Response.err("Thread synchronization error: " + e.getMessage());
+            Msg.error(this, "Error in suggestFieldNames", e);
+            return ServiceUtils.fail(e);
         }
-
-        return responseRef.get();
     }
 
-    // Backward compatibility overload
-    public Response suggestFieldNames(String structAddressStr, int structSize) {
-        return suggestFieldNames(structAddressStr, structSize, null);
-    }
+
 
     /**
      * Generate field name suggestions based on data type and patterns
@@ -2901,14 +2456,8 @@ public class DataTypeService {
                                + "{name, type} objects; ARRAY needs count plus either element_type or "
                                + "element_struct; STRING takes an optional type. It must be an OBJECT — a "
                                + "JSON string is rejected.") Object typeDefinitionObj,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-        final AtomicReference<String> typeApplied = new AtomicReference<>("none");
-        final List<String> operations = new ArrayList<>();
+            @Param(value = "program", defaultValue = "") Program program) {
+        record ClassificationOutcome(String typeApplied, List<String> operations) {}
 
         try {
             Address addr = ServiceUtils.parseAddress(program, addressStr);
@@ -2935,10 +2484,12 @@ public class DataTypeService {
 
             // Atomic transaction for all operations
             try {
-                threadingStrategy.executeWrite(program, "Apply Data Classification", () -> {
+                ClassificationOutcome outcome = threadingStrategy.executeWrite(program, "Apply Data Classification", () -> {
                     DataTypeManager dtm = program.getDataTypeManager();
                     Listing listing = program.getListing();
                     DataType dataTypeToApply = null;
+                    String typeAppliedLocal = "none";
+                    List<String> operationsLocal = new ArrayList<>();
 
                     // 1. CREATE/RESOLVE DATA TYPE based on classification
                     if ("PRIMITIVE".equals(finalClassification)) {
@@ -2958,8 +2509,8 @@ public class DataTypeService {
                         String typeStr = (String) typeDef.get("type");
                         dataTypeToApply = ServiceUtils.resolveDataType(dtm, typeStr);
                         if (dataTypeToApply != null) {
-                            typeApplied.set(typeStr);
-                            operations.add("resolved_primitive_type");
+                            typeAppliedLocal = typeStr;
+                            operationsLocal.add("resolved_primitive_type");
                         } else {
                             throw new IllegalArgumentException("Failed to resolve primitive type: " + typeStr);
                         }
@@ -2979,8 +2530,8 @@ public class DataTypeService {
                         DataType existing = dtm.getDataType("/" + structName);
                         if (existing != null) {
                             dataTypeToApply = existing;
-                            typeApplied.set(structName);
-                            operations.add("found_existing_structure");
+                            typeAppliedLocal = structName;
+                            operationsLocal.add("found_existing_structure");
                         } else {
                             // Create new structure
                             StructureDataType struct = new StructureDataType(structName, 0);
@@ -3000,8 +2551,8 @@ public class DataTypeService {
                             }
 
                             dataTypeToApply = dtm.addDataType(struct, null);
-                            typeApplied.set(structName);
-                            operations.add("created_structure");
+                            typeAppliedLocal = structName;
+                            operationsLocal.add("created_structure");
                         }
                     }
                     else if ("ARRAY".equals(finalClassification)) {
@@ -3036,16 +2587,16 @@ public class DataTypeService {
 
                         ArrayDataType arrayType = new ArrayDataType(elementType, count, elementType.getLength());
                         dataTypeToApply = arrayType;
-                        typeApplied.set(elementType.getName() + "[" + count + "]");
-                        operations.add("created_array");
+                        typeAppliedLocal = elementType.getName() + "[" + count + "]";
+                        operationsLocal.add("created_array");
                     }
                     else if ("STRING".equals(finalClassification)) {
                         if (typeDef != null && typeDef.containsKey("type")) {
                             String typeStr = (String) typeDef.get("type");
                             dataTypeToApply = ServiceUtils.resolveDataType(dtm, typeStr);
                             if (dataTypeToApply != null) {
-                                typeApplied.set(typeStr);
-                                operations.add("resolved_string_type");
+                                typeAppliedLocal = typeStr;
+                                operationsLocal.add("resolved_string_type");
                             }
                         }
                     }
@@ -3058,7 +2609,7 @@ public class DataTypeService {
                         // time is what let a refused write complete through the
                         // next tool in the chain.
                         Response reject = evictionRejection(
-                                program, addr, dataTypeToApply, 0, false, typeApplied.get());
+                                program, addr, dataTypeToApply, 0, false, typeAppliedLocal);
                         if (reject != null) throw new EvictionRejected(reject);
 
                         // Clear existing code/data
@@ -3069,7 +2620,7 @@ public class DataTypeService {
                         }
 
                         listing.createData(addr, dataTypeToApply);
-                        operations.add("applied_type");
+                        operationsLocal.add("applied_type");
                     }
 
                     // 3. RENAME (if name provided)
@@ -3083,7 +2634,7 @@ public class DataTypeService {
                             } else {
                                 symTable.createLabel(addr, finalName, SourceType.USER_DEFINED);
                             }
-                            operations.add("renamed");
+                            operationsLocal.add("renamed");
                         }
                     }
 
@@ -3094,22 +2645,11 @@ public class DataTypeService {
                                                              .replace("\\t", "\t")
                                                              .replace("\\r", "\r");
                         listing.setComment(addr, CodeUnit.PRE_COMMENT, unescapedComment);
-                        operations.add("commented");
+                        operationsLocal.add("commented");
                     }
 
-                    return null;
+                    return new ClassificationOutcome(typeAppliedLocal, operationsLocal);
                 });
-            } catch (EvictionRejected e) {
-                // Structured refusal, not a fault — surface it verbatim so the
-                // caller sees `type_would_evict` and the casualty list rather
-                // than a bare error string.
-                responseRef.set(e.response);
-            } catch (Exception e) {
-                responseRef.set(Response.err(e.getMessage()));
-            }
-
-            // Build result if no error
-            if (responseRef.get() == null) {
                 Map<String, Object> resultMap = new LinkedHashMap<>();
                 resultMap.put("success", true);
                 resultMap.put("address", addressStr);
@@ -3117,23 +2657,21 @@ public class DataTypeService {
                 if (name != null) {
                     resultMap.put("name", name);
                 }
-                resultMap.put("type_applied", typeApplied.get());
-                resultMap.put("operations_performed", operations);
+                resultMap.put("type_applied", outcome.typeApplied());
+                resultMap.put("operations_performed", outcome.operations());
                 return Response.ok(resultMap);
+            } catch (EvictionRejected e) {
+                // Structured refusal, not a fault — surface it verbatim so the
+                // caller sees `type_would_evict` and the casualty list rather
+                // than a bare error string.
+                return e.response;
+            } catch (Exception e) {
+                return ServiceUtils.fail(e);
             }
 
-            return responseRef.get();
-
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-    }
-
-    // Backward compatibility overload
-    public Response applyDataClassification(String addressStr, String classification,
-                                           String name, String comment,
-                                           Object typeDefinitionObj) {
-        return applyDataClassification(addressStr, classification, name, comment, typeDefinitionObj, null);
     }
 
     // -----------------------------------------------------------------------
@@ -3159,8 +2697,8 @@ public class DataTypeService {
         return reason + ". Expected a JSON array of objects, each with "
                 + "name (string) and type (string), with optional offset (decimal byte). "
                 + "Example: "
-                + "[{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},"
-                + "{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. "
+                + "[{ \"name\":\"dwId\", \"type\":\"uint\", \"offset\":0},"
+                + "{ \"name\":\"pNext\", \"type\":\"void *\", \"offset\":4}]. "
                 + "type may be any resolvable Ghidra data type "
                 + "(uint, byte, ushort, char *, void *, MyStruct *, ...). "
                 + "Do NOT pass a C-style struct definition or CSV — only JSON.";
@@ -3175,31 +2713,51 @@ public class DataTypeService {
         }
 
         try {
-            // Trim and validate JSON array
             String json = fieldsJson.trim();
             if (!json.startsWith("[")) {
-                Msg.error(this, "Fields JSON must be an array starting with [, got: " + json.substring(0, Math.min(50, json.length())));
-                return fields;
-            }
-            if (!json.endsWith("]")) {
-                Msg.error(this, "Fields JSON must be an array ending with ]");
+                Msg.error(this, "Fields JSON must be an array starting with [, got: "
+                        + json.substring(0, Math.min(50, json.length())));
                 return fields;
             }
 
-            // Remove outer brackets
-            json = json.substring(1, json.length() - 1).trim();
+            com.google.gson.JsonElement root = com.google.gson.JsonParser.parseString(json);
+            if (!root.isJsonArray()) {
+                Msg.error(this, "Fields JSON must be an array");
+                return fields;
+            }
 
-            // Parse field objects using proper bracket/brace matching
-            List<String> fieldJsons = parseFieldJsonArray(json);
-            Msg.info(this, "Found " + fieldJsons.size() + " field objects to parse");
+            Msg.info(this, "Found " + root.getAsJsonArray().size() + " field objects to parse");
+            for (com.google.gson.JsonElement el : root.getAsJsonArray()) {
+                if (el == null || !el.isJsonObject()) {
+                    Msg.warn(this, "  Skipping non-object field entry");
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> keyValues = JsonHelper.parseJson(el.toString());
+                // Gson numbers arrive as Double; stringify for firstOf, parse offset via getInt.
+                Map<String, String> asStrings = new LinkedHashMap<>();
+                for (Map.Entry<String, Object> e : keyValues.entrySet()) {
+                    Object v = e.getValue();
+                    asStrings.put(e.getKey(), v == null ? null : String.valueOf(v));
+                }
 
-            for (String fieldJson : fieldJsons) {
-                FieldDefinition field = parseFieldJsonObject(fieldJson);
-                if (field != null && field.name != null && field.type != null) {
-                    fields.add(field);
-                    Msg.info(this, "  Parsed field: " + field.name + " (" + field.type + ")");
+                String name = firstOf(asStrings, "name", "field_name", "fieldName", "field");
+                String type = firstOf(asStrings, "type", "field_type", "fieldType", "data_type", "dataType");
+                Object offsetRaw = null;
+                for (String k : new String[] {"offset", "field_offset", "fieldOffset", "off"}) {
+                    if (keyValues.containsKey(k)) {
+                        offsetRaw = keyValues.get(k);
+                        break;
+                    }
+                }
+                int offset = offsetRaw == null ? -1 : JsonHelper.getInt(offsetRaw, -1);
+
+                if (name != null && type != null) {
+                    name = NamingConventions.applyStructFieldNamingPolicy(name, type);
+                    fields.add(new FieldDefinition(name, type, offset));
+                    Msg.info(this, "  Parsed field: " + name + " (" + type + ")");
                 } else {
-                    Msg.warn(this, "  Field missing required fields (name/type): " + fieldJson.substring(0, Math.min(50, fieldJson.length())));
+                    Msg.warn(this, "  Field missing required fields (name/type): " + el);
                 }
             }
 
@@ -3217,103 +2775,6 @@ public class DataTypeService {
         return fields;
     }
 
-    /**
-     * Parse a JSON array string by properly matching braces
-     * Returns list of individual JSON object content strings (without outer braces)
-     */
-    private List<String> parseFieldJsonArray(String json) {
-        List<String> items = new ArrayList<>();
-
-        int braceDepth = 0;
-        int start = -1;
-        boolean inString = false;
-        boolean escapeNext = false;
-
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
-
-            // Handle escape sequences
-            if (escapeNext) {
-                escapeNext = false;
-                continue;
-            }
-
-            if (c == '\\') {
-                escapeNext = true;
-                continue;
-            }
-
-            // Track if we're inside a string
-            if (c == '"' && !escapeNext) {
-                inString = !inString;
-                continue;
-            }
-
-            // Only count braces outside of strings
-            if (!inString) {
-                if (c == '{') {
-                    if (braceDepth == 0) {
-                        start = i + 1; // Start after the opening brace
-                    }
-                    braceDepth++;
-                } else if (c == '}') {
-                    braceDepth--;
-                    if (braceDepth == 0 && start >= 0) {
-                        // Extract object content (between braces)
-                        String item = json.substring(start, i).trim();
-                        if (!item.isEmpty()) {
-                            items.add(item);
-                        }
-                        start = -1;
-                    }
-                }
-            }
-        }
-
-        return items;
-    }
-
-    /**
-     * Parse a single JSON object string (content between braces) into a FieldDefinition
-     * Format: "name":"fieldname","type":"typename","offset":0
-     */
-    private FieldDefinition parseFieldJsonObject(String objectJson) {
-        if (objectJson == null || objectJson.isEmpty()) {
-            return null;
-        }
-
-        String name = null;
-        String type = null;
-        int offset = -1;
-
-        try {
-            // Parse key-value pairs while respecting quotes and escapes
-            Map<String, String> keyValues = parseJsonKeyValues(objectJson);
-
-            // Accept common alternative key names for flexibility
-            name = firstOf(keyValues, "name", "field_name", "fieldName", "field");
-            type = firstOf(keyValues, "type", "field_type", "fieldType", "data_type", "dataType");
-            String offsetStr = firstOf(keyValues, "offset", "field_offset", "fieldOffset", "off");
-            if (offsetStr != null) {
-                try {
-                    offset = Integer.parseInt(offsetStr);
-                } catch (NumberFormatException e) {
-                    // Keep offset as -1
-                }
-            }
-
-        } catch (Exception e) {
-            Msg.error(this, "Error parsing JSON object: " + e.getMessage());
-        }
-
-        // Apply configured struct-field naming policy.
-        if (name != null && type != null) {
-            name = NamingConventions.applyStructFieldNamingPolicy(name, type);
-        }
-
-        return new FieldDefinition(name, type, offset);
-    }
-
     /** Return the value for the first matching key, or null. */
     private static String firstOf(Map<String, String> map, String... keys) {
         for (String key : keys) {
@@ -3323,92 +2784,6 @@ public class DataTypeService {
         return null;
     }
 
-    /**
-     * Parse JSON key-value pairs from a string like: "name":"value","type":"typename"
-     * Properly handles quoted strings and escapes
-     */
-    private Map<String, String> parseJsonKeyValues(String json) {
-        Map<String, String> pairs = new LinkedHashMap<>();
-
-        // Find all "key":"value" or "key":value patterns
-        int i = 0;
-        while (i < json.length()) {
-            // Skip whitespace and commas
-            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ',')) {
-                i++;
-            }
-
-            if (i >= json.length()) break;
-
-            // Expect opening quote for key
-            if (json.charAt(i) != '"') {
-                i++;
-                continue;
-            }
-
-            // Parse key (quoted string)
-            i++; // Skip opening quote
-            int keyStart = i;
-            boolean escapeNext = false;
-            while (i < json.length()) {
-                char c = json.charAt(i);
-                if (escapeNext) {
-                    escapeNext = false;
-                } else if (c == '\\') {
-                    escapeNext = true;
-                } else if (c == '"') {
-                    break;
-                }
-                i++;
-            }
-            String key = json.substring(keyStart, i).replace("\\\"", "\"");
-            i++; // Skip closing quote
-
-            // Skip whitespace and colon
-            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ':')) {
-                i++;
-            }
-
-            if (i >= json.length()) break;
-
-            // Parse value (can be quoted string or number)
-            String value;
-            if (json.charAt(i) == '"') {
-                // Quoted string value
-                i++; // Skip opening quote
-                int valueStart = i;
-                escapeNext = false;
-                while (i < json.length()) {
-                    char c = json.charAt(i);
-                    if (escapeNext) {
-                        escapeNext = false;
-                    } else if (c == '\\') {
-                        escapeNext = true;
-                    } else if (c == '"') {
-                        break;
-                    }
-                    i++;
-                }
-                value = json.substring(valueStart, i).replace("\\\"", "\"");
-                i++; // Skip closing quote
-            } else {
-                // Unquoted value (number, boolean, etc)
-                int valueStart = i;
-                while (i < json.length() && json.charAt(i) != ',' && json.charAt(i) != '}') {
-                    i++;
-                }
-                value = json.substring(valueStart, i).trim();
-            }
-
-            pairs.put(key, value);
-        }
-
-        return pairs;
-    }
-
-    /**
-     * Parse values JSON into name-value pairs (for enum creation)
-     */
     /**
      * Parse enum values from JSON string. Accepts multiple formats:
      * - {"NAME": 0, "NAME2": 1}          (standard int values)
@@ -3493,6 +2868,85 @@ public class DataTypeService {
     // → batch_set_comments → maybe create_label) so partial application is
     // structurally impossible.
 
+    /** Read-only origin facts; naming and storage applicability are separate decisions. */
+    private static final class GlobalProvenance {
+        final Map<String, Object> facts;
+        final boolean preserveName;
+        final boolean linkagePlaceholder;
+
+        GlobalProvenance(Program program, Address address, Symbol primary, Data data) {
+            Data container = program.getListing().getDefinedDataContaining(address);
+            MemoryBlock block = program.getMemory().getBlock(address);
+            List<Map<String, Object>> symbols = new ArrayList<>();
+            boolean importedIdentity = false;
+            for (Symbol symbol : program.getSymbolTable().getSymbols(address)) {
+                symbols.add(symbolProvenance(symbol));
+                if (symbol.getSource() == SourceType.IMPORTED && hasIdentityName(symbol)) {
+                    importedIdentity = true;
+                }
+            }
+            // A demangler can replace an imported primary with an ANALYSIS
+            // label while retaining the imported alias at the same address.
+            // A user rename, default DAT label, or namespace alone is not proof.
+            preserveName = hasIdentityName(primary) &&
+                    (primary.getSource() == SourceType.IMPORTED ||
+                     (primary.getSource() == SourceType.ANALYSIS && importedIdentity));
+            linkagePlaceholder = block != null && block.isExternalBlock()
+                    && !block.isInitialized() && !block.isMapped()
+                    && importedIdentity && preserveName && data == null && container == null
+                    && program.getListing().getInstructionContaining(address) == null
+                    && program.getFunctionManager().getFunctionAt(address) == null;
+
+            Map<String, Object> memory = null;
+            if (block != null) {
+                memory = JsonHelper.mapOf("name", block.getName(),
+                        "start", block.getStart().toString(), "end", block.getEnd().toString(),
+                        "external", block.isExternalBlock(), "initialized", block.isInitialized(),
+                        "mapped", block.isMapped(), "loaded", block.isLoaded(),
+                        "read", block.isRead(), "write", block.isWrite(), "execute", block.isExecute());
+            }
+            List<Map<String, Object>> bindings = new ArrayList<>();
+            for (Reference reference : program.getReferenceManager().getReferencesFrom(address)) {
+                bindings.add(JsonHelper.mapOf("from", reference.getFromAddress().toString(),
+                        "to", reference.getToAddress().toString(),
+                        "type", reference.getReferenceType().toString(),
+                        "source", reference.getSource().toString(),
+                        "operand_index", reference.getOperandIndex()));
+            }
+            facts = JsonHelper.mapOf("primary_symbol", primary == null ? null : symbolProvenance(primary),
+                    "symbols", symbols, "has_imported_identity", importedIdentity,
+                    "name_preserved", preserveName,
+                    "name_preservation_reason", !preserveName ? null :
+                            primary.getSource() == SourceType.IMPORTED ? "imported_symbol" : "analysis_with_imported_alias",
+                    "memory_block", memory, "defined_data_at_address", data != null,
+                    "defined_data_containing_address", container != null,
+                    "linkage_placeholder", linkagePlaceholder, "outgoing_references", bindings);
+        }
+    }
+
+    private static boolean hasIdentityName(Symbol symbol) {
+        return symbol != null && !symbol.isDynamic() && symbol.getSymbolType() == SymbolType.LABEL
+                && !symbol.getName().isEmpty()
+                && !NamingConventions.isAutoGeneratedGlobalName(symbol.getName())
+                && !NamingConventions.isOrdinalExportName(symbol.getName());
+    }
+
+    private static Map<String, Object> symbolProvenance(Symbol symbol) {
+        List<Map<String, Object>> namespaces = new ArrayList<>();
+        for (Namespace parent = symbol.getParentNamespace(); parent != null && !parent.isGlobal();
+                parent = parent.getParentNamespace()) {
+            Symbol namespaceSymbol = parent.getSymbol();
+            namespaces.add(JsonHelper.mapOf("name", parent.getName(),
+                    "qualified_name", parent.getName(true),
+                    "type", namespaceSymbol == null ? null : namespaceSymbol.getSymbolType().toString(),
+                    "source", namespaceSymbol == null ? null : namespaceSymbol.getSource().toString()));
+        }
+        return JsonHelper.mapOf("name", symbol.getName(), "qualified_name", symbol.getName(true),
+                "type", symbol.getSymbolType().toString(), "source", symbol.getSource().toString(),
+                "primary", symbol.isPrimary(), "dynamic", symbol.isDynamic(),
+                "external", symbol.isExternal(), "namespaces", namespaces);
+    }
+
     /**
      * Audit a single global at the given address — public static helper
      * shared by audit_global (per-address) and audit_globals_in_function
@@ -3547,6 +3001,7 @@ public class DataTypeService {
         while (iter.hasNext()) { iter.next(); xrefCount++; }
 
         List<String> issues = new ArrayList<>();
+        GlobalProvenance provenance = new GlobalProvenance(program, addr, primary, data);
 
         // Code-address guard: any address that is code (has an Instruction
         // at it, OR has a Function defined at it) is not a data global.
@@ -3577,8 +3032,23 @@ public class DataTypeService {
                     "issues", issues,
                     "fully_documented", true,
                     "is_code_address", true,
-                    "is_function_entry", hasFunction
+                    "is_function_entry", hasFunction,
+                    "applicable", false,
+                    "reason", "code_address",
+                    "provenance", provenance.facts
             );
+        }
+
+        // Reserved uninitialized EXTERNAL addresses are linker identities,
+        // not application storage, only with actual imported provenance and
+        // no defined data/container. BSS, initialized/mapped EXTERNAL blocks,
+        // ordinary DAT labels and user-created primaries remain auditable.
+        if (provenance.linkagePlaceholder) {
+            return JsonHelper.mapOf("address", addr.toString(), "name", name,
+                    "type", typeName, "length", length, "plate_comment", plateComment,
+                    "xref_count", xrefCount, "issues", issues, "fully_documented", false,
+                    "applicable", false, "reason", "external_linkage_placeholder",
+                    "provenance", provenance.facts);
         }
 
         // OS-canonical labels (TIB/PEB/KUSER) are fully exempt from the
@@ -3597,7 +3067,9 @@ public class DataTypeService {
                     "xref_count", xrefCount,
                     "issues", issues,
                     "fully_documented", true,
-                    "os_canonical", true
+                    "os_canonical", true,
+                    "applicable", true,
+                    "provenance", provenance.facts
             );
         }
 
@@ -3638,9 +3110,11 @@ public class DataTypeService {
                 && !name.isEmpty();
 
         boolean autoGen = !isExported
-                && (NamingConventions.isAutoGeneratedGlobalName(name) || name.isEmpty());
-        if (isExported) {
-            // Nothing to check: the name is fixed by the export table.
+                && (NamingConventions.isAutoGeneratedGlobalName(name)
+                    || NamingConventions.isOrdinalExportName(name) || name.isEmpty());
+        if (isExported || (!autoGen && provenance.preserveName)) {
+            // Keep verified export/import identity. This protects the name
+            // only: real storage still needs types, layout and documentation.
         } else if (autoGen) {
             issues.add("generic_name");
             severityByIssue.put("generic_name", "hard");
@@ -3861,7 +3335,9 @@ public class DataTypeService {
                         "soft", softCount
                 ),
                 "applicable_axes", applicableAxes,
-                "fully_documented", fullyDocumented
+                "fully_documented", fullyDocumented,
+                "applicable", true,
+                "provenance", provenance.facts
         ));
         if (isExported) {
             // Tell the worker WHY the name went unaudited, so it doesn't read
@@ -4076,19 +3552,13 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response auditGlobal(
             @Param(value = "address", paramType = "address",
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address is required");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        return Response.ok(auditGlobalAt(program, addr));
+            return Response.ok(auditGlobalAt(program, addr));
     }
 
     // ------------------------------------------------------------------
@@ -4137,7 +3607,7 @@ public class DataTypeService {
     /** Reusable global completeness scorer (mirrors {@link #auditGlobalAt}).
      *  Returns raw + effective + per-axis breakdown; effective forgives the
      *  enum/struct axes and all soft-severity issues, so effective==100
-     *  exactly when the global is fully documented. */
+     *  exactly when an applicable global is fully documented. */
     public static Map<String, Object> scoreGlobalCompletenessAt(Program program, Address addr) {
         Map<String, Object> audit = auditGlobalAt(program, addr);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -4146,10 +3616,11 @@ public class DataTypeService {
         out.put("type", audit.get("type"));
         out.put("xref_count", audit.get("xref_count"));
 
-        // Code addresses are not data globals — not scorable.
-        if (Boolean.TRUE.equals(audit.get("is_code_address"))) {
+        out.put("provenance", audit.get("provenance"));
+        // Code and proven synthetic linkage addresses are not scorable data.
+        if (Boolean.FALSE.equals(audit.get("applicable")) || Boolean.TRUE.equals(audit.get("is_code_address"))) {
             out.put("applicable", false);
-            out.put("reason", "code_address");
+            out.put("reason", audit.getOrDefault("reason", "code_address"));
             out.put("score", null);
             out.put("effective_score", null);
             out.put("band", null);
@@ -4286,20 +3757,14 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.READ_ONLY)
     public Response analyzeGlobalCompleteness(
             @Param(value = "address", paramType = "address",
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (score/effective/band/missing only)") boolean compact,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address is required");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Map<String, Object> full = scoreGlobalCompletenessAt(program, addr);
+            Map<String, Object> full = scoreGlobalCompletenessAt(program, addr);
         if (compact) {
             Map<String, Object> slim = new LinkedHashMap<>();
             for (String k : new String[]{"address", "name", "applicable", "score",
@@ -4317,20 +3782,9 @@ public class DataTypeService {
     public Response auditGlobalsInFunction(
             @Param(value = "function",
                    paramType = Param.FUNCTION_REF,
-                   description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+                   description = "Function name or any address within the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") Function func,
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("function is required (name or entry-point address)");
-        }
-        // resolveFunction takes a name OR an address; parsing an address first would
-        // reject every name before the resolver ever ran.
-        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
-        if (funcLookup.hasError()) return funcLookup.error();
-        Function func = funcLookup.function();
         Address funcAddr = func.getEntryPoint();
 
         // Walk instructions, gather unique data-reference targets.
@@ -4365,19 +3819,26 @@ public class DataTypeService {
         List<Map<String, Object>> globals = new ArrayList<>();
         int fullyDocumented = 0;
         int withIssues = 0;
+        int notApplicable = 0;
+        Map<String, Integer> notApplicableReasons = new LinkedHashMap<>();
         Map<String, Integer> issueHistogram = new java.util.LinkedHashMap<>();
         for (Address gAddr : globalAddrs) {
             Map<String, Object> audit = auditGlobalAt(program, gAddr);
             globals.add(audit);
             @SuppressWarnings("unchecked")
             List<String> auditIssues = (List<String>) audit.get("issues");
-            if (auditIssues == null || auditIssues.isEmpty()) {
+            if (Boolean.FALSE.equals(audit.get("applicable"))) {
+                notApplicable++;
+                notApplicableReasons.merge(String.valueOf(audit.get("reason")), 1, Integer::sum);
+            } else if (Boolean.TRUE.equals(audit.get("fully_documented"))) {
                 fullyDocumented++;
             } else {
                 withIssues++;
-                for (String issue : auditIssues) {
-                    issueHistogram.merge(issue, 1, Integer::sum);
-                }
+            }
+            // Preserve soft findings for review without counting them as
+            // incomplete; auditGlobalAt already distinguishes severities.
+            if (auditIssues != null) {
+                for (String issue : auditIssues) issueHistogram.merge(issue, 1, Integer::sum);
             }
         }
 
@@ -4391,6 +3852,8 @@ public class DataTypeService {
                         "total", globalAddrs.size(),
                         "fully_documented", fullyDocumented,
                         "with_issues", withIssues,
+                        "not_applicable", notApplicable,
+                        "not_applicable_reasons", notApplicableReasons,
                         "issue_histogram", issueHistogram
                 )
         ));
@@ -4401,7 +3864,7 @@ public class DataTypeService {
             category = "datatype", access = ToolAccess.WRITE)
     public Response setGlobal(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") Address addr,
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New name. Must follow g_ + Hungarian + descriptor convention (e.g., g_dwActiveQuestState, g_pUnitList).") String newName,
             @Param(value = "type_name", source = ParamSource.BODY,
@@ -4410,20 +3873,15 @@ public class DataTypeService {
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
                    description = "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
                     String strictModeArg,
             @Param(value = "allow_evict", source = ParamSource.BODY, defaultValue = "false",
                    description = "Permit this type application to clear NAMED neighbouring globals out of existence. Default false: the call is rejected with `type_would_evict` plus the list of globals it would destroy. Only set true when the overlap is genuinely wrong and the other symbol should go — the default exists because a silent clear deletes another global's documentation and still reports success.")
                     boolean allowEvict) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        if (addr == null) return Response.err("address is required");
+        
 
         try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
         // Pre-flight validation. Strict naming enforcement preserves the
@@ -4457,7 +3915,7 @@ public class DataTypeService {
                         "error", "name_quality",
                         "issue", quality.issue,
                         "rejected_name", newName,
-                        "address", addressStr,
+                        "address", addr.toString(),
                         "message", quality.message,
                         "suggestion", quality.suggestion
                 );
@@ -4601,14 +4059,12 @@ public class DataTypeService {
         if (evictionReject != null) return evictionReject;
 
         // Single transaction: type → array → name → plate comment.
-        final List<String> applied = new ArrayList<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicBoolean success = new AtomicBoolean(false);
         final DataType finalType = resolvedType;
 
         try {
-            threadingStrategy.executeWrite(program, "set_global at " + addressStr, () -> {
+            List<String> applied = threadingStrategy.executeWrite(program, "set_global at " + addr.toString(), () -> {
                 Listing listing = program.getListing();
+                List<String> appliedLocal = new ArrayList<>();
 
                 if (finalType != null) {
                     // Clear existing data at the address before re-applying.
@@ -4628,8 +4084,8 @@ public class DataTypeService {
                     } else {
                         listing.createData(addr, finalType);
                     }
-                    applied.add("type");
-                    if (arrayLength > 0) applied.add("array_length=" + arrayLength);
+                    appliedLocal.add("type");
+                    if (arrayLength > 0) appliedLocal.add("array_length=" + arrayLength);
                 }
 
                 if (newName != null && !newName.isEmpty()) {
@@ -4643,31 +4099,24 @@ public class DataTypeService {
                         // global hit this when the name landed in a previous
                         // attempt but the type or plate comment didn't.
                         if (newName.equals(existing.getName())) {
-                            applied.add("name=already_set");
+                            appliedLocal.add("name=already_set");
                         } else {
                             existing.setName(newName, SourceType.USER_DEFINED);
-                            applied.add("name");
+                            appliedLocal.add("name");
                         }
                     } else {
                         symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
-                        applied.add("name");
+                        appliedLocal.add("name");
                     }
                 }
 
                 if (plateComment != null && !plateComment.trim().isEmpty()) {
                     listing.setComment(addr, ghidra.program.model.listing.CodeUnit.PLATE_COMMENT, plateComment);
-                    applied.add("plate_comment");
+                    appliedLocal.add("plate_comment");
                 }
 
-                success.set(true);
-                return null;
+                return appliedLocal;
             });
-        } catch (Exception e) {
-            errorMsg.set(e.getMessage() != null ? e.getMessage() : e.getClass().getName());
-            Msg.error(this, "set_global error", e);
-        }
-
-        if (success.get()) {
             Map<String, Object> result = JsonHelper.mapOf(
                     "status", "success",
                     "address", addr.toString(),
@@ -4677,8 +4126,11 @@ public class DataTypeService {
                 result.put("warnings", enforcementWarnings);
             }
             return Response.ok(result);
+        } catch (Exception e) {
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+            Msg.error(this, "set_global error", e);
+            return Response.err(errorMsg);
         }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
         } catch (Exception e) {
             // try-with-resources close() is declared as throws Exception;
             // re-wrap since the body never raises a checked exception.

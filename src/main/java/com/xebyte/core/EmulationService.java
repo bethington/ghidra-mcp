@@ -84,7 +84,7 @@ public class EmulationService {
             category = "emulation", access = ToolAccess.READ_ONLY)
     public Response emulateFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                    description = "Entry point address of the function to emulate") String addressStr,
+                    description = "Function name or any address within the function to emulate") Function func,
             @Param(value = "registers", source = ParamSource.BODY, fieldsJson = true,
                     description = "Initial register values as JSON: {\"EAX\": \"0x1234\", \"ECX\": \"0x7FFE0000\"}") String registersJson,
             @Param(value = "memory", source = ParamSource.BODY, fieldsJson = true,
@@ -104,19 +104,10 @@ public class EmulationService {
                             "emulation sees only the ORIGINAL unmodified bytes, not the emulated " +
                             "result. This reads from the emulator's own state instead.")
                     String readMemoryAfterJson,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        Address entryAddr = ServiceUtils.resolveFunctionAddress(program, addressStr);
-        if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Function func = program.getFunctionManager().getFunctionAt(entryAddr);
-        if (func == null) return Response.err("No function at address: " + addressStr);
+        if (func == null) return Response.err("function is required");
+        Address entryAddr = func.getEntryPoint();
 
         try {
             EmulatorHelper emu = new EmulatorHelper(program);
@@ -233,8 +224,7 @@ public class EmulationService {
                 // Read registers
                 Map<String, String> regValues = new LinkedHashMap<>();
                 if (returnRegisters != null && !returnRegisters.isEmpty()) {
-                    for (String rn : returnRegisters.split(",")) {
-                        rn = rn.trim();
+                    for (String rn : ServiceUtils.csvTokens(returnRegisters)) {
                         try {
                             BigInteger val = emu.readRegister(rn);
                             regValues.put(rn, "0x" + val.toString(16));
@@ -311,7 +301,7 @@ public class EmulationService {
                 emu.dispose();
             }
         } catch (Exception e) {
-            return Response.err("Emulation failed: " + e.getMessage());
+            return ServiceUtils.fail("Emulation", e);
         }
     }
 
@@ -348,13 +338,7 @@ public class EmulationService {
                     description = "Additional register values to set before each emulation (JSON object)") String initialRegistersJson,
             @Param(value = "wide_string", source = ParamSource.BODY, defaultValue = "false",
                     description = "Write candidate strings as UTF-16LE (wide) instead of ASCII") boolean wideString,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         Address entryAddr = ServiceUtils.parseAddress(program, hashFuncAddr);
         if (entryAddr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -373,10 +357,17 @@ public class EmulationService {
         List<String> candidates = new ArrayList<>();
         if (candidatesJson != null && !candidatesJson.isEmpty()) {
             try {
-                Object parsed = JsonHelper.parseJson("{\"c\":" + candidatesJson + "}").get("c");
-                if (parsed instanceof List<?> list) {
-                    for (Object item : list) {
-                        candidates.add(String.valueOf(item));
+                com.google.gson.JsonElement el =
+                        com.google.gson.JsonParser.parseString(candidatesJson);
+                if (el.isJsonArray()) {
+                    for (com.google.gson.JsonElement item : el.getAsJsonArray()) {
+                        if (item == null || item.isJsonNull()) {
+                            candidates.add("null");
+                        } else if (item.isJsonPrimitive()) {
+                            candidates.add(item.getAsString());
+                        } else {
+                            candidates.add(item.toString());
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -476,7 +467,7 @@ public class EmulationService {
 
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Batch emulation failed: " + e.getMessage());
+            return ServiceUtils.fail("Batch emulation", e);
         }
     }
 

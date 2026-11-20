@@ -40,7 +40,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -54,24 +53,21 @@ import java.util.concurrent.atomic.AtomicReference;
 public class FunctionService {
 
     private static final int DECOMPILE_TIMEOUT_SECONDS = 60;  // Increased from 30s to 60s for large functions
-    private static final int MAX_DECOMPILE_TIMEOUT_SECONDS = 1800;
 
     /** Matches any of the five Windows calling-convention keywords. */
     private static final Pattern CALLING_CONV_PATTERN = Pattern.compile(
             "\\b(__cdecl|__stdcall|__thiscall|__fastcall|__vectorcall)\\b");
 
-    // Shorter cap for the no-retry scoring/analysis path. Keeps EDT-holding
-    // decompiles under Ghidra's 20-second Swing deadlock threshold so internal
-    // task-manager jobs (GTreeRestoreTreeStateTask, TableUpdateJob) can run
-    // between calls. Chosen so that handlers with up to 4 sequential no-retry
-    // decompiles (e.g. /analyze_for_documentation -> nested
+    // Shorter cap for the no-retry scoring/analysis path. Chosen so that
+    // handlers with up to 4 sequential no-retry decompiles (e.g.
+    // /analyze_for_documentation -> nested
     // /analyze_function_completeness -> validateParameterTypeQuality fallback)
     // still finish under the 60s client-side HTTP timeout:
-    //   4 * 12s = 48s < 60s client timeout. 12s also stays under the 20s
-    //   Swing deadlock threshold per decompile. Pathological functions that
+    //   4 * 12s = 48s < 60s client timeout. Pathological functions that
     //   need >12s are treated as "too complex to score" — an acceptable
     //   trade since they also pin the HTTP thread pool under any longer cap.
-    private static final int NO_RETRY_DECOMPILE_TIMEOUT_SECONDS = 12;
+    //   Package-private so /get_functions' request-scoped decompiler uses the same cap.
+    static final int NO_RETRY_DECOMPILE_TIMEOUT_SECONDS = 12;
 
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
@@ -111,90 +107,16 @@ public class FunctionService {
             boolean terminalNoReturn) {
     }
 
+    private record ForceDecompileOutcome(
+            boolean success,
+            String errorMessage,
+            String functionName,
+            String decompiledCode) {
+    }
+
     // ========================================================================
     // Decompilation methods
     // ========================================================================
-
-    /**
-     * Decompile a function at the given address.
-     * If programName is provided, uses that program instead of the current one.
-     * Agent-visible surface is {@code /get_functions?fields=decompiled_code}; kept as an
-     * internal/benchmark helper.
-     */
-    public Response decompileFunctionByAddress(
-            @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
-            @Param(value = "functions", defaultValue = "",
-                   description = "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.") String functionsParam,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName,
-            @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (functionsParam != null && !functionsParam.trim().isEmpty()) {
-            return batchDecompileFunctions(functionsParam, programName);
-        }
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required (or pass functions= for bulk)");
-        // Checked after the bulk dispatch, not before: batchDecompileFunctions
-        // takes no timeout, so validating it there would reject a bulk call
-        // over a parameter that path never reads.
-        if (timeoutSeconds <= 0 || timeoutSeconds > MAX_DECOMPILE_TIMEOUT_SECONDS) {
-            return Response.err("timeout must be between 1 and " + MAX_DECOMPILE_TIMEOUT_SECONDS + " seconds");
-        }
-
-        DecompInterface decomp = null;
-        try {
-            ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
-            if (funcLookup.hasError()) return funcLookup.error();
-            Function func = funcLookup.function();
-decomp = ServiceUtils.createConfiguredDecompiler(program);
-            DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
-
-            if (decompResult == null) {
-                return Response.err("Decompiler returned null result for function at " + addressStr);
-            }
-
-            if (!decompResult.decompileCompleted()) {
-                String errorMsg = decompResult.getErrorMessage();
-                return Response.err("Decompilation did not complete. " +
-                       (errorMsg != null ? "Reason: " + errorMsg : "Function may be too complex or have invalid code flow."));
-            }
-
-            if (decompResult.getDecompiledFunction() == null) {
-                return Response.err("Decompiler completed but returned null decompiled function.");
-            }
-
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("name", func.getName());
-            out.put("address", func.getEntryPoint().toString(false));
-            // Stamped although nothing routes here today: an unlabelled C-returning
-            // helper kept ready for reuse is the hole pre-dug, and whoever wires it up
-            // next inherits pseudocode with no record of the dialect that decoded it.
-            ServiceUtils.putLanguageSelection(out, program);
-            out.put("decompiled", decompResult.getDecompiledFunction().getC());
-            return Response.ok(out);
-        } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Error decompiling function: " + msg);
-        } finally {
-            if (decomp != null) {
-                try { decomp.dispose(); } catch (Exception ignored) {}
-            }
-        }
-    }
-
-    // Backward compatible overloads for internal callers
-    public Response decompileFunctionByAddress(String addressStr, String programName, int timeout) {
-        return decompileFunctionByAddress(addressStr, "", programName, timeout);
-    }
-
-    public Response decompileFunctionByAddress(String addressStr, String programName) {
-        return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
-    }
-
-    public Response decompileFunctionByAddress(String addressStr) {
-        return decompileFunctionByAddress(addressStr, null, DECOMPILE_TIMEOUT_SECONDS);
-    }
 
     /**
      * Decompile a function and return the results (with retry logic).
@@ -219,13 +141,50 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
     /** As above, with a hook to adjust decompiler options for this call only. */
     public DecompileResults decompileFunctionNoRetry(Function func, Program program,
             java.util.function.Consumer<ghidra.app.decompiler.DecompileOptions> tune) {
+        return attemptDecompileNoRetry(func, program, tune).results();
+    }
+
+    /**
+     * One single-attempt decompile and, when it produced nothing, why.
+     *
+     * <p>{@code results} is exactly what {@link #decompileFunctionNoRetry} returns.
+     * {@code failure} is non-null only when no results exist at all -- the native
+     * decompiler failed to initialise ({@link DecompilerInitException}) or the call
+     * threw -- which {@code decompileFunctionNoRetry}'s bare {@code null} cannot say.
+     */
+    public record DecompileAttempt(DecompileResults results, String failure) {
+        /** Whether the decompile completed. */
+        public boolean completed() {
+            return results != null && results.decompileCompleted();
+        }
+
+        /**
+         * Why the decompile produced no code: the init/exception failure when there is one,
+         * else the decompiler's own words via {@link FunctionFacts#decompileError}.
+         */
+        public String failureReason() {
+            return failure != null ? failure : FunctionFacts.decompileError(results);
+        }
+    }
+
+    /** {@link #attemptDecompileNoRetry(Function, Program, java.util.function.Consumer)} with default options. */
+    public DecompileAttempt attemptDecompileNoRetry(Function func, Program program) {
+        return attemptDecompileNoRetry(func, program, null);
+    }
+
+    /** As {@link #decompileFunctionNoRetry}, keeping the failure reason (#654). */
+    public DecompileAttempt attemptDecompileNoRetry(Function func, Program program,
+            java.util.function.Consumer<ghidra.app.decompiler.DecompileOptions> tune) {
         DecompInterface decomp = null;
         try {
             decomp = ServiceUtils.createConfiguredDecompiler(program, tune);
-            return decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+            return new DecompileAttempt(
+                decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor()),
+                null);
         } catch (Exception e) {
-            Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + e.getMessage());
-            return null;
+            String msg = ServiceUtils.failureMessage(e);
+            Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + msg);
+            return new DecompileAttempt(null, msg);
         } finally {
             if (decomp != null) {
                 try { decomp.dispose(); } catch (Exception ignored) {}
@@ -276,6 +235,11 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                     Msg.warn(this, "Decompilation attempt " + attempt + " failed: " + errorMsg);
                 }
 
+            } catch (DecompilerInitException e) {
+                // A decompiler that cannot start will not start on the next attempt either;
+                // retrying would only spawn the same doomed process twice more (#654).
+                Msg.error(this, e.getMessage());
+                return null;
             } catch (Exception e) {
                 Msg.warn(this, "Decompilation attempt " + attempt + " threw exception: " + e.getMessage());
             } finally {
@@ -300,77 +264,6 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
     }
 
     /**
-     * Batch decompile multiple functions by name.
-     */
-    // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 7.0.0.
-    public Response batchDecompileFunctions(
-            @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionsParam == null || functionsParam.trim().isEmpty()) {
-            return Response.err("Functions parameter is required");
-        }
-
-        try {
-            String[] functionRefs = functionsParam.split(",");
-            // The stamp goes on an envelope with the results nested under "functions",
-            // never into resultMap itself: its keys are references the CALLER chose, so
-            // a flat map would put the stamp's reserved names in the same namespace as
-            // user input, and a function named language_id would travel unlabelled.
-            Map<String, Object> out = new LinkedHashMap<>();
-            ServiceUtils.putLanguageSelection(out, program);
-            Map<String, Object> resultMap = new LinkedHashMap<>();
-            final int MAX_FUNCTIONS = 20; // Limit to prevent overload
-
-            for (int i = 0; i < functionRefs.length && i < MAX_FUNCTIONS; i++) {
-                String funcRef = functionRefs[i].trim();
-                if (funcRef.isEmpty()) continue;
-
-                ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, funcRef);
-                if (lookup.hasError()) {
-                    resultMap.put(funcRef, "Error: " + lookup.message());
-                    continue;
-                }
-                Function function = lookup.function();
-
-                // Decompile the function
-                DecompInterface decompiler = null;
-                try {
-                    decompiler = ServiceUtils.createConfiguredDecompiler(program);
-                    DecompileResults decompResults = decompiler.decompileFunction(function, 30, null);
-
-                    if (decompResults != null && decompResults.decompileCompleted()) {
-                        String decompCode = decompResults.getDecompiledFunction().getC();
-                        resultMap.put(funcRef, decompCode);
-                    } else {
-                        resultMap.put(funcRef, "Error: Decompilation failed");
-                    }
-                } catch (Exception e) {
-                    resultMap.put(funcRef, "Error: " + e.getMessage());
-                } finally {
-                    if (decompiler != null) {
-                        try { decompiler.dispose(); } catch (Exception ignored) {}
-                    }
-                }
-            }
-
-            out.put("functions", resultMap);
-            return Response.ok(out);
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-    }
-
-    public Response batchDecompileFunctions(String functionsParam) {
-        return batchDecompileFunctions(functionsParam, null);
-    }
-
-    /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
     @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. Stamped with language_id + variant like get_functions' decompiled_code, and carries variant_ambiguous on a processor offering more than one SLEIGH decoder — a cache flush re-runs the SAME language, so a wrong variant simply re-derives the same wrong C rather than fixing it. Pass variant= to assert which dialect you believe you are reading; naming one the program is not loaded under is refused. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.READ_ONLY)
@@ -380,15 +273,10 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+                               + "address is unambiguous.") Function func,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "variant", defaultValue = "",
                    description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id (PowerPC:BE:64:VLE-32addr). Omit it and the decompile proceeds, labelled with whatever actually ran. Supply it and it is CHECKED: naming a variant the program is not loaded under is refused rather than answered, because flushing the decompiler cache re-runs the program's own language and cannot reinterpret the bytes under another one. get_language_metadata reports variant, available_variants and variant_ambiguous.") String variant) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         // The same check get_functions runs, and like it this fires only on a variant
         // the caller named that the program contradicts. This endpoint is reached for
@@ -398,40 +286,11 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
         Response variantReject = ServiceUtils.variantGate(program, variant);
         if (variantReject != null) return variantReject;
 
-        return forceDecompileAt(program, functionAddrStr);
-    }
 
-    /**
-     * The forced decompile itself, with no variant check.
-     *
-     * <p>The check belongs on the MCP boundary, where a caller states a belief about
-     * which dialect it is reading. Internal Java callers never cross that boundary and
-     * never pass a variant, so routing them through it would make them answer a
-     * question nobody asked them. Output is still stamped: the label is unconditional.
-     */
-    private Response forceDecompileAt(Program program, String functionAddrStr) {
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
-        }
-
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMessage = new AtomicReference<>();
-        final AtomicReference<String> functionName = new AtomicReference<>();
-        final AtomicReference<String> decompiledCode = new AtomicReference<>();
-
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
+        ForceDecompileOutcome outcome;
         try {
-            threadingStrategy.executeRead(() -> {
+            outcome = threadingStrategy.executeRead(() -> {
                 try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorMessage.set("No function at address: " + functionAddrStr);
-                        return null;
-                    }
-
                     // Create new decompiler interface
                     DecompInterface decompiler = ServiceUtils.createConfiguredDecompiler(program);
 
@@ -446,70 +305,56 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                             if (errorMsg != null && !errorMsg.isEmpty()) {
                                 message += ". Reason: " + errorMsg;
                             }
-                            errorMessage.set(message);
-                            return null;
+                            return new ForceDecompileOutcome(false, message, null, null);
                         }
 
                         // Check if decompiled function is null (can happen even when decompileCompleted returns true)
                         if (results.getDecompiledFunction() == null) {
-                            errorMessage.set("Decompiler completed but returned null decompiled function for "
+                            return new ForceDecompileOutcome(false,
+                                    "Decompiler completed but returned null decompiled function for "
                                     + func.getName() + ". This can happen with functions that have: "
                                     + "invalid control flow or unreachable code; large NOP sleds or padding; "
                                     + "external calls to unknown addresses; stack frame issues. "
-                                    + "Consider using disassemble_function() instead for this function.");
-                            return null;
+                                    + "Consider using disassemble_function() instead for this function.",
+                                    null, null);
                         }
 
-                        functionName.set(func.getName());
-                        decompiledCode.set(results.getDecompiledFunction().getC());
-                        success.set(true);
-
                         Msg.info(this, "Forced decompilation for function: " + func.getName());
+                        return new ForceDecompileOutcome(true, null, func.getName(),
+                                results.getDecompiledFunction().getC());
 
                     } finally {
                         decompiler.dispose();
                     }
 
                 } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMessage.set(msg);
+                    String msg = ServiceUtils.failureMessage(e);
                     Msg.error(this, "Error forcing decompilation", e);
+                    return new ForceDecompileOutcome(false, msg, null, null);
                 }
-                return null;
             });
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            errorMessage.set("Failed to execute on Swing thread: " + msg);
-            Msg.error(this, "Failed to execute force decompile on Swing thread", e);
+            String msg = ServiceUtils.failureMessage(e);
+            Msg.error(this, "Force decompile failed", e);
+            outcome = new ForceDecompileOutcome(false, "Write failed: " + msg, null, null);
         }
 
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
+        if (!outcome.success()) {
+            return Response.err(outcome.errorMessage() != null ? outcome.errorMessage() : "Unknown failure");
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "success");
-        out.put("address", functionAddrStr);
-        out.put("name", functionName.get());
+        out.put("address", func.getEntryPoint().toString(false));
+        out.put("name", outcome.functionName());
         // The dialect that produced the code travels with it. Pseudocode with no
         // record of the variant that decoded it cannot be audited after the fact,
         // which is how a VLE-as-classic-PowerPC mistake survives review.
         ServiceUtils.putLanguageSelection(out, program);
-        out.put("decompiled", decompiledCode.get());
+        out.put("decompiled", outcome.decompiledCode());
         return Response.ok(out);
     }
 
-    // Backward compatible overloads for internal callers. They go to forceDecompileAt,
-    // not the annotated method, so the exemption from the check is one the code
-    // performs rather than one that holds only because variant= happens to be empty.
-    public Response forceDecompile(String functionAddrStr, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        return forceDecompileAt(pe.program(), functionAddrStr);
-    }
 
-    public Response forceDecompile(String functionAddrStr) {
-        return forceDecompile(functionAddrStr, null);
-    }
 
     // ========================================================================
     // Disassembly
@@ -517,29 +362,19 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
 
     /**
      * Get assembly code for a function.
-     * If programName is provided, uses that program instead of the current one.
      */
     @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. When Ghidra's stored function body is degenerate (body_end == body_start, which would truncate the listing to a single instruction), the listing is instead bounded by the next function or the containing memory block and the response adds body_degenerate=true, bounded_by (next_function | memory_block | function_body) and a warning; do not trust this function's stored extent in that case.", category = "function", access = ToolAccess.READ_ONLY)
     public Response disassembleFunction(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+            @Param(value = "address", paramType = Param.FUNCTION_REF,
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+                               + "address is unambiguous.") Function func,
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (func == null) return Response.err("address is required");
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
 
             StringBuilder sb = new StringBuilder();
             Listing listing = program.getListing();
@@ -699,14 +534,11 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                   + "here; re-derive the extent rather than trusting it.");
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Error disassembling function: " + e.getMessage());
+            return Response.err("Error disassembling function: " + ServiceUtils.failureMessage(e));
         }
     }
 
-    // Backward compatible overload for internal callers
-    public Response disassembleFunction(String addressStr) {
-        return disassembleFunction(addressStr, null);
-    }
+
 
     /**
      * True when a function's stored body cannot be the whole function.
@@ -773,19 +605,12 @@ decomp = ServiceUtils.createConfiguredDecompiler(program);
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("Address or function name is required");
-        }
+                               + "address is unambiguous.") Function func,
+            @Param(value = "program", defaultValue = "") Program program) {
+        
 
         try {
-            ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, addressStr);
-            if (funcLookup.hasError()) return funcLookup.error();
-            Function func = funcLookup.function();
+            
 Map<String, Object> out = new LinkedHashMap<>();
             out.put("name", func.getName());
             out.put("address", func.getEntryPoint().toString(false));
@@ -795,13 +620,8 @@ Map<String, Object> out = new LinkedHashMap<>();
             out.put("body_end", func.getBody().getMaxAddress().toString(false));
             return Response.ok(out);
         } catch (Exception e) {
-            return Response.err("Error getting function: " + e.getMessage());
+            return Response.err("Error getting function: " + ServiceUtils.failureMessage(e));
         }
-    }
-
-    // Backward compatibility overload
-    public Response getFunctionByAddress(String addressStr) {
-        return getFunctionByAddress(addressStr, null);
     }
 
     // ========================================================================
@@ -818,13 +638,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
             @Param(value = "old_variable_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldVarName,
             @Param(value = "new_variable_name", source = ParamSource.BODY, aliases = {"newName"}) String newVarName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if ((functionName == null || functionName.isEmpty()) && (functionAddress == null || functionAddress.isEmpty())) {
             return Response.err("Function name or address is required");
         }
@@ -874,9 +688,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             final HighSymbol finalHighSymbol = highSymbol;
             final HighFunction finalHighFunction = highFunction;
             final Function finalFunction = func;
-            AtomicBoolean successFlag = new AtomicBoolean(false);
-
-            threadingStrategy.executeWrite(program, "Rename variable", () -> {
+            boolean renamed = threadingStrategy.executeWrite(program, "Rename variable", () -> {
                 if (commitRequired) {
                     HighFunctionDBUtil.commitParamsToDatabase(finalHighFunction, false,
                         ReturnCommitOption.NO_COMMIT, finalFunction.getSignatureSource());
@@ -887,34 +699,22 @@ Map<String, Object> out = new LinkedHashMap<>();
                     null,
                     SourceType.USER_DEFINED
                 );
-                successFlag.set(true);
-                return null;
+                return true;
             });
 
-            if (successFlag.get()) {
+            if (renamed) {
                 String varType = finalHighSymbol.getDataType().getName();
                 String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
-                if (hungarianWarning != null) {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
-                }
-                return Response.success("Variable renamed");
+                List<String> warnings = hungarianWarning != null ? List.of(hungarianWarning) : List.of();
+                return Response.successWithWarnings("Variable renamed", warnings);
             }
         } catch (Exception e) {
-            String errorMsg = "Failed to execute rename on Swing thread: " + e.getMessage();
-            Msg.error(this, errorMsg, e);
-            return Response.err(errorMsg);
+            Msg.error(this, "Rename failed: " + ServiceUtils.failureMessage(e), e);
+            return ServiceUtils.fail("Rename", e);
         } finally {
             decomp.dispose();
         }
         return Response.err("Failed to rename variable");
-    }
-
-    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
-        return renameVariableInFunction(functionName, null, oldVarName, newVarName, null);
-    }
-
-    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
-        return renameVariableInFunction(functionName, null, oldVarName, newVarName, programName);
     }
 
     /**
@@ -962,7 +762,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                    aliases = {"function_address", "function", "oldName"},
                    description = "Function name or address to rename. Address accepts 0x<hex> or "
                                + "<space>:<hex> (e.g., mem:1000, code:ff00); a plain name resolves by exact "
-                               + "function name.") String functionAddrStr,
+                               + "function name.") Function targetFunc,
             @Param(value = "new_name", source = ParamSource.BODY,
                    description = "New function name in PascalCase, verb first: GetPlayerHealth, not "
                                + "get_player_health and not PlayerHealth. An UPPERCASE module prefix is "
@@ -972,29 +772,19 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(GetInfo), and a name whose tokens are a strict subset of an existing "
                                + "function's within the same module prefix. strict_mode downgrades those "
                                + "rejections to warnings.") String newName,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional per-call override for naming enforcement: 'enforce' (reject "
                                + "low-quality names), 'warn' (write goes through with warnings), or 'off' "
                                + "(skip validation entirely). Omit to use the project/global setting.")
                     String strictModeArg) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address or name is required");
-        }
+        
 
         if (newName == null || newName.isEmpty()) {
             return Response.err("New function name is required");
         }
 
-        ServiceUtils.FunctionOrError targetFuncLookup = ServiceUtils.getFunctionOrError(program, functionAddrStr);
-        if (targetFuncLookup.hasError()) return targetFuncLookup.error();
-        Function targetFunc = targetFuncLookup.function();
+        
 
         // Per-call strict_mode override. The AutoCloseable returned by
         // scopedRequestMode() clears the override on close — even if the
@@ -1049,34 +839,20 @@ Map<String, Object> out = new LinkedHashMap<>();
             }
         }
 
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Rename function by address", () -> {
+            String text = threadingStrategy.executeWrite(program, "Rename function by address", () -> {
                 String oldName = targetFunc.getName();
                 targetFunc.setName(newName, SourceType.USER_DEFINED);
-                success.set(true);
-                resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
-                        .append(" from '").append(oldName).append("' to '").append(newName).append("'");
-                return null;
+                return "Success: Renamed function at " + targetFunc.getEntryPoint().toString(false)
+                        + " from '" + oldName + "' to '" + newName + "'";
             });
-        } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute rename function on Swing thread", e);
-        }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
             List<String> nameWarnings = new ArrayList<>(NamingConventions.validateFunctionName(newName, false));
             nameWarnings.addAll(enforcementWarnings);
-            Map<String, Object> data = JsonHelper.mapOf("status", "success", "message", text);
-            if (!nameWarnings.isEmpty()) {
-                data.put("warnings", nameWarnings);
-            }
-            return Response.ok(data);
+            return Response.successWithWarnings(text, nameWarnings);
+        } catch (Exception e) {
+            Msg.error(this, "Rename function failed", e);
+            return ServiceUtils.fail("Rename", e);
         }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
         } catch (Exception e) {
             // try-with-resources close path: scopedRequestMode's close()
             // is declared on AutoCloseable so the compiler requires us to
@@ -1086,15 +862,9 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    /** Three-arg overload preserving the pre-v5.11.2 signature for the
-     * registry + headless dispatcher + bare programmatic callers. */
-    public Response renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
-        return renameFunctionByAddress(functionAddrStr, newName, programName, null);
-    }
+    
 
-    public Response renameFunctionByAddress(String functionAddrStr, String newName) {
-        return renameFunctionByAddress(functionAddrStr, newName, null, null);
-    }
+
 
     /**
      * The library name Ghidra's Function ID analyzer recorded for this
@@ -1214,30 +984,11 @@ Map<String, Object> out = new LinkedHashMap<>();
         return new String[]{cc, cleaned.replaceAll("\\s+", " ").trim()};
     }
 
-    /**
-     * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd.
-     */
-    public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
-        return setFunctionPrototype(functionAddrStr, prototype, null, null);
-    }
 
-    /**
-     * Set a function's prototype with calling convention support (backward compatible).
-     */
-    public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention) {
-        return setFunctionPrototype(functionAddrStr, prototype, callingConvention, null);
-    }
-
-    /**
-     * Set a function's prototype with calling convention and program name support.
-     */
-    public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention, String programName) {
+    public PrototypeResult setFunctionPrototype(Function func, String prototype, String callingConvention, Program program) {
         // Input validation
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return new PrototypeResult(false, pe.error().toJson());
-        Program program = pe.program();
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return new PrototypeResult(false, "Function address is required");
+        if (func == null) {
+            return new PrototypeResult(false, "Function is required");
         }
         if (prototype == null || prototype.isEmpty()) {
             return new PrototypeResult(false, "Function prototype is required");
@@ -1257,20 +1008,25 @@ Map<String, Object> out = new LinkedHashMap<>();
         final String finalConvention = resolvedConvention;
 
         final StringBuilder errorMessage = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
+        boolean success = false;
 
         try {
-            threadingStrategy.executeRead(() -> {
-                applyFunctionPrototype(program, functionAddrStr, finalPrototype, finalConvention, success, errorMessage);
-                return null;
-            });
+            success = Boolean.TRUE.equals(threadingStrategy.executeWrite(program, "Set function prototype", () -> {
+                if (!applyFunctionPrototype(program, func, finalPrototype, finalConvention, errorMessage)) {
+                    // The prototype and the convention are one request: a failed step rolls back both.
+                    throw new Refusal(errorMessage.toString());
+                }
+                return true;
+            }));
+        } catch (Refusal r) {
+            // errorMessage already says why
         } catch (Exception e) {
-            String msg = "Failed to set function prototype on Swing thread: " + e.getMessage();
+            String msg = "set function prototype failed: " + ServiceUtils.failureMessage(e);
             errorMessage.append(msg);
             Msg.error(this, msg, e);
         }
 
-        return new PrototypeResult(success.get(), errorMessage.toString());
+        return new PrototypeResult(success, errorMessage.toString());
     }
 
     /**
@@ -1278,12 +1034,12 @@ Map<String, Object> out = new LinkedHashMap<>();
      */
     @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setFunctionPrototypeEndpoint(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+            @Param(value = "function_address", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "prototype", source = ParamSource.BODY,
                    description = "Full C signature as one string, e.g. "
                                + "int __fastcall Foo(int nCount, char *pszName). The NAME in it is parsed "
@@ -1296,8 +1052,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "whatever else list_calling_conventions reports for this program's "
                                + "language. When set it OVERRIDES the convention written into the "
                                + "prototype string; omit to use whatever the prototype says.") String callingConvention,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
+            @Param(value = "program", defaultValue = "") Program program) {
+        PrototypeResult result = setFunctionPrototype(func, prototype, callingConvention, program);
         if (result.isSuccess()) {
             List<String> warnings = new ArrayList<>();
             // Warn about __thiscall ECX auto-param limitation
@@ -1314,16 +1070,17 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
             }
 
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("status", "success");
-            out.put("message", "Successfully set prototype for function at " + functionAddress);
-            out.put("address", functionAddress);
-            out.put("prototype", prototype);
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("address", func.getEntryPoint().toString(false));
+            extras.put("prototype", prototype);
             if (callingConvention != null && !callingConvention.isEmpty()) {
-                out.put("calling_convention", callingConvention);
+                extras.put("calling_convention", callingConvention);
             }
-            if (!warnings.isEmpty()) out.put("warnings", warnings);
-            return Response.ok(out);
+            if (!warnings.isEmpty()) extras.put("warnings", warnings);
+            return Response.success(
+                    "Successfully set prototype for function at "
+                            + func.getEntryPoint().toString(false),
+                    extras);
         } else {
             return Response.err("Failed to set function prototype: " + result.getErrorMessage());
         }
@@ -1332,34 +1089,19 @@ Map<String, Object> out = new LinkedHashMap<>();
     /**
      * Helper method that applies the function prototype within a transaction.
      * v3.0.1: Preserves existing plate comment across prototype changes.
+     * @return true when the signature (and optional convention) applied
      */
-    void applyFunctionPrototype(Program program, String functionAddrStr, String prototype,
-                                       String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
+    boolean applyFunctionPrototype(Program program, Function func, String prototype,
+                                      String callingConvention, StringBuilder errorMessage) {
         try {
-            // Get the address and function
-            Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-            if (addr == null) {
-                String msg = ServiceUtils.getLastParseError();
-                errorMessage.append(msg);
-                Msg.error(this, msg);
-                return;
-            }
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-
-            if (func == null) {
-                String msg = "Could not find function at address: " + functionAddrStr;
-                errorMessage.append(msg);
-                Msg.error(this, msg);
-                return;
-            }
-
+            Address addr = func.getEntryPoint();
             Msg.info(this, "Setting prototype for function " + func.getName() + ": " + prototype);
 
             // v3.0.1: Save existing plate comment before prototype change (which may wipe it)
             String savedPlateComment = func.getComment();
 
             // Use ApplyFunctionSignatureCmd to parse and apply the signature
-            parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, success, errorMessage);
+            boolean applied = parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, errorMessage);
 
             // v3.0.1: Restore plate comment if it was wiped by prototype change
             if (savedPlateComment != null && !savedPlateComment.isEmpty()) {
@@ -1375,19 +1117,22 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
             }
+            return applied;
 
         } catch (Exception e) {
-            String msg = "Error setting function prototype: " + e.getMessage();
+            String msg = "Error setting function prototype: " + ServiceUtils.failureMessage(e);
             errorMessage.append(msg);
             Msg.error(this, msg, e);
+            return false;
         }
     }
 
     /**
      * Parse and apply the function signature with error handling.
+     * @return true when the signature (and optional convention) applied
      */
-    void parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
-                                              String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
+    boolean parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
+                                              String callingConvention, StringBuilder errorMessage) {
         // Use ApplyFunctionSignatureCmd to parse and apply the signature
         WriteTx txProto = WriteTx.begin(program, "Set function prototype");
         boolean signatureApplied = false;
@@ -1407,7 +1152,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 String msg = "Failed to parse function prototype";
                 errorMessage.append(msg);
                 Msg.error(this, msg);
-                return;
+                return false;
             }
 
             // Create and apply the command
@@ -1427,36 +1172,31 @@ Map<String, Object> out = new LinkedHashMap<>();
                 Msg.error(this, msg);
             }
         } catch (Exception e) {
-            String msg = "Error applying function signature: " + e.getMessage();
+            String msg = "Error applying function signature: " + ServiceUtils.failureMessage(e);
             errorMessage.append(msg);
             Msg.error(this, msg, e);
         } finally {
             txProto.end(signatureApplied);
         }
 
-        // Apply calling convention in a SEPARATE transaction after signature is committed
-        // This ensures the calling convention isn't overridden by ApplyFunctionSignatureCmd
+        // Apply calling convention after the signature, in the same executeWrite unit,
+        // so ApplyFunctionSignatureCmd does not override it.
         if (signatureApplied && callingConvention != null && !callingConvention.isEmpty()) {
             WriteTx txConv = WriteTx.begin(program, "Set calling convention");
             boolean conventionApplied = false;
             try {
                 conventionApplied = applyCallingConvention(program, addr, callingConvention, errorMessage);
-                if (conventionApplied) {
-                    success.set(true);
-                } else {
-                    success.set(false);  // Fail if calling convention couldn't be applied
-                }
+                return conventionApplied;
             } catch (Exception e) {
-                String msg = "Error in calling convention transaction: " + e.getMessage();
+                String msg = "Error in calling convention transaction: " + ServiceUtils.failureMessage(e);
                 errorMessage.append(msg);
                 Msg.error(this, msg, e);
-                success.set(false);
+                return false;
             } finally {
                 txConv.end(conventionApplied);
             }
-        } else if (signatureApplied) {
-            success.set(true);
         }
+        return signatureApplied;
     }
 
     /**
@@ -1511,7 +1251,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             }
 
         } catch (Exception e) {
-            String msg = "Error setting calling convention: " + e.getMessage();
+            String msg = "Error setting calling convention: " + ServiceUtils.failureMessage(e);
             errorMessage.append(msg);
             Msg.error(this, msg, e);
             return false;
@@ -1521,6 +1261,28 @@ Map<String, Object> out = new LinkedHashMap<>();
     // ========================================================================
     // Variable type methods
     // ========================================================================
+
+    /**
+     * Parse "-0x88", "-136" or "Stack[-0x88]" (optionally ":size") into a frame offset.
+     */
+    private static Integer parseStackOffset(String text) {
+        if (text == null) return null;
+        String trimmed = text.strip().replace("Stack[", "").replace("]", "");
+        int colon = trimmed.indexOf(':');
+        if (colon > 0) trimmed = trimmed.substring(0, colon);
+        if (trimmed.isEmpty()) return null;
+        try {
+            if (trimmed.startsWith("-0x") || trimmed.startsWith("-0X")) {
+                return -Integer.parseInt(trimmed.substring(3), 16);
+            }
+            if (trimmed.startsWith("0x") || trimmed.startsWith("0X")) {
+                return Integer.parseInt(trimmed.substring(2), 16);
+            }
+            return Integer.parseInt(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
 
     /**
      * Build the decompiler-default-name guidance appended to a "variable not found"
@@ -1578,25 +1340,17 @@ Map<String, Object> out = new LinkedHashMap<>();
     // set_local_variable_type merged into set_variable_type in 7.0.0; kept as the shared impl
     // that set_variable_type (and set_variable_type) delegate to.
     public Response setLocalVariableType(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "function_address", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
+                               + "address is unambiguous.") Function func,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"variableName"}) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // Input validation
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
-        }
+        
 
         if (variableName == null || variableName.isEmpty()) {
             return Response.err("Variable name is required");
@@ -1612,158 +1366,138 @@ Map<String, Object> out = new LinkedHashMap<>();
                     + "Resolve to a concrete type: byte, ushort, int, uint, void *, etc.");
         }
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
+        boolean ambient = program != null && program.getCurrentTransactionInfo() != null;
         try {
-            threadingStrategy.executeRead(() -> {
-                try {
-                    // Find the function
-                    Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                    if (func == null) {
-                        resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                        return null;
-                    }
-
+            String text = threadingStrategy.executeWrite(program, "Set variable type", () -> {
                     DecompileResults results = decompileFunction(func, program);
-                    if (results == null || !results.decompileCompleted()) {
-                        resultMsg.append("Error: Decompilation failed for function at ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
-                    if (highFunction == null) {
-                        resultMsg.append("Error: No high function available");
-                        return null;
-                    }
-
-                    // Find the symbol by name
-                    HighSymbol symbol = findSymbolByName(highFunction, variableName);
-                    if (symbol == null) {
-                        // PRIORITY 2 FIX: Provide helpful diagnostic information
-                        resultMsg.append("Error: Variable '").append(variableName)
-                                .append("' not found in decompiled function. ");
-
-                        // List available variables for user guidance
-                        List<String> availableNames = new ArrayList<>();
-                        Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
-                        while (symbols.hasNext()) {
-                            availableNames.add(symbols.next().getName());
-                        }
-
-                        if (!availableNames.isEmpty()) {
-                            resultMsg.append("Available variables: ")
-                                    .append(String.join(", ", availableNames))
-                                    .append(". ");
-                        }
-
-                        // Decompiler-default-name guidance (SSA churn / renamed-away /
-                        // register-resident). Pure function of the requested name + the
-                        // available high-symbol names — see buildVariableNameHint.
-                        resultMsg.append(buildVariableNameHint(variableName, availableNames));
-
-                        // Check if variable exists in low-level API but not high-level (phantom variable)
-                        Variable[] lowLevelVars = func.getLocalVariables();
-                        boolean isPhantomVariable = false;
-                        for (Variable v : lowLevelVars) {
-                            if (v.getName().equals(variableName)) {
-                                isPhantomVariable = true;
-                                break;
-                            }
-                        }
-
-                        if (isPhantomVariable) {
-                            resultMsg.append("NOTE: Variable '").append(variableName)
-                                    .append("' exists in stack frame but not in decompiled code. ")
-                                    .append("This is a phantom variable created by Ghidra's stack analysis ")
-                                    .append("that was optimized away during decompilation. ")
-                                    .append("You cannot set the type of phantom variables. ")
-                                    .append("Only variables visible in the decompiled code can be typed.");
-                        }
-
-                        return null;
-                    }
-
-                    // Get high variable -- may be null for EBP-pinned / SSA-only symbols.
-                    // updateDBVariable works without a HighVariable (rename path proves this),
-                    // so we skip the null guard and fall through to updateVariableType directly.
-                    HighVariable highVar = symbol.getHighVariable();
-                    String oldType = highVar != null
-                        ? highVar.getDataType().getName()
-                        : symbol.getDataType().getName();
-
-                    // Find the data type
-                    DataTypeManager dtm = program.getDataTypeManager();
-                    DataType dataType = ServiceUtils.resolveDataType(dtm, newType);
-
-                    if (dataType == null) {
-                        resultMsg.append("Error: Could not resolve data type: ").append(newType);
-                        // Provide actionable hint for pointer types
-                        if (newType.endsWith("*")) {
-                            String baseTypeName = newType.substring(0, newType.length() - 1).trim();
-                            if (!baseTypeName.isEmpty() && !baseTypeName.equals("void")) {
-                                resultMsg.append(". Hint: struct '").append(baseTypeName)
-                                    .append("' does not exist. Create it first with create_struct(name=\"")
-                                    .append(baseTypeName).append("\", fields=[...]), then retry set_variable_type.");
-                            }
-                        }
-                        return null;
-                    }
-
-                    // Apply the type change in a transaction
-                    StringBuilder errorDetails = new StringBuilder();
-                    if (updateVariableType(program, symbol, dataType, success, errorDetails)) {
-                        resultMsg.append("Success: Changed type of variable '").append(variableName)
-                                .append("' from '").append(oldType).append("' to '")
-                                .append(dataType.getName()).append("'")
-                                .append(". WARNING: Type changes trigger re-decompilation which may create new SSA variables. ")
-                                .append("Call get_functions(fields=parameters,locals) after all type changes to discover any new variables.");
-                    } else {
-                        // Provide detailed error message including storage location
-                        String storageInfo = "unknown";
-                        try {
-                            storageInfo = symbol.getStorage().toString();
-                        } catch (Exception e) {
-                            // If we can't get storage, continue without it
-                        }
-
-                        resultMsg.append("Error: Failed to update variable type for '").append(variableName).append("'");
-                        resultMsg.append(" (Storage: ").append(storageInfo).append(")");
-
-                        if (errorDetails.length() > 0) {
-                            resultMsg.append(". Details: ").append(errorDetails.toString());
-                        }
-
-                        // Add helpful guidance for known limitations
-                        if (storageInfo.startsWith("Stack[-") && storageInfo.contains(":4")) {
-                            resultMsg.append(". Note: Stack-based local variables with 4-byte size may have type-setting limitations in Ghidra's API");
-                        }
-                    }
-
-                } catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
-                    Msg.error(this, "Error setting variable type", e);
+                if (results == null || !results.decompileCompleted()) {
+                    throw new Refusal("Decompilation failed for function at " + func.getName());
                 }
-                return null;
+
+                ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
+                if (highFunction == null) {
+                    throw new Refusal("No high function available");
+                }
+
+                // Find the symbol by name
+                HighSymbol symbol = findSymbolByName(highFunction, variableName);
+                if (symbol == null) {
+                    // PRIORITY 2 FIX: Provide helpful diagnostic information
+                    StringBuilder notFound = new StringBuilder();
+                    notFound.append("Variable '").append(variableName)
+                            .append("' not found in decompiled function. ");
+
+                    // List available variables for user guidance
+                    List<String> availableNames = new ArrayList<>();
+                    Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                    while (symbols.hasNext()) {
+                        availableNames.add(symbols.next().getName());
+                    }
+
+                    if (!availableNames.isEmpty()) {
+                        notFound.append("Available variables: ")
+                                .append(String.join(", ", availableNames))
+                                .append(". ");
+                    }
+
+                    // Decompiler-default-name guidance (SSA churn / renamed-away /
+                    // register-resident). Pure function of the requested name + the
+                    // available high-symbol names — see buildVariableNameHint.
+                    notFound.append(buildVariableNameHint(variableName, availableNames));
+
+                    // Check if variable exists in low-level API but not high-level (phantom variable)
+                    Variable[] lowLevelVars = func.getLocalVariables();
+                    boolean isPhantomVariable = false;
+                    for (Variable v : lowLevelVars) {
+                        if (v.getName().equals(variableName)) {
+                            isPhantomVariable = true;
+                            break;
+                        }
+                    }
+
+                    if (isPhantomVariable) {
+                        notFound.append("NOTE: Variable '").append(variableName)
+                                .append("' exists in stack frame but not in decompiled code. ")
+                                .append("This is a phantom variable created by Ghidra's stack analysis ")
+                                .append("that was optimized away during decompilation. ")
+                                .append("You cannot set the type of phantom variables. ")
+                                .append("Only variables visible in the decompiled code can be typed.");
+                    }
+
+                    throw new Refusal(notFound.toString());
+                }
+
+                // Get high variable -- may be null for EBP-pinned / SSA-only symbols.
+                // updateDBVariable works without a HighVariable (rename path proves this),
+                // so we skip the null guard and fall through to updateVariableType directly.
+                HighVariable highVar = symbol.getHighVariable();
+                String oldType = highVar != null
+                    ? highVar.getDataType().getName()
+                    : symbol.getDataType().getName();
+
+                // Find the data type
+                DataTypeManager dtm = program.getDataTypeManager();
+                DataType dataType = ServiceUtils.resolveDataType(dtm, newType);
+
+                if (dataType == null) {
+                    StringBuilder unresolved = new StringBuilder("Could not resolve data type: ").append(newType);
+                    // Provide actionable hint for pointer types
+                    if (newType.endsWith("*")) {
+                        String baseTypeName = newType.substring(0, newType.length() - 1).trim();
+                        if (!baseTypeName.isEmpty() && !baseTypeName.equals("void")) {
+                            unresolved.append(". Hint: struct '").append(baseTypeName)
+                                .append("' does not exist. Create it first with create_struct(name=\"")
+                                .append(baseTypeName).append("\", fields=[...]), then retry set_variable_type.");
+                        }
+                    }
+                    throw new Refusal(unresolved.toString());
+                }
+
+                dataType = dataType.clone(dtm);
+                String requestError = validateVariableTypeRequest(newType, dataType);
+                if (requestError != null) throw new Refusal(requestError);
+
+                // Apply the type change in a transaction
+                StringBuilder errorDetails = new StringBuilder();
+                if (updateVariableType(program, symbol, dataType, errorDetails)) {
+                    return "Success: Changed type of variable '" + variableName
+                            + "' from '" + oldType + "' to '"
+                            + dataType.getName() + "'"
+                            + ". WARNING: Type changes trigger re-decompilation which may create new SSA variables. "
+                            + "Call get_functions(fields=parameters,locals) after all type changes to discover any new variables.";
+                }
+
+                // Provide detailed error message including storage location
+                String storageInfo = "unknown";
+                try {
+                    storageInfo = symbol.getStorage().toString();
+                } catch (Exception e) {
+                    // If we can't get storage, continue without it
+                }
+
+                StringBuilder failMsg = new StringBuilder();
+                failMsg.append("Failed to update variable type for '").append(variableName).append("'");
+                failMsg.append(" (Storage: ").append(storageInfo).append(")");
+
+                if (errorDetails.length() > 0) {
+                    failMsg.append(". Details: ").append(errorDetails.toString());
+                }
+
+                // Add helpful guidance for known limitations
+                if (storageInfo.startsWith("Stack[-") && storageInfo.contains(":4")) {
+                    failMsg.append(". Note: Stack-based local variables with 4-byte size may have type-setting limitations in Ghidra's API");
+                }
+                throw new Refusal(failMsg.toString());
             });
+            return Response.success(text);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage() + (ambient
+                ? " The surrounding transaction owns any partial changes; they were not rolled back here."
+                : ""));
         } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute set variable type on Swing thread", e);
+            Msg.error(this, "Set variable type failed", e);
+            return ServiceUtils.fail("Write", e);
         }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
-        }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
-    }
-
-    public Response setLocalVariableType(String functionAddrStr, String variableName, String newType) {
-        return setLocalVariableType(functionAddrStr, variableName, newType, null);
     }
 
     /**
@@ -1776,14 +1510,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "parameter_name", source = ParamSource.BODY, aliases = {"parameterName"}) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if ("this".equals(parameterName)) {
-            return setFunctionThisType(functionAddress, newType, programName);
+            return setFunctionThisType(func, newType, program);
         }
-        return setLocalVariableType(functionAddress, parameterName, newType, programName);
+        return setLocalVariableType(func, parameterName, newType, program);
     }
 
     /**
@@ -1794,13 +1528,14 @@ Map<String, Object> out = new LinkedHashMap<>();
             description = "Type the implicit 'this' of a __thiscall/__fastcall member function by associating the function with its class. Ghidra's auto-'this' (ECX on x86) is an immutable auto-parameter; with auto-storage it derives its type from the function's parent Class namespace, matched by name to a same-named structure. This tool finds/creates a class namespace for the struct and moves the function into it (no custom storage). Pass 'MyClass *' or 'MyClass'; the structure MyClass must already exist (create_struct). On programs with multiple address spaces, prefix function_address with the space name (mem:1000).",
             category = "function", access = ToolAccess.WRITE)
     public Response setFunctionThisType(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddrStr,
+            @Param(value = "function_address", aliases = {"address", "name", "function_name", "function"},
+                   paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
+                   description = "Function name or any address within the function (0x<hex> or <space>:<hex>).") Function func,
             @Param(value = "this_type", source = ParamSource.BODY, aliases = {"thisType"},
                    description = "Class type for this, e.g. 'MyWidget *' or 'MyWidget'. The base struct name becomes the function's class.") String thisType,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+        if (func == null) {
             return Response.err("Function address is required");
         }
         if (thisType == null || thisType.isEmpty()) {
@@ -1809,41 +1544,22 @@ Map<String, Object> out = new LinkedHashMap<>();
         if (thisType.startsWith("undefined")) {
             return Response.err("Rejected: this_type must be a concrete struct/class pointer, not " + thisType);
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-
         try {
-            threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                if (func == null) {
-                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                    return null;
-                }
-
-                // The this_type names the owning class. Its base must be an existing structure,
+            String text = threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
+                    // The this_type names the owning class. Its base must be an existing structure,
                 // because Ghidra derives the auto-'this' type from a class namespace that is
                 // associated by name with a same-named struct.
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType pointerType = resolveThisPointerType(dtm, thisType);
                 if (!(pointerType instanceof Pointer)) {
-                    resultMsg.append("Error: Could not resolve this_type '").append(thisType)
-                            .append("' to a pointer. Create the structure first with create_struct, then retry.");
-                    return null;
+                    throw new Refusal("Could not resolve this_type '" + thisType
+                            + "' to a pointer. Create the structure first with create_struct, then retry.");
                 }
                 DataType base = ((Pointer) pointerType).getDataType();
                 if (!(base instanceof Structure)) {
-                    resultMsg.append("Error: 'this' must point to a structure/class type; '")
-                            .append(base != null ? base.getName() : "void")
-                            .append("' is not a structure. Ghidra derives the 'this' type from a same-named struct.");
-                    return null;
+                    throw new Refusal("'this' must point to a structure/class type; '"
+                            + (base != null ? base.getName() : "void")
+                            + "' is not a structure. Ghidra derives the 'this' type from a same-named struct.");
                 }
                 String className = base.getName();
 
@@ -1858,11 +1574,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                     } catch (Exception ignored) {
                         cc = "";
                     }
-                    resultMsg.append("Error: ").append(func.getName())
-                            .append(" has no implicit 'this' parameter (calling convention '")
-                            .append(cc == null || cc.isEmpty() ? "(default)" : cc)
-                            .append("'). Set it to __thiscall with set_function_prototype, then retry.");
-                    return null;
+                    throw new Refusal(func.getName()
+                            + " has no implicit 'this' parameter (calling convention '"
+                            + (cc == null || cc.isEmpty() ? "(default)" : cc)
+                            + "'). Set it to __thiscall with set_function_prototype, then retry.");
                 }
 
                 // Auto-parameters are immutable via the API; the 'this' auto-parameter instead
@@ -1893,22 +1608,17 @@ Map<String, Object> out = new LinkedHashMap<>();
                 thisParam = findAutoThisParameter(func);
                 DataType resolvedThis = thisParam != null ? thisParam.getDataType() : pointerType;
                 String resolvedName = resolvedThis != null ? resolvedThis.getDisplayName() : (className + " *");
-                success.set(true);
-                resultMsg.append(alreadyInClass ? "Confirmed " : "Moved ").append(func.getName())
-                        .append(alreadyInClass ? " in class " : " into class ").append(className)
-                        .append("; 'this' types as ").append(resolvedName)
-                        .append(" (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.");
-                return null;
+                return (alreadyInClass ? "Confirmed " : "Moved ") + func.getName()
+                        + (alreadyInClass ? " in class " : " into class ") + className
+                        + "; 'this' types as " + resolvedName
+                        + " (auto-storage). Call force_decompile, or get_functions with fields=decompiled_code, to refresh output.";
             });
+            return Response.success(text);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("set_function_this_type failed: " + e.getMessage());
+            return ServiceUtils.fail("set_function_this_type", e);
         }
-
-        if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", resultMsg.toString()));
-        }
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Failed to set 'this' type";
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     /** Locate the implicit {@code this} (auto-parameter or explicit) on a member function. */
@@ -1934,11 +1644,11 @@ Map<String, Object> out = new LinkedHashMap<>();
             description = "Set the data type of a function variable (local OR parameter) by name at the decompiler (high-level) layer. Pass variable_name='this' to type a __thiscall/__fastcall implicit this. Replaces set_local_variable_type / set_parameter_type / set_decompiler_variable_type.",
             category = "function", access = ToolAccess.WRITE)
     public Response setDecompilerVariableType(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Entry address of the function that owns the variable. Accepts 0x<hex> "
+            @Param(value = "function_address", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
+                   description = "Function name or any address within the function that owns the variable. Accepts 0x<hex> "
                                + "(default space) or <space>:<hex> (e.g., mem:1000, code:ff00); use "
                                + "get_address_spaces first on targets that are not "
-                               + "address-space-agnostic.") String functionAddress,
+                               + "address-space-agnostic.") Function func,
             @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"parameter_name"},
                    description = "Local or parameter to retype, named exactly as the decompiler shows it "
                                + "(get_functions fields=parameters,locals lists them). The literal value 'this' is "
@@ -1949,13 +1659,11 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "is REJECTED whatever the current type is — swapping one undefined width "
                                + "for another is a no-op, not documentation. For 'this', a bare struct name "
                                + "is auto-suffixed with ' *'.") String newType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if ("this".equals(variableName)) {
-            return setFunctionThisType(functionAddress, newType, programName);
+            return setFunctionThisType(func, newType, program);
         }
-        return setLocalVariableType(functionAddress, variableName, newType, programName);
+        return setLocalVariableType(func, variableName, newType, program);
     }
 
     static DataType resolveThisPointerType(DataTypeManager dtm, String thisType) {
@@ -1982,18 +1690,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Number of members to skip before this page starts; 0 begins at the "
                                + "first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "200",
-                   description = "Maximum members returned in this page (default 200). It is clamped to a "
-                               + "MINIMUM of 1, so 0 returns one member rather than everything — page with "
-                               + "offset against total_members instead.") int limit,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+                   description = "Maximum members returned in this page (default 200). 0 or less: no limit.") int limit,
+            @Param(value = "program", defaultValue = "") Program program) {
         if (className == null || className.trim().isEmpty()) {
             return Response.err("class_name is required");
         }
         final String cls = className.trim();
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         try {
             return threadingStrategy.executeRead(() -> {
                 SymbolTable st = program.getSymbolTable();
@@ -2035,29 +1737,18 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
 
-                int total = members.size();
-                int from = Math.max(0, offset);
-                int pageLimit = Math.max(1, limit);
-                int to = Math.min(total, from + pageLimit);
-                List<Map<String, Object>> page = from < to
-                        ? new ArrayList<>(members.subList(from, to)) : new ArrayList<>();
-
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("class_name", cls);
-                result.put("class_namespace_exists", isGhidraClass);
-                result.put("total_members", total);
-                result.put("offset", from);
-                result.put("limit", pageLimit);
-                result.put("members", page);
-                if (total == 0) {
-                    result.put("note", "No members found. A function matches if it is in the '" + cls
+                Map<String, Object> extras = new LinkedHashMap<>();
+                extras.put("class_name", cls);
+                extras.put("class_namespace_exists", isGhidraClass);
+                if (members.isEmpty()) {
+                    extras.put("note", "No members found. A function matches if it is in the '" + cls
                             + "' namespace or its 'this' parameter types as '" + cls + " *'. Create the "
                             + "struct (create_struct) and associate functions with set_function_this_type.");
                 }
-                return Response.ok(result);
+                return ServiceUtils.paged("members", members, offset, limit, extras);
             });
         } catch (Exception e) {
-            return Response.err("list_class_members failed: " + e.getMessage());
+            return ServiceUtils.fail("list_class_members", e);
         }
     }
 
@@ -2075,11 +1766,79 @@ Map<String, Object> out = new LinkedHashMap<>();
         return null;
     }
 
+    /** A decompiler's pseudo-type must not silently bind to an unrelated Code enum. */
+    static String validateVariableTypeRequest(String requested, DataType resolved) {
+        if (requested != null && requested.replaceAll("\\s+", "").equals("code*")) {
+            DataType base = resolved instanceof Pointer p ? p.getDataType() : resolved;
+            if (!(base instanceof ghidra.program.model.data.FunctionDefinition)) {
+                return "The ambiguous type 'code *' resolved to " + resolved.getPathName()
+                    + ", not a function pointer. Use an explicit function-definition type "
+                    + "or void * for an opaque address.";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Verify the database annotation through the same recovered symbol used for
+     * the write. A fresh SSA symbol can resolve to dynamic hash storage even
+     * when the requested register or stack annotation is present, so looking
+     * the variable up through that fresh symbol produces a false negative and
+     * requires an otherwise unnecessary second decompilation.
+     */
+    String verifyPersistedVariableUpdate(HighSymbol symbol, String name, DataType expectedType) {
+        return verifyPersistedVariableUpdate(symbol, name, expectedType,
+            HighFunctionDBUtil::getFunctionVariable);
+    }
+
+    static String verifyPersistedVariableUpdate(HighSymbol symbol, String name,
+            DataType expectedType, java.util.function.Function<HighSymbol, Variable> persistedVariable) {
+        if (symbol == null) {
+            return "Variable '" + name + "' was not present in the original recovered view";
+        }
+        Variable stored;
+        try {
+            stored = persistedVariable.apply(symbol);
+        } catch (Exception e) {
+            return "Could not verify persisted annotation for '" + name + "': " + e.getMessage();
+        }
+        if (stored == null) {
+            return "No persisted DB variable is attached to original symbol '" + name
+                + "' by storage and first-use PC";
+        }
+        if (!name.equals(stored.getName())) {
+            return "Persisted DB name mismatch: requested '" + name + "', stored '"
+                + stored.getName() + "'";
+        }
+        if (expectedType != null && !variableTypesMatch(expectedType, stored.getDataType())) {
+            return "Persisted DB type mismatch for '" + name + "': requested "
+                + expectedType.getPathName() + ", stored " + stored.getDataType().getPathName();
+        }
+        return null;
+    }
+
+    /** Ghidra represents an opaque void pointer as undefined*, never as a scalar undefined. */
+    static boolean variableTypesMatch(DataType expected, DataType actual) {
+        if (expected.isEquivalent(actual)) return true;
+        if (expected instanceof Pointer requested && actual instanceof Pointer recovered
+                && expected.getLength() == actual.getLength()) {
+            DataType target = requested.getDataType();
+            return (target == null || target instanceof ghidra.program.model.data.VoidDataType)
+                && ghidra.program.model.data.Undefined.isUndefined(recovered.getDataType());
+        }
+        return false;
+    }
+
+    private HighFunction freshVariableView(Function function, Program program) {
+        DecompileResults result = decompileFunctionNoRetry(function, program);
+        return result != null && result.decompileCompleted() ? result.getHighFunction() : null;
+    }
+
     /**
      * Apply the type update in a transaction.
      */
     boolean updateVariableType(Program program, HighSymbol symbol, DataType dataType,
-                                       AtomicBoolean success, StringBuilder errorDetails) {
+                                       StringBuilder errorDetails) {
         WriteTx tx = WriteTx.begin(program, "Set variable type");
         boolean result = false;
         String storageInfo = "unknown";
@@ -2104,7 +1863,13 @@ Map<String, Object> out = new LinkedHashMap<>();
                 SourceType.USER_DEFINED // Mark as user-defined
             );
 
-            success.set(true);
+            String verification = verifyPersistedVariableUpdate(
+                symbol, symbol.getName(), dataType);
+            if (verification != null) {
+                if (errorDetails != null) errorDetails.append(verification);
+                return false;
+            }
+
             result = true;
             Msg.info(this, "Successfully set variable type using HighFunctionDBUtil");
 
@@ -2152,7 +1917,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
             }
         } finally {
-            tx.end(success.get());
+            tx.end(result);
         }
         return result;
     }
@@ -2220,81 +1985,52 @@ Map<String, Object> out = new LinkedHashMap<>();
      */
     @McpTool(path = "/set_function_no_return", method = "POST", description = "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function", access = ToolAccess.WRITE)
     public Response setFunctionNoReturn(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+            @Param(value = "function_address", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
+                               + "address is unambiguous.") Function func,
             @Param(value = "no_return", source = ParamSource.BODY, aliases = {"noReturn"},
                    description = "True marks the function non-returning: its call sites become "
                                + "CALL_TERMINATOR, so control-flow analysis and the decompiler stop showing "
                                + "execution continuing past the call. False clears that back to an ordinary "
                                + "returning function. Required — there is no default.") boolean noReturn,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        // Input validation
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (func == null) {
             return Response.err("Function address is required");
         }
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<NoReturnUpdateResult> verifiedResult = new AtomicReference<>();
+        record NoReturnOutcome(String message, NoReturnUpdateResult verified) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Set function no return", () -> {
+            NoReturnOutcome outcome = threadingStrategy.executeWrite(program, "Set function no return", () -> {
 
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
-                if (func == null) {
-                    resultMsg.append("Error: No function at address: ").append(functionAddrStr);
-                    return null;
-                }
-
-                String oldState = func.hasNoReturn() ? "non-returning" : "returning";
+                    String oldState = func.hasNoReturn() ? "non-returning" : "returning";
 
                 NoReturnUpdateResult verified = setNoReturnState(func, noReturn);
                 String newState = verified.functionNoReturn() ? "non-returning" : "returning";
-                verifiedResult.set(verified);
-                success.set(true);
 
-                resultMsg.append("Success: Set function '").append(func.getName())
-                        .append("' at ").append(functionAddrStr)
-                        .append(" from ").append(oldState)
-                        .append(" to ").append(newState);
+                String text = "Success: Set function '" + func.getName()
+                        + "' at " + func.getEntryPoint().toString(false)
+                        + " from " + oldState
+                        + " to " + newState;
 
-                Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName() + " at " + functionAddrStr);
-                return null;
+                Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName() + " at " + func.getEntryPoint().toString(false));
+                return new NoReturnOutcome(text, verified);
             });
+            return Response.success(outcome.message(), JsonHelper.mapOf(
+                "function_no_return", outcome.verified().functionNoReturn(),
+                "terminal_no_return", outcome.verified().terminalNoReturn()));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute set no-return on Swing thread", e);
+            Msg.error(this, "Set no-return failed", e);
+            return ServiceUtils.fail("Write", e);
         }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
-            NoReturnUpdateResult verified = verifiedResult.get();
-            return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", text,
-                "function_no_return", verified.functionNoReturn(),
-                "terminal_no_return", verified.terminalNoReturn()));
-        }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public Response setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
-        return setFunctionNoReturn(functionAddrStr, noReturn, null);
-    }
+
 
     /**
      * Clear instruction-level flow override at a specific address.
@@ -2321,36 +2057,24 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String instructionAddrStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+                               + "address is unambiguous.") Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
         // Input validation
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (instructionAddrStr == null || instructionAddrStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Instruction address is required");
         }
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, instructionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
+        
 
         try {
-            threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
+            String text = threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
 
                 // Get the instruction at the address
                 Listing listing = program.getListing();
                 ghidra.program.model.listing.Instruction instruction = listing.getInstructionAt(addr);
 
                 if (instruction == null) {
-                    resultMsg.append("Error: No instruction found at address ").append(instructionAddrStr);
-                    return null;
+                    throw new Refusal("No instruction found at address " + addr.toString());
                 }
 
                 // Get the current flow override type (if any)
@@ -2359,31 +2083,25 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // Clear the flow override by setting to NONE
                 instruction.setFlowOverride(ghidra.program.model.listing.FlowOverride.NONE);
 
-                success.set(true);
-                resultMsg.append("Success: Cleared flow override at ").append(instructionAddrStr);
-                resultMsg.append(" (was: ").append(oldOverride.toString()).append(", now: NONE)");
+                String msg = "Success: Cleared flow override at " + addr.toString()
+                        + " (was: " + oldOverride.toString() + ", now: NONE)";
 
                 // Get the instruction's mnemonic for logging
                 String mnemonic = instruction.getMnemonicString();
-                Msg.info(this, "Cleared flow override for instruction '" + mnemonic + "' at " + instructionAddrStr +
+                Msg.info(this, "Cleared flow override for instruction '" + mnemonic + "' at " + addr.toString() +
                          " (previous override: " + oldOverride + ")");
-                return null;
+                return msg;
             });
+            return Response.success(text);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
-            Msg.error(this, "Failed to execute clear flow override on Swing thread", e);
+            Msg.error(this, "Clear flow override failed", e);
+            return ServiceUtils.fail("Write", e);
         }
-
-        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
-        if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
-        }
-        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public Response clearInstructionFlowOverride(String instructionAddrStr) {
-        return clearInstructionFlowOverride(instructionAddrStr, null);
-    }
+
 
     /**
      * Set custom storage for a local variable or parameter (v1.7.0).
@@ -2417,7 +2135,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
+                               + "address is unambiguous.") Function func,
             @Param(value = "variable_name", source = ParamSource.BODY,
                    description = "Local or parameter to address, matched by exact name against the "
                                + "function's variables.") String variableName,
@@ -2425,16 +2143,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Storage specification: a location followed by a size in bytes, e.g. "
                                + "Stack[-0x10]:4, EBP:4, EAX:4. The response echoes it as "
                                + "requested_storage next to the variable's current_storage.") String storageSpec,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
-        }
+            @Param(value = "program", defaultValue = "") Program program) {
+        
         if (variableName == null || variableName.isEmpty()) {
             return Response.err("Variable name is required");
         }
@@ -2442,27 +2152,15 @@ Map<String, Object> out = new LinkedHashMap<>();
             return Response.err("Storage specification is required");
         }
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMessage = new AtomicReference<>();
-        final AtomicReference<String> functionName = new AtomicReference<>();
-        final AtomicReference<String> oldStorageRef = new AtomicReference<>();
-        final AtomicReference<String> newStorageRef = new AtomicReference<>();
-        final AtomicBoolean enabledCustom = new AtomicBoolean(false);
-        final AtomicReference<String> variableKind = new AtomicReference<>();
-
+        record StorageOutcome(String functionName, String variableKind, String previousStorage,
+                              String storage, boolean enabledCustom) {}
         try {
-            threadingStrategy.executeWrite(program, "Set variable storage", () -> {
+            StorageOutcome outcome = threadingStrategy.executeWrite(program, "Set variable storage", () -> {
 
-                Function func = program.getFunctionManager().getFunctionAt(addr);
-                if (func == null) {
-                    errorMessage.set("No function at address: " + functionAddrStr);
-                    return null;
+                    if (func == null) {
+                    throw new Refusal("No function at address");
                 }
-                functionName.set(func.getName());
+                String functionName = func.getName();
 
                 Variable targetVar = null;
                 for (Variable var : func.getAllVariables()) {
@@ -2472,12 +2170,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
                 if (targetVar == null) {
-                    errorMessage.set("Variable '" + variableName + "' not found in function " + func.getName());
-                    return null;
+                    throw new Refusal("Variable '" + variableName + "' not found in function " + func.getName());
                 }
-                oldStorageRef.set(targetVar.getVariableStorage().toString());
+                String previousStorage = targetVar.getVariableStorage().toString();
                 boolean isParam = targetVar instanceof Parameter;
-                variableKind.set(isParam ? "parameter" : "local");
+                String variableKind = isParam ? "parameter" : "local";
+                boolean enabledCustom = false;
 
                 // PARSE BEFORE TOUCHING THE FUNCTION'S STORAGE MODE. Enabling
                 // custom storage is a FUNCTION-WIDE change -- it pins every
@@ -2493,8 +2191,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 try {
                     newStorage = parseStorageSpec(program, storageSpec, defaultSize);
                 } catch (InvalidInputException e) {
-                    errorMessage.set(e.getMessage());
-                    return null;
+                    throw new Refusal(e.getMessage());
                 }
 
                 // A parameter's storage is owned by the calling convention until
@@ -2505,7 +2202,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // variable must be looked up again afterwards.
                 if (isParam && !func.hasCustomVariableStorage()) {
                     func.setCustomVariableStorage(true);
-                    enabledCustom.set(true);
+                    enabledCustom = true;
                     targetVar = null;
                     for (Variable var : func.getAllVariables()) {
                         if (var.getName().equals(variableName)) {
@@ -2514,10 +2211,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
                     if (targetVar == null) {
-                        errorMessage.set("Variable '" + variableName + "' disappeared when custom storage was "
-                                + "enabled on " + func.getName() + "; storage was not changed.");
                         revertCustomStorage(func, enabledCustom);
-                        return null;
+                        throw new Refusal("Variable '" + variableName + "' disappeared when custom storage was "
+                                + "enabled on " + func.getName() + "; storage was not changed.");
                     }
                     currentType = targetVar.getDataType();
                 }
@@ -2529,10 +2225,9 @@ Map<String, Object> out = new LinkedHashMap<>();
                 } catch (InvalidInputException e) {
                     // VariableSizeException extends InvalidInputException, so
                     // this one catch covers both.
-                    errorMessage.set("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
-                            + "': " + e.getMessage());
                     revertCustomStorage(func, enabledCustom);
-                    return null;
+                    throw new Refusal("Ghidra rejected storage '" + storageSpec + "' for '" + variableName
+                            + "': " + e.getMessage());
                 }
 
                 // Read the storage back off the variable rather than echoing the
@@ -2547,54 +2242,48 @@ Map<String, Object> out = new LinkedHashMap<>();
                     }
                 }
                 if (readBack == null) {
-                    errorMessage.set("Variable '" + variableName + "' could not be read back after the write");
                     revertCustomStorage(func, enabledCustom);
-                    return null;
+                    throw new Refusal("Variable '" + variableName + "' could not be read back after the write");
                 }
                 VariableStorage actual = readBack.getVariableStorage();
-                newStorageRef.set(actual.toString());
                 if (actual.compareTo(newStorage) != 0) {
-                    errorMessage.set("Storage did not take: requested " + newStorage
+                    revertCustomStorage(func, enabledCustom);
+                    throw new Refusal("Storage did not take: requested " + newStorage
                             + " but the variable now reads " + actual
                             + ". This usually means the location overlaps another variable's storage.");
-                    revertCustomStorage(func, enabledCustom);
-                    return null;
                 }
 
-                success.set(true);
                 Msg.info(this, "Set variable storage for " + variableName + " in " + func.getName()
-                        + ": " + oldStorageRef.get() + " -> " + actual);
-                return null;
+                        + ": " + previousStorage + " -> " + actual);
+                return new StorageOutcome(functionName, variableKind, previousStorage, actual.toString(), enabledCustom);
             });
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("status", "success");
+            out.put("variable", variableName);
+            out.put("variable_kind", outcome.variableKind());
+            out.put("function", outcome.functionName());
+            out.put("address", func.getEntryPoint().toString());
+            out.put("previous_storage", outcome.previousStorage());
+            out.put("storage", outcome.storage());
+            out.put("requested_storage", storageSpec);
+            if (outcome.enabledCustom()) {
+                // Say it: this is a function-wide mode change, not a per-variable
+                // one. Every other parameter is now pinned at whatever the calling
+                // convention had assigned it, and will no longer track a later
+                // change of convention.
+                out.put("custom_storage_enabled", true);
+                out.put("note", "Custom variable storage was switched on for " + outcome.functionName()
+                        + " so this parameter's storage could be set. All of the function's parameters are "
+                        + "now held at their current locations instead of being derived from its calling "
+                        + "convention.");
+            }
+            return Response.ok(out);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            errorMessage.set("Failed to set variable storage: " + e.getMessage());
             Msg.error(this, "Failed to execute set variable storage", e);
+            return ServiceUtils.fail("set variable storage", e);
         }
-
-        if (!success.get()) {
-            return Response.err(errorMessage.get() != null ? errorMessage.get() : "Unknown failure");
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("status", "success");
-        out.put("variable", variableName);
-        out.put("variable_kind", variableKind.get());
-        out.put("function", functionName.get());
-        out.put("address", functionAddrStr);
-        out.put("previous_storage", oldStorageRef.get());
-        out.put("storage", newStorageRef.get());
-        out.put("requested_storage", storageSpec);
-        if (enabledCustom.get()) {
-            // Say it: this is a function-wide mode change, not a per-variable
-            // one. Every other parameter is now pinned at whatever the calling
-            // convention had assigned it, and will no longer track a later
-            // change of convention.
-            out.put("custom_storage_enabled", true);
-            out.put("note", "Custom variable storage was switched on for " + functionName.get()
-                    + " so this parameter's storage could be set. All of the function's parameters are "
-                    + "now held at their current locations instead of being derived from its calling "
-                    + "convention.");
-        }
-        return Response.ok(out);
     }
 
 
@@ -2613,13 +2302,12 @@ Map<String, Object> out = new LinkedHashMap<>();
      * request that was refused would still have permanently changed the
      * function, which is the mirror image of the bug #446 was filed for.
      */
-    private static void revertCustomStorage(Function func, AtomicBoolean enabledHere) {
-        if (!enabledHere.get()) {
+    private static void revertCustomStorage(Function func, boolean enabledHere) {
+        if (!enabledHere) {
             return;
         }
         try {
             func.setCustomVariableStorage(false);
-            enabledHere.set(false);
         } catch (Exception e) {
             Msg.warn(FunctionService.class, "Could not restore convention-derived storage on "
                     + func.getName() + " after a refused set_variable_storage: " + e.getMessage());
@@ -2722,9 +2410,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         return new VariableStorage(program, varnodes.toArray(new Varnode[0]));
     }
 
-    public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
-        return setVariableStorage(functionAddrStr, variableName, storageSpec, null);
-    }
+
 
     // ========================================================================
     // Function variables query
@@ -2737,15 +2423,9 @@ Map<String, Object> out = new LinkedHashMap<>();
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
             @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") int limit,
             @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if ((functionName == null || functionName.isEmpty()) && (address == null || address.isEmpty())) {
             return Response.err("Either function_name or address is required");
         }
@@ -2753,20 +2433,16 @@ Map<String, Object> out = new LinkedHashMap<>();
         final String filterMode = (filter != null && !filter.isEmpty()) ? filter : "all";
 
         final Program finalProgram = program;
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
-            threadingStrategy.executeRead(() -> {
-                try {
-                    // The address, when given, overrides the name
-                    String ref = (address != null && !address.isEmpty()) ? address : functionName;
-                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(finalProgram, ref);
-                    if (lookup.hasError()) {
-                        errorMsg.set(lookup.message());
-                        return null;
-                    }
-                    Function func = lookup.function();
+            return threadingStrategy.executeRead(() -> {
+                // The address, when given, overrides the name
+                String ref = (address != null && !address.isEmpty()) ? address : functionName;
+                ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(finalProgram, ref);
+                if (lookup.hasError()) {
+                    return Response.err(lookup.message());
+                }
+                Function func = lookup.function();
 
                     // Use shared decompileFunction (uses existing cache, no forced flush)
                     // The old forced cache flush + re-decompile added 5-30s latency per call.
@@ -2868,30 +2544,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                     if (filteredOut > 0) data.put("filtered_out", filteredOut);
                     if (truncated > 0) data.put("truncated", truncated);
 
-                    resultData.set(data);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error getting function variables", e);
-                }
-                return null;
+                return Response.ok(data);
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            Msg.error(this, "Error getting function variables", e);
+            return ServiceUtils.fail(e);
         }
-
-        if (resultData.get() != null) {
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown error");
-    }
-
-    // Backward compatibility overload
-    public Response getFunctionVariables(String functionName) {
-        return getFunctionVariables(functionName, null, null, 200, null);
     }
 
     /** Suggest a concrete type for an undefined Ghidra type based on size. */
@@ -2959,7 +2617,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "function_name", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional new name for the function; leave empty to keep the current "
                                + "one. Unlike rename_function this writes the name directly and does NOT "
@@ -2978,17 +2636,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "array (int[4]), resolved like every other tool's type argument. A type "
                                + "that cannot be resolved refuses the whole call before anything is "
                                + "renamed.") String returnType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
+            @Param(value = "program", defaultValue = "") Program program) {
         // Resolve the type before anything is written. It used to be an exact-path lookup
         // that ignored a miss, so "int" or "char*" silently left the return type unchanged
         // while the call reported success.
@@ -3001,19 +2649,13 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
         final DataType finalReturnType = newReturnType;
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicInteger paramsRenamed = new AtomicInteger(0);
-        final AtomicInteger localsRenamed = new AtomicInteger(0);
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
+        record BatchComponentRenameOutcome(int paramsRenamed, int localsRenamed) {}
 
         try {
-            threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
+            BatchComponentRenameOutcome counts = threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
 
-                Function func = program.getFunctionManager().getFunctionAt(addr);
-                if (func == null) {
-                    errorRef.set("No function at address: " + functionAddress);
-                    return null;
-                }
+                int paramsRenamed = 0;
+                int localsRenamed = 0;
 
                 // Rename function
                 if (functionName != null && !functionName.isEmpty()) {
@@ -3027,7 +2669,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         String newName = parameterRenames.get(param.getName());
                         if (newName != null && !newName.isEmpty()) {
                             param.setName(newName, SourceType.USER_DEFINED);
-                            paramsRenamed.incrementAndGet();
+                            paramsRenamed++;
                         }
                     }
                 }
@@ -3039,7 +2681,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         String newName = localRenames.get(local.getName());
                         if (newName != null && !newName.isEmpty()) {
                             local.setName(newName, SourceType.USER_DEFINED);
-                            localsRenamed.incrementAndGet();
+                            localsRenamed++;
                         }
                     }
                 }
@@ -3048,35 +2690,23 @@ Map<String, Object> out = new LinkedHashMap<>();
                     func.setReturnType(finalReturnType, SourceType.USER_DEFINED);
                 }
 
-                success.set(true);
-                return null;
+                return new BatchComponentRenameOutcome(paramsRenamed, localsRenamed);
             });
 
-            if (errorRef.get() != null) {
-                return Response.err(errorRef.get());
-            }
-
-            if (success.get()) {
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "function_renamed", functionName != null,
-                    "parameters_renamed", paramsRenamed.get(),
-                    "locals_renamed", localsRenamed.get()
-                ));
-            }
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "function_renamed", functionName != null,
+                "parameters_renamed", counts.paramsRenamed(),
+                "locals_renamed", counts.localsRenamed()
+            ));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        return Response.err("Unknown failure");
     }
 
-    public Response batchRenameFunctionComponents(String functionAddress, String functionName,
-                                                Map<String, String> parameterRenames,
-                                                Map<String, String> localRenames,
-                                                String returnType) {
-        return batchRenameFunctionComponents(functionAddress, functionName, parameterRenames, localRenames, returnType, null);
-    }
+
 
     // ========================================================================
     // Function creation / deletion
@@ -3093,12 +2723,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address parameter required");
         }
@@ -3107,16 +2732,12 @@ Map<String, Object> out = new LinkedHashMap<>();
         Address addr = ServiceUtils.resolveFunctionAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.executeWrite(program, "Delete function at address", () -> {
+            Map<String, Object> delResult = threadingStrategy.executeWrite(program, "Delete function at address", () -> {
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMsg.set("No function at address: " + addressStr);
-                    return null;
+                    throw new Refusal("No function at address: " + addressStr);
                 }
 
                 String funcName = func.getName();
@@ -3141,33 +2762,22 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                 program.getFunctionManager().removeFunction(addr);
 
-                Map<String, Object> delResult = new LinkedHashMap<>();
-                delResult.put("success", true);
-                delResult.putAll(ServiceUtils.addressToJson(addr, program));
-                delResult.put("deleted_function", funcName);
-                delResult.put("body_size", bodySize);
-                delResult.put("detached_tags", detachedTags);
-                delResult.put("message", "Function '" + funcName + "' deleted at " + addr);
-                resultData.set(delResult);
-                return null;
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("success", true);
+                result.putAll(ServiceUtils.addressToJson(addr, program));
+                result.put("deleted_function", funcName);
+                result.put("body_size", bodySize);
+                result.put("detached_tags", detachedTags);
+                result.put("message", "Function '" + funcName + "' deleted at " + addr);
+                return result;
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(delResult);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return Response.err("Write failed: " + msg);
         }
-
-        if (resultData.get() != null) {
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown failure");
-    }
-
-    public Response deleteFunctionAtAddress(String addressStr) {
-        return deleteFunctionAtAddress(addressStr, null);
     }
 
     /**
@@ -3180,7 +2790,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "",
                    description = "Optional name for the new function; leave empty to keep Ghidra's "
                                + "generated FUN_<address>. Written directly, so the naming-quality gate "
@@ -3190,32 +2800,20 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "instruction exists there, which is what lets you create a function over "
                                + "raw undefined bytes. False requires the address to be disassembled "
                                + "already; function creation fails otherwise.") boolean disassembleFirst,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (addressStr == null || addressStr.isEmpty()) {
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (addr == null) {
             return Response.err("address parameter required");
         }
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
+        
 
         try {
-            threadingStrategy.executeWrite(program, "Create function at address", () -> {
+            Map<String, Object> data = threadingStrategy.executeWrite(program, "Create function at address", () -> {
 
                 // Check if a function already exists at this address
                 Function existing = program.getFunctionManager().getFunctionAt(addr);
                 if (existing != null) {
-                    errorMsg.set("Function already exists at " + addressStr + ": " + existing.getName());
-                    return null;
+                    throw new Refusal("Function already exists at " + addr.toString() + ": " + existing.getName());
                 }
 
                 // Optionally disassemble first
@@ -3225,8 +2823,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                         ghidra.app.cmd.disassemble.DisassembleCommand disCmd =
                             new ghidra.app.cmd.disassemble.DisassembleCommand(addrSet, null, true);
                         if (!disCmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                            errorMsg.set("Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg());
-                            return null;
+                            throw new Refusal("Failed to disassemble at " + addr.toString() + ": " + disCmd.getStatusMsg());
                         }
                     }
                 }
@@ -3235,14 +2832,12 @@ Map<String, Object> out = new LinkedHashMap<>();
                 ghidra.app.cmd.function.CreateFunctionCmd cmd =
                     new ghidra.app.cmd.function.CreateFunctionCmd(addr);
                 if (!cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
-                    errorMsg.set("Failed to create function at " + addressStr + ": " + cmd.getStatusMsg());
-                    return null;
+                    throw new Refusal("Failed to create function at " + addr.toString() + ": " + cmd.getStatusMsg());
                 }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    errorMsg.set("Function creation reported success but function not found at " + addressStr);
-                    return null;
+                    throw new Refusal("Function creation reported success but function not found at " + addr.toString());
                 }
 
                 // Optionally rename the function
@@ -3262,20 +2857,8 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
                 createResult.put("body_size", func.getBody().getNumAddresses());
                 createResult.put("message", "Function created successfully at " + addr);
-                resultData.set(createResult);
-                return null;
+                return createResult;
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
-        } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
-        }
-
-        if (resultData.get() != null) {
-            Map<String, Object> data = resultData.get();
             // Validate function name if one was provided
             if (name != null && !name.isEmpty()) {
                 List<String> nameWarnings = NamingConventions.validateFunctionName(name, false);
@@ -3284,13 +2867,15 @@ Map<String, Object> out = new LinkedHashMap<>();
                 }
             }
             return Response.ok(data);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return Response.err("Write failed: " + msg);
         }
-        return Response.err("Unknown failure");
     }
 
-    public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
-        return createFunctionAtAddress(addressStr, name, disassembleFirst, null);
-    }
+
 
     // ========================================================================
     // Disassembly
@@ -3313,13 +2898,13 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddress,
+                               + "address is unambiguous.") Address start,
             @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String endAddress,
+                               + "address is unambiguous.") Address end,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "0",
                    description = "Number of BYTES to disassemble from start_address, as an alternative to "
                                + "end_address; end_address wins when both are given. 0 (the default) with "
@@ -3334,58 +2919,35 @@ Map<String, Object> out = new LinkedHashMap<>();
                    description = "Return the disassembled instruction list (mnemonic, operands, raw bytes, address) in the response. Disable for byte ranges where you only need the success/byte-count summary.") boolean includeInstructions,
             @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
                    description = "Cap on number of instructions returned when include_instructions is true. Protects against runaway payload for large ranges; if the actual count exceeds this, the response sets truncated=true and instructions_total reports the real count.") int maxInstructions,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (startAddress == null || startAddress.isEmpty()) {
+        if (start == null) {
             return Response.err("start_address parameter required");
         }
 
-        // Resolve addresses before entering SwingUtilities lambda
-        Address start = ServiceUtils.parseAddress(program, startAddress);
-        if (start == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Address parsedEnd = null;
-        if (endAddress != null && !endAddress.isEmpty()) {
-            parsedEnd = ServiceUtils.parseAddress(program, endAddress);
-            if (parsedEnd == null) return Response.err(ServiceUtils.getLastParseError());
-        }
-        final Address resolvedEnd = parsedEnd;
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
+        final Address resolvedEnd = end;
 
         try {
-            Msg.debug(this, "disassembleBytes: Starting disassembly at " + startAddress +
+            Msg.debug(this, "disassembleBytes: Starting disassembly at " + start.toString() +
                      (length != null ? " with length " + length : "") +
-                     (endAddress != null ? " to " + endAddress : ""));
+                     (end != null ? " to " + end.toString() : ""));
 
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Disassemble Bytes");
-                boolean success = false;
-
-                try {
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Disassemble Bytes", () -> {
                     // Determine end address
-                    Address end;
+                    Address rangeEnd;
                     if (resolvedEnd != null) {
                         // Make end address inclusive for AddressSet
                         try {
-                            end = resolvedEnd.subtract(1);
+                            rangeEnd = resolvedEnd.subtract(1);
                         } catch (Exception e) {
-                            errorMsg.set("End address calculation failed: " + e.getMessage());
-                            return;
+                            throw new Refusal("End address calculation failed: " + e.getMessage());
                         }
                     } else if (length != null && length > 0) {
                         // Use length to calculate end address
                         try {
-                            end = start.add(length - 1);
+                            rangeEnd = start.add(length - 1);
                         } catch (Exception e) {
-                            errorMsg.set("End address calculation from length failed: " + e.getMessage());
-                            return;
+                            throw new Refusal("End address calculation from length failed: " + e.getMessage());
                         }
                     } else {
                         // Auto-detect length (scan until we hit existing code/data)
@@ -3416,20 +2978,19 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
 
                         if (count == 0) {
-                            errorMsg.set("No undefined bytes found at address (already disassembled or defined data)");
-                            return;
+                            throw new Refusal("No undefined bytes found at address (already disassembled or defined data)");
                         }
 
-                        // end is now one past the last undefined byte
+                        // rangeEnd is now one past the last undefined byte
                         try {
-                            end = current.subtract(1);
+                            rangeEnd = current.subtract(1);
                         } catch (Exception e) {
-                            end = current;
+                            rangeEnd = current;
                         }
                     }
 
                     // Create address set
-                    AddressSet addressSet = new AddressSet(start, end);
+                    AddressSet addressSet = new AddressSet(start, rangeEnd);
                     long numBytes = addressSet.getNumAddresses();
 
                     // Execute disassembly
@@ -3442,11 +3003,11 @@ Map<String, Object> out = new LinkedHashMap<>();
 
                     if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
                         // Success - build result
-                        Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + end);
+                        Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + rangeEnd);
                         Map<String, Object> result = new java.util.LinkedHashMap<>();
                         result.put("success", true);
                         result.put("start_address", start.toString());
-                        result.put("end_address", end.toString());
+                        result.put("end_address", rangeEnd.toString());
                         result.put("bytes_disassembled", numBytes);
                         result.put("message", "Successfully disassembled " + numBytes + " byte(s)");
 
@@ -3501,59 +3062,25 @@ Map<String, Object> out = new LinkedHashMap<>();
                                 result.put("truncated", false);
                             }
                         }
-                        resultData.set(result);
-                        success = true;
-                    } else {
-                        errorMsg.set("Disassembly failed: " + cmd.getStatusMsg());
-                        Msg.error(this, "disassembleBytes: Disassembly command failed - " + cmd.getStatusMsg());
+                        return result;
                     }
-
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set("Exception during disassembly: " + msg);
-                    Msg.error(this, "disassembleBytes: Exception during disassembly", e);
-                } finally {
-                    tx.end(success);
-                }
+                    throw new Refusal("Disassembly failed: " + cmd.getStatusMsg());
             });
 
-            Msg.debug(this, "disassembleBytes: invokeAndWait completed");
-
-            if (errorMsg.get() != null) {
-                Msg.error(this, "disassembleBytes: Returning error response - " + errorMsg.get());
-                return Response.err(errorMsg.get());
-            }
+            Msg.debug(this, "disassembleBytes: Returning success response");
+            return Response.ok(resultData);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            String msg = ServiceUtils.failureMessage(e);
             Msg.error(this, "disassembleBytes: Exception in outer try block", e);
             return Response.err(msg);
         }
-
-        if (resultData.get() != null) {
-            Msg.debug(this, "disassembleBytes: Returning success response");
-            return Response.ok(resultData.get());
-        }
-        return Response.err("Unknown failure");
     }
 
-    /**
-     * Back-compat overloads for callers that don't care about the
-     * include_instructions / max_instructions options added for issue #205.
-     * Default to the new behavior (instructions included, 1000-instruction cap)
-     * so the headless and registry paths surface the same data as the MCP
-     * endpoint.
-     */
-    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory) {
-        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
-                                true, 1000, null);
-    }
+    
 
-    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory, String programName) {
-        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
-                                true, 1000, programName);
-    }
+
 
     // ========================================================================
     // Clear Flow and Repair
@@ -3567,35 +3094,23 @@ Map<String, Object> out = new LinkedHashMap<>();
     }
 
     @McpTool(path = "/clear_flow_and_repair", method = "POST",
-             description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock (GUI: the Swing thread) until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
+             description = "Run Ghidra's GUI 'Clear Flow and Repair' action on a seed range: clears instruction flow reachable from the seed, then repairs function bodies and re-disassembles retained flow (ClearFlowAndRepairCmd with clear_data=false, clear_labels=false, repair=true). Use to rebuild regions whose flow was created under wrong assumptions, e.g. a function truncated while a callee was incorrectly marked non-returning. The command follows control flow BEYOND the seed range; the reported observations are seed-local only and do not describe everything the command changed. The flow traversal is not cancellable — a very large connected flow can hold the write lock until it completes. Ghidra treats a seed with exactly one candidate flow start (an instruction that is neither a function entry nor reached by fallthrough from inside the seed) as the flow being intentionally removed and does not reseed that start during repair; consequently, applying this action to otherwise healthy flow can clear code, matching the GUI action's behavior. The response's seed_range.end_address_exclusive is null when the seed ends at its address space's maximum address, since that boundary has no representable exclusive successor. Results are reachability-dependent and the command is not idempotent: some damaged regions may require more than one application to rebuild, while applying it again to healthy flow can clear code — inspect the before/after observations and resulting disassembly after every call.",
              category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response clearFlowAndRepair(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
                    description = "Seed start. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000). "
-                               + "Use get_address_spaces first on multi-space programs.") String startAddress,
+                               + "Use get_address_spaces first on multi-space programs.") Address start,
             @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
                    description = "Exclusive seed end (consistent with disassemble_bytes). Must be in the same "
                                + "address space as start_address and strictly greater. Omitted: one-address seed; "
-                               + "the command still follows flow from there like clicking one address in the GUI.") String endAddress,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+                               + "the command still follows flow from there like clicking one address in the GUI.") Address end,
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (startAddress == null || startAddress.isEmpty()) {
+        if (start == null) {
             return Response.err("start_address parameter required");
         }
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        Address start = ServiceUtils.parseAddress(program, startAddress);
-        if (start == null) return Response.err(ServiceUtils.getLastParseError());
-
         Address seedEnd = start;
-        if (endAddress != null && !endAddress.isEmpty()) {
-            Address end = ServiceUtils.parseAddress(program, endAddress);
-            if (end == null) return Response.err(ServiceUtils.getLastParseError());
+        if (end != null) {
             if (!end.getAddressSpace().equals(start.getAddressSpace())) {
                 return Response.err("end_address must be in the same address space as start_address");
             }
@@ -3660,9 +3175,9 @@ Map<String, Object> out = new LinkedHashMap<>();
             });
             return Response.ok(data);
         } catch (ClearFlowFailedException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         } catch (Exception e) {
-            return Response.err(e.getClass().getSimpleName() + ": " + e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3861,7 +3376,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
 @Param(value = "variable_renames", source = ParamSource.BODY,
                    description = "JSON object mapping each variable's CURRENT decompiler name to its new "
                                + "name. Matching happens against the decompiler's high-level symbols, so "
@@ -3875,48 +3390,34 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "whole batch. Use it when the batch path fails or renames the wrong symbol; the "
                                + "response carries \"method\": \"individual\".") boolean forceIndividual,
             
-@Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
+@Param(value = "program", defaultValue = "") Program program) {
         // force_individual asks for exactly the routine the batch path falls back
         // to on failure (line ~3466). Dispatch straight there instead of running
         // the batch attempt first -- otherwise the flag promises "skip batch mode"
         // and delivers batch mode, which is what it did until now.
         if (forceIndividual && variableRenames != null && !variableRenames.isEmpty()) {
-            return batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
+            return batchRenameVariablesIndividual(func, variableRenames, program);
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicInteger variablesRenamed = new AtomicInteger(0);
-        final AtomicInteger variablesFailed = new AtomicInteger(0);
-        final List<String> errors = new ArrayList<>();
-        final List<String> warnings = new ArrayList<>();
-        final AtomicReference<Function> funcRef = new AtomicReference<>(null);
-        final AtomicReference<Response> fallbackResult = new AtomicReference<>(null);
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
+        record BatchRenameOutcome(Response fallback, String error, int renamed, int failed,
+                                  List<String> errors, List<String> warnings) {}
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Rename Variables");
-                // Suppress events during batch operation to prevent re-analysis on each rename
+            BatchRenameOutcome outcome = threadingStrategy.executeWrite(program, "Batch Rename Variables", () -> {
                 WriteTx eventTx = WriteTx.begin(program, "Suppress Events");
                 program.flushEvents();
+                boolean batchSuccess = false;
+                int variablesRenamed = 0;
+                int variablesFailed = 0;
+                List<String> errors = new ArrayList<>();
+                List<String> warnings = new ArrayList<>();
+                Response fallbackResult = null;
+                String errorRef = null;
 
                 try {
 
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    funcRef.set(func);
                     if (func == null) {
-                        errorRef.set("No function at address: " + functionAddress);
-                        return;
+                    throw new Refusal("No function at address");
                     }
 
                     if (variableRenames != null && !variableRenames.isEmpty()) {
@@ -3942,7 +3443,7 @@ Map<String, Object> out = new LinkedHashMap<>();
                                         for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
                                             String newName = entry.getValue();
                                             if (!entry.getKey().equals(newName) && existingNames.contains(newName)) {
-                                                variablesFailed.incrementAndGet();
+                                                variablesFailed++;
                                                 errors.add("Variable name '" + newName + "' already exists in function");
                                             }
                                         }
@@ -3977,14 +3478,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                                         null,
                                                         SourceType.USER_DEFINED
                                                     );
-                                                    variablesRenamed.incrementAndGet();
+                                                    variablesRenamed++;
                                                     renamedVars.add(oldName);
                                                     // Validate Hungarian prefix against type
                                                     String varType = symbol.getDataType().getName();
                                                     String hw = NamingConventions.validateHungarianPrefix(newName, varType);
                                                     if (hw != null) warnings.add(hw);
                                                 } catch (Exception e) {
-                                                    variablesFailed.incrementAndGet();
+                                                    variablesFailed++;
                                                     errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
                                                 }
                                             }
@@ -4000,10 +3501,10 @@ Map<String, Object> out = new LinkedHashMap<>();
                                                 if (newName != null && !newName.isEmpty() && !oldName.equals(newName) && !renamedVars.contains(oldName)) {
                                                     try {
                                                         var.setName(newName, SourceType.USER_DEFINED);
-                                                        variablesRenamed.incrementAndGet();
+                                                        variablesRenamed++;
                                                         renamedVars.add(oldName);
                                                     } catch (Exception e) {
-                                                        variablesFailed.incrementAndGet();
+                                                        variablesFailed++;
                                                         errors.add("Failed to rename storage variable " + oldName + " to " + newName + ": " + e.getMessage());
                                                     }
                                                 }
@@ -4027,100 +3528,149 @@ Map<String, Object> out = new LinkedHashMap<>();
                         }
                     }
 
-                    success.set(true);
+                    batchSuccess = true;
+                } catch (Refusal r) {
+                    throw r;
                 } catch (Exception e) {
                     // If batch operation fails, try individual operations as fallback
                     Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
                     try {
                         // Try individual operations (transactions will be closed in finally)
-                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
-                        fallbackResult.set(individualResult);
+                        fallbackResult = batchRenameVariablesIndividual(func, variableRenames, program);
                     } catch (Exception fallbackE) {
-                        errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
+                        errorRef = "Batch operation failed and fallback also failed: " + ServiceUtils.failureMessage(e);
                         Msg.error(this, "Both batch and individual rename operations failed", e);
                     }
                 } finally {
                     // ALWAYS close transactions — nested transactions must be closed inner-first
-                    eventTx.end(success.get());
+                    eventTx.end(batchSuccess);
                     program.flushEvents();
-                    tx.end(success.get());
-
-                    // Invalidate decompiler cache after successful renames
-                    if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
-                        try {
-                            DecompInterface tempDecomp = null;
-                            try {
-                                tempDecomp = ServiceUtils.createConfiguredDecompiler(program);
-                                tempDecomp.flushCache();
-                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                            } finally {
-                                if (tempDecomp != null) {
-                                    try { tempDecomp.dispose(); } catch (Exception ignored) {}
-                                }
-                            }
-                            Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
-                        } catch (Exception cacheEx) {
-                            Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
-                        }
-                    }
                 }
+                return new BatchRenameOutcome(fallbackResult, errorRef, variablesRenamed, variablesFailed, errors, warnings);
             });
 
-            // Return fallback result if used
-            if (fallbackResult.get() != null) {
-                return fallbackResult.get();
+            if (outcome.fallback() != null) {
+                return outcome.fallback();
             }
 
-            if (errorRef.get() != null) {
-                return Response.err(errorRef.get());
+            if (outcome.error() != null) {
+                return Response.err(outcome.error());
             }
 
-            if (success.get()) {
-                Map<String, Object> resultMap = new LinkedHashMap<>();
-                resultMap.put("success", true);
-                resultMap.put("method", "batch");
-                resultMap.put("variables_renamed", variablesRenamed.get());
-                resultMap.put("variables_failed", variablesFailed.get());
-                if (!errors.isEmpty()) {
-                    resultMap.put("errors", errors);
-                }
-                if (!warnings.isEmpty()) {
-                    resultMap.put("warnings", warnings);
-                }
-                return Response.ok(resultMap);
+            Map<String, Object> resultMap = new LinkedHashMap<>();
+            resultMap.put("success", true);
+            resultMap.put("method", "batch");
+            resultMap.put("variables_renamed", outcome.renamed());
+            resultMap.put("variables_failed", outcome.failed());
+            if (!outcome.errors().isEmpty()) {
+                resultMap.put("errors", outcome.errors());
             }
-
-            return Response.err("Unknown failure");
+            if (!outcome.warnings().isEmpty()) {
+                resultMap.put("warnings", outcome.warnings());
+            }
+            return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
-    public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
-        return batchRenameVariables(functionAddress, variableRenames, forceIndividual, null);
+
+
+    private record StackVariablePlan(int offset, String name, DataType type, Variable target,
+            List<Variable> overlaps, boolean create, boolean nameRequested, boolean typeRequested) {}
+
+    private static boolean stackOverlap(Variable variable, int offset, int length) {
+        return variable.isStackVariable() && (long) variable.getStackOffset() < (long) offset + length
+            && (long) offset < (long) variable.getStackOffset() + variable.getLength();
+    }
+
+    /** Validate the entire interval, not just the byte at the requested offset. */
+    private static StackVariablePlan planStackVariable(Program program, Function func, String key,
+            Map<String, String> spec, List<StackVariablePlan> staged, List<String> warnings)
+            throws InvalidInputException {
+        if (!key.matches("Stack\\[[^\\]]+\\](?::[0-9]+)?")) throw new InvalidInputException("Invalid stack storage: " + key);
+        Integer offset = parseStackOffset(key);
+        if (offset == null) throw new InvalidInputException("Invalid stack offset: " + key);
+        if (func.getStackFrame() == null) throw new InvalidInputException("No stack frame for function");
+        boolean create = Boolean.parseBoolean(spec.get("create"));
+        boolean replace = Boolean.parseBoolean(spec.get("replace"));
+        Variable target = null;
+        for (Variable local : func.getLocalVariables()) {
+            if (local.isStackVariable() && local.getStackOffset() == offset) { target = local; break; }
+        }
+        if (!create && target == null) throw new InvalidInputException("Variable not found: " + key + "; use create:true with name and type");
+        if (replace && !create) throw new InvalidInputException("replace:true requires create:true");
+        String name = spec.get("name");
+        String typeName = spec.get("type");
+        if (create && (name == null || typeName == null)) throw new InvalidInputException("Creating a local requires name and type");
+        if (name == null) name = target.getName();
+        ghidra.program.model.symbol.SymbolUtilities.validateName(name);
+        if (typeName != null && (typeName.startsWith("undefined")
+                || NamingConventions.isUndefinedToUndefined("undefined", typeName))) {
+            throw new InvalidInputException("Rejected: new type '" + typeName + "' is still undefined");
+        }
+        DataType type = typeName == null ? target.getDataType()
+            : ServiceUtils.resolveDataType(program.getDataTypeManager(), typeName);
+        if (type == null || type.getLength() <= 0) throw new InvalidInputException("Unknown or unsized type: " + typeName);
+        long endOffset = (long) offset + type.getLength() - 1;
+        if (endOffset > Integer.MAX_VALUE) throw new InvalidInputException("Stack interval exceeds offset range");
+        // An unoccupied parameter slot is still a parameter slot: createVariable
+        // would insert a parameter there and enable custom storage. Check both ends
+        // before removing locals, including intervals that cross the frame boundary.
+        StackFrame frame = func.getStackFrame();
+        if (frame.isParameterOffset(offset) || frame.isParameterOffset((int) endOffset)) {
+            throw new InvalidInputException("Stack interval enters the parameter region: " + key);
+        }
+        String warning = NamingConventions.validateHungarianPrefix(name, type.getName());
+        if (warning != null) warnings.add(warning);
+        for (Parameter parameter : func.getParameters()) {
+            if (stackOverlap(parameter, offset, type.getLength())) throw new InvalidInputException("Stack storage overlaps parameter " + parameter.getName());
+            if (name.equals(parameter.getName())) throw new InvalidInputException("Variable name already exists: " + name);
+        }
+        List<Variable> overlaps = new ArrayList<>();
+        for (Variable local : func.getLocalVariables()) {
+            boolean overlap = stackOverlap(local, offset, type.getLength());
+            if (overlap && (create || local != target)) {
+                if (!replace) throw new InvalidInputException("Stack storage already occupied; pass create:true, replace:true to replace locals");
+                overlaps.add(local);
+            }
+            if (name.equals(local.getName()) && local != target && !overlaps.contains(local)) {
+                throw new InvalidInputException("Variable name already exists: " + name);
+            }
+        }
+        for (StackVariablePlan plan : staged) {
+            if (name.equals(plan.name()) || ((long) offset < (long) plan.offset() + plan.type().getLength()
+                    && (long) plan.offset() < (long) offset + type.getLength())) {
+                throw new InvalidInputException("Conflicting stack variable requests: " + key);
+            }
+        }
+        return new StackVariablePlan(offset, name, type, target, overlaps, create,
+            spec.containsKey("name"), spec.containsKey("type"));
     }
 
     @McpTool(path = "/set_variables", method = "POST",
-            description = "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. "
-                        + "Hungarian prefix validation is enforced: the new name's prefix must match the type. "
+            description = "Set types and names for multiple variables in a single transaction. Named-variable types are applied before renames. "
+                        + "Stack-local names are validated for naming syntax; Hungarian prefix/type mismatches produce warnings. "
+                        + "Create stack locals using a Stack[-0x8] key and {name,type,create:true,replace:false}. "
+                        + "replace:true replaces overlapping locals after validation. Stack operations are local-only: "
+                        + "intervals entering the parameter region or overlapping parameters are refused, even in empty slots. "
+                        + "Mixed stack/named batches roll back entirely on any named type, rename, or decompilation error. "
                         + "On programs with multiple address spaces, prefix addresses with the space name.",
             category = "function", access = ToolAccess.WRITE)
     public Response setVariables(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                   description = "Function entry point address") String functionAddress,
-            @Param(value = "variables", source = ParamSource.BODY,
+                   description = "Function name or any address within the function (entry point address)") Function func,
+            @Param(value = "variables", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON object mapping old variable names to {name, type} objects. "
                                + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
+                               + "Stack[offset] keys (signed decimal or hex, optional :size) select storage. "
+                               + "For missing locals require name, type, create:true; replace:true permits overlapping locals. "
                                + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
-            @Param(value = "program",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program") Program program) {
 
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        if (func == null) {
+            return Response.err("function is required");
+        }
 
         // Parse the variables JSON into a map of oldName -> {name?, type?}.
         // Tolerant of three worker shapes:
@@ -4157,6 +3707,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                 if (value instanceof Map<?, ?> mapVal) {
                     if (mapVal.containsKey("name")) spec.put("name", String.valueOf(mapVal.get("name")));
                     if (mapVal.containsKey("type")) spec.put("type", String.valueOf(mapVal.get("type")));
+                    for (String flag : List.of("create", "replace")) {
+                        if (mapVal.containsKey(flag)) {
+                            if (!(mapVal.get(flag) instanceof Boolean)) {
+                                return Response.err("variables['" + entry.getKey() + "']." + flag + " must be boolean");
+                            }
+                            spec.put(flag, String.valueOf(mapVal.get(flag)));
+                        }
+                    }
                 } else if (value instanceof String strVal) {
                     // Shape 2: {"local_8": "dwFlags"} — rename-only shorthand.
                     if (!strVal.isEmpty()) spec.put("name", strVal);
@@ -4194,192 +3752,154 @@ Map<String, Object> out = new LinkedHashMap<>();
                 "message", "No variables to set (empty payload)"));
         }
 
-        final AtomicInteger typesSet = new AtomicInteger(0);
-        final AtomicInteger namesSet = new AtomicInteger(0);
-        final AtomicInteger failed = new AtomicInteger(0);
-        final List<String> warnings = new ArrayList<>();
-        final List<String> errors = new ArrayList<>();
-        final AtomicReference<String> errorRef = new AtomicReference<>(null);
-
+        record SetVariablesOutcome(int typesSet, int namesSet, int failed,
+                                   List<String> warnings, List<String> errors) {}
+        SetVariablesOutcome outcome;
+        boolean ambient = program != null && program.getCurrentTransactionInfo() != null;
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Set Variables");
+            outcome = threadingStrategy.executeWrite(program, "Set Variables", () -> {
+                int typesSetLocal = 0;
+                int namesSetLocal = 0;
+                int failedLocal = 0;
+                List<String> warningsLocal = new ArrayList<>();
+                List<String> errorsLocal = new ArrayList<>();
+
+
+                // Stage every storage change before removing anything. Exceptions during
+                // application escape executeWrite so the transaction rolls back in full.
+                List<StackVariablePlan> stackPlans = new ArrayList<>();
                 try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorRef.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    // Phase 1: Set types
                     for (Map.Entry<String, Map<String, String>> entry : variables.entrySet()) {
-                        String oldName = entry.getKey();
-                        String newType = entry.getValue().get("type");
-                        if (newType == null) continue;
-
-                        // Find the variable
-                        Variable target = null;
-                        for (Variable v : func.getLocalVariables()) {
-                            if (v.getName().equals(oldName)) { target = v; break; }
-                        }
-                        if (target == null) {
-                            for (Parameter p : func.getParameters()) {
-                                if (p.getName().equals(oldName)) { target = p; break; }
-                            }
-                        }
-                        if (target == null) {
-                            errors.add("Variable not found: " + oldName);
-                            failed.incrementAndGet();
-                            continue;
-                        }
-
-                        // Reject undefined -> undefined
-                        String oldType = target.getDataType().getName();
-                        if (NamingConventions.isUndefinedToUndefined(oldType, newType)) {
-                            errors.add("Rejected: " + oldName + " type " + oldType + " -> " + newType + " (still undefined)");
-                            failed.incrementAndGet();
-                            continue;
-                        }
-
-                        try {
-                            DataType dt = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
-                            if (dt == null) {
-                                errors.add("Unknown type '" + newType + "' for " + oldName);
-                                failed.incrementAndGet();
-                                continue;
-                            }
-                            target.setDataType(dt, SourceType.USER_DEFINED);
-                            typesSet.incrementAndGet();
-                        } catch (Exception e) {
-                            errors.add("Failed to set type on " + oldName + ": " + e.getMessage());
-                            failed.incrementAndGet();
+                        if (entry.getKey().startsWith("Stack[")) {
+                            stackPlans.add(planStackVariable(program, func, entry.getKey(), entry.getValue(), stackPlans, warningsLocal));
+                        } else if (entry.getValue().containsKey("create") || entry.getValue().containsKey("replace")) {
+                            throw new InvalidInputException("create/replace require a Stack[offset] storage key");
                         }
                     }
-
-                    // Phase 2: Decompile to get fresh SSA variables for renaming
-                    DecompInterface decomp = null;
-                    try {
-                        decomp = ServiceUtils.createConfiguredDecompiler(program);
-                        DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                        if (decompResult == null || !decompResult.decompileCompleted()) {
-                            errors.add("Decompilation failed after type changes; renames skipped");
-                            return;
-                        }
-                        HighFunction highFunction = decompResult.getHighFunction();
-                        if (highFunction == null) {
-                            errors.add("No HighFunction after decompile; renames skipped");
-                            return;
-                        }
-
-                        // Commit params if needed
-                        LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
-                        Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
-                        if (checkSymbols.hasNext()) {
-                            HighSymbol first = checkSymbols.next();
-                            if (checkFullCommit(first, highFunction)) {
-                                HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
-                                        ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
-                            }
-                        }
-
-                        // Phase 3a: Rename via HighSymbol (decompiler-visible variables).
-                        // This is the primary path for SSA temporaries (iVar*, psVar*, etc.)
-                        // and for register-backed parameters/locals.
-                        Set<String> renamedHere = new HashSet<>();
-                        Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
-                        while (symbols.hasNext()) {
-                            HighSymbol symbol = symbols.next();
-                            String currentName = symbol.getName();
-                            Map<String, String> spec = variables.get(currentName);
-                            if (spec == null || !spec.containsKey("name")) continue;
-
-                            String newName = spec.get("name");
-                            if (newName == null || newName.isEmpty() || newName.equals(currentName)) continue;
-
-                            // Validate Hungarian prefix against actual type
-                            String actualType = symbol.getDataType().getName();
-                            String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
-                            if (hungarianWarning != null) {
-                                warnings.add(hungarianWarning);
-                            }
-
-                            try {
-                                HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                                namesSet.incrementAndGet();
-                                renamedHere.add(currentName);
-                            } catch (Exception e) {
-                                errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
-                                failed.incrementAndGet();
-                            }
-                        }
-
-                        // Phase 3b: Storage-based fallback. Stack-frame-only variables
-                        // (local_4, local_148, etc.) are not promoted to HighSymbol
-                        // form — they live only in func.getAllVariables(). Without
-                        // this fallback, a worker calling set_variables with
-                        // {local_4: {name: nStackDepth, ...}} sees types_set++ but
-                        // names_set silently stays at zero, then fails subsequent
-                        // calls with "Variable not found: nStackDepth".
-                        try {
-                            for (Variable lowVar : func.getAllVariables()) {
-                                String oldName = lowVar.getName();
-                                if (renamedHere.contains(oldName)) continue;
-                                Map<String, String> spec = variables.get(oldName);
-                                if (spec == null || !spec.containsKey("name")) continue;
-                                String newName = spec.get("name");
-                                if (newName == null || newName.isEmpty() || newName.equals(oldName)) continue;
-                                try {
-                                    lowVar.setName(newName, SourceType.USER_DEFINED);
-                                    namesSet.incrementAndGet();
-                                    renamedHere.add(oldName);
-                                } catch (Exception e) {
-                                    errors.add("Failed to rename storage variable " + oldName + " -> " + newName + ": " + e.getMessage());
-                                    failed.incrementAndGet();
-                                }
-                            }
-                        } catch (Exception e) {
-                            Msg.warn(this, "set_variables storage-rename fallback encountered error: " + e.getMessage());
-                        }
-
-                        // Phase 3c: Caller-visibility — surface any rename specs
-                        // that matched neither path so workers can tell at a
-                        // glance that part of their request didn't apply.
-                        for (Map.Entry<String, Map<String, String>> e : variables.entrySet()) {
-                            String oldName = e.getKey();
-                            Map<String, String> spec = e.getValue();
-                            if (!spec.containsKey("name")) continue;
-                            String requestedNew = spec.get("name");
-                            if (requestedNew == null || requestedNew.isEmpty() || requestedNew.equals(oldName)) continue;
-                            if (!renamedHere.contains(oldName)) {
-                                errors.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
-                                        + "name unchanged. Re-fetch with get_functions(fields=parameters,locals) before retrying.");
-                                failed.incrementAndGet();
-                            }
-                        }
-                    } finally {
-                        if (decomp != null) {
-                            try { decomp.dispose(); } catch (Exception ignored) {}
-                        }
-                    }
-                } catch (Exception e) {
-                    errorRef.set(e.getMessage());
-                } finally {
-                    tx.end(errorRef.get() == null);
+                } catch (InvalidInputException e) {
+                    return new SetVariablesOutcome(0, 0, 1, warningsLocal, List.of(e.getMessage()));
                 }
+                Map<String, Map<String, String>> named = new LinkedHashMap<>(variables);
+                named.keySet().removeIf(key -> key.startsWith("Stack["));
+                Variable[] originalVariables = named.isEmpty() ? new Variable[0] : func.getAllVariables();
+                for (StackVariablePlan plan : stackPlans) {
+                    for (Variable overlap : plan.overlaps()) func.removeVariable(overlap);
+                    if (plan.create()) {
+                        Variable created = func.getStackFrame().createVariable(plan.name(), plan.offset(), plan.type(), SourceType.USER_DEFINED);
+                        if (created == null) throw new InvalidInputException("Could not create local " + plan.name());
+                    } else {
+                        if (plan.typeRequested()) plan.target().setDataType(plan.type(), SourceType.USER_DEFINED);
+                        if (plan.nameRequested()) plan.target().setName(plan.name(), SourceType.USER_DEFINED);
+                    }
+                    if (plan.typeRequested()) typesSetLocal++;
+                    if (plan.nameRequested()) namesSetLocal++;
+                }
+                // Resolve names against ONE original recovered view. Re-decompiling
+                // between typing and naming can invalidate the caller's SSA names.
+                if (!named.isEmpty()) {
+                    Map<String, HighSymbol> highTargets = new LinkedHashMap<>();
+                    Map<String, Variable> lowTargets = new LinkedHashMap<>();
+                    Map<String, DataType> types = new LinkedHashMap<>();
+                    Map<String, String> names = new LinkedHashMap<>();
+                    HighFunction original = null;
+                    boolean originalRequested = false;
+                    for (var entry : named.entrySet()) {
+                        String oldName = entry.getKey();
+                        var spec = entry.getValue();
+                        String desired = spec.get("name");
+                        names.put(oldName, desired == null || desired.isEmpty() ? oldName : desired);
+                        for (Variable local : originalVariables) {
+                            if (local.getName().equals(oldName)) { lowTargets.put(oldName, local); break; }
+                        }
+                        if (!lowTargets.containsKey(oldName)) {
+                            // Decompile only when a name has no existing DB variable.
+                            // Entirely storage-backed batches need no decompilation at all.
+                            if (!originalRequested) {
+                                original = freshVariableView(func, program);
+                                originalRequested = true;
+                            }
+                            HighSymbol symbol = original == null ? null : findSymbolByName(original, oldName);
+                            if (symbol != null) highTargets.put(oldName, symbol);
+                            else throw new Refusal("Variable not found in original view: " + oldName);
+                        }
+                        String requested = spec.get("type");
+                        if (requested != null) {
+                            // Refuse only undefined -> undefined, the no-op this guard exists
+                            // for. A defined variable may still be given an undefinedN type
+                            // (int -> undefined4) or an undefined pointer (undefined *).
+                            Variable lowTarget = lowTargets.get(oldName);
+                            DataType currentType = lowTarget != null
+                                    ? lowTarget.getDataType()
+                                    : highTargets.get(oldName).getDataType();
+                            String oldType = currentType == null ? null : currentType.getName();
+                            if (NamingConventions.isUndefinedToUndefined(oldType, requested)) {
+                                throw new Refusal("Rejected: " + oldName + " type " + oldType
+                                        + " -> " + requested + " (still undefined)");
+                            }
+                            DataType type = ServiceUtils.resolveDataType(program.getDataTypeManager(), requested);
+                            if (type == null) throw new Refusal("Unknown type '" + requested + "' for " + oldName);
+                            type = type.clone(program.getDataTypeManager());
+                            String error = validateVariableTypeRequest(requested, type);
+                            if (error != null) throw new Refusal(error);
+                            types.put(oldName, type);
+                        }
+                    }
+                    for (String oldName : named.keySet()) {
+                        String newName = names.get(oldName);
+                        DataType type = types.get(oldName);
+                        boolean rename = !newName.equals(oldName);
+                        if (type == null && !rename) continue;
+                        HighSymbol symbol = highTargets.get(oldName);
+                        DataType actualType;
+                        if (symbol != null) {
+                            actualType = type != null ? type : symbol.getDataType();
+                            HighFunctionDBUtil.updateDBVariable(symbol, rename ? newName : null,
+                                type, SourceType.USER_DEFINED);
+                        } else {
+                            Variable target = lowTargets.get(oldName);
+                            if (type != null) target.setDataType(type, SourceType.USER_DEFINED);
+                            if (rename) target.setName(newName, SourceType.USER_DEFINED);
+                            actualType = target.getDataType();
+                        }
+                        if (type != null) typesSetLocal++;
+                        if (rename) {
+                            namesSetLocal++;
+                            String warning = NamingConventions.validateHungarianPrefix(newName, actualType.getName());
+                            if (warning != null) warningsLocal.add(warning);
+                        }
+                    }
+                    for (String oldName : named.keySet()) {
+                        String newName = names.get(oldName);
+                        DataType type = types.get(oldName);
+                        if (type == null && newName.equals(oldName)) continue;
+                        if (highTargets.containsKey(oldName)) {
+                            String error = verifyPersistedVariableUpdate(
+                                highTargets.get(oldName), newName, type);
+                            if (error != null) throw new Refusal(error);
+                        } else {
+                            Variable target = lowTargets.get(oldName);
+                            if (!newName.equals(target.getName())
+                                    || (type != null && !variableTypesMatch(type, target.getDataType()))) {
+                                throw new Refusal("Storage variable did not read back as requested: " + newName);
+                            }
+                        }
+                    }
+                }
+                return new SetVariablesOutcome(typesSetLocal, namesSetLocal, failedLocal, warningsLocal, errorsLocal);
             });
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.err(ServiceUtils.failureMessage(e) + (ambient
+                ? " The surrounding transaction owns any partial changes; they were not rolled back here."
+                : " Variable batch rolled back."));
         }
 
-        if (errorRef.get() != null) return Response.err(errorRef.get());
-
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("types_set", typesSet.get());
-        result.put("names_set", namesSet.get());
-        result.put("failed", failed.get());
-        if (!warnings.isEmpty()) result.put("warnings", warnings);
-        if (!errors.isEmpty()) result.put("errors", errors);
+        result.put("success", outcome.failed() == 0 && outcome.errors().isEmpty());
+        result.put("types_set", outcome.typesSet());
+        result.put("names_set", outcome.namesSet());
+        result.put("failed", outcome.failed());
+        if (!outcome.warnings().isEmpty()) result.put("warnings", outcome.warnings());
+        if (!outcome.errors().isEmpty()) result.put("errors", outcome.errors());
         return Response.ok(result);
     }
 
@@ -4387,38 +3907,12 @@ Map<String, Object> out = new LinkedHashMap<>();
      * Individual variable renaming using HighFunctionDBUtil (fallback method).
      * This method uses decompilation but is more reliable for persistence.
      */
-    public Response batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicInteger variablesRenamed = new AtomicInteger(0);
-        final AtomicInteger variablesFailed = new AtomicInteger(0);
+    public Response batchRenameVariablesIndividual(Function func, Map<String, String> variableRenames, Program program) {
+        int variablesRenamed = 0;
+        int variablesFailed = 0;
         final List<String> errors = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
-
-        // Get function name for individual operations
-        final String[] functionName = new String[1];
-        try {
-            threadingStrategy.runOnUi(() -> {
-                if (addr != null) {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func != null) {
-                        functionName[0] = func.getName();
-                    }
-                }
-            });
-        } catch (Exception e) {
-            return Response.err("Failed to get function name: " + e.getMessage());
-        }
-
-        if (functionName[0] == null) {
-            return Response.err("Could not find function at address: " + functionAddress);
-        }
+        final String functionName = func.getName();
 
         // Process each variable individually using the reliable method
         for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
@@ -4426,7 +3920,7 @@ Map<String, Object> out = new LinkedHashMap<>();
             String newName = entry.getValue();
 
             try {
-                Response renameResult = renameVariableInFunction(functionName[0], oldName, newName, programName);
+                Response renameResult = renameVariableInFunction(functionName, null, oldName, newName, program);
                 // Inspect the Response, do NOT string-compare its serialized form.
                 // renameVariableInFunction returns Response.success("Variable
                 // renamed"), whose toJson() is {"status":"success","message":
@@ -4436,15 +3930,15 @@ Map<String, Object> out = new LinkedHashMap<>();
                 // comparison was written against the pre-Response raw-text
                 // contract and was not updated when that contract changed.
                 if (isVariableRenameSuccess(renameResult)) {
-                    variablesRenamed.incrementAndGet();
+                    variablesRenamed++;
                     collectRenameWarnings(renameResult, oldName, warnings);
                 } else {
-                    variablesFailed.incrementAndGet();
+                    variablesFailed++;
                     errors.add("Failed to rename '" + oldName + "' to '" + newName + "': "
                         + renameResult.toJson());
                 }
             } catch (Exception e) {
-                variablesFailed.incrementAndGet();
+                variablesFailed++;
                 errors.add("Exception renaming '" + oldName + "' to '" + newName + "': " + e.getMessage());
             }
         }
@@ -4452,10 +3946,10 @@ Map<String, Object> out = new LinkedHashMap<>();
         Map<String, Object> resultMap = new LinkedHashMap<>();
         // "success" must reflect what actually happened. Hardcoding true meant a
         // run in which every rename failed still reported success.
-        resultMap.put("success", variablesFailed.get() == 0);
+        resultMap.put("success", variablesFailed == 0);
         resultMap.put("method", "individual");
-        resultMap.put("variables_renamed", variablesRenamed.get());
-        resultMap.put("variables_failed", variablesFailed.get());
+        resultMap.put("variables_renamed", variablesRenamed);
+        resultMap.put("variables_failed", variablesFailed);
         if (!warnings.isEmpty()) {
             resultMap.put("warnings", warnings);
         }
@@ -4467,9 +3961,7 @@ Map<String, Object> out = new LinkedHashMap<>();
 
     /**
      * True if a {@link #renameVariableInFunction} response reports a completed
-     * rename. Both of its success shapes are accepted: the plain
-     * {@code Response.success("Variable renamed")} envelope and the map form
-     * carrying Hungarian-notation warnings.
+     * rename. {@code warnings} is present only when non-empty.
      *
      * @param response the response returned by renameVariableInFunction
      * @return whether the rename succeeded
@@ -4498,9 +3990,7 @@ Map<String, Object> out = new LinkedHashMap<>();
         }
     }
 
-    public Response batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
-        return batchRenameVariablesIndividual(functionAddress, variableRenames, null);
-    }
+    
 
     // ========================================================================
     // Function tag methods
@@ -4521,22 +4011,12 @@ Map<String, Object> out = new LinkedHashMap<>();
         return m;
     }
 
-    private static List<String> splitTagList(String raw) {
-        List<String> out = new ArrayList<>();
-        if (raw == null) return out;
-        for (String part : raw.split(",")) {
-            String t = part.trim();
-            if (!t.isEmpty()) out.add(t);
-        }
-        return out;
-    }
-
     @McpTool(path = "/add_function_tag", method = "POST",
              description = "Attach tags to ONE function (function + tags) OR MANY in one transaction (assignments=[{function,tags}, ...]). Tags are comma-separated and created on the fly (give a new tag a description with tag_comments). Replaces batch_add_function_tags and create_function_tag.",
              category = "function", access = ToolAccess.WRITE)
     public Response addFunctionTag(
             @Param(value = "function", source = ParamSource.BODY, paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
+                   description = "Function address or name (single mode). Omit when using assignments[].") Function func,
             @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated tag names to attach (single mode).") String tagsCsv,
             @Param(value = "tag_comments", source = ParamSource.BODY,
@@ -4545,22 +4025,14 @@ Map<String, Object> out = new LinkedHashMap<>();
                                + "(change one with set_function_tag_comment).") Map<String, String> tagComments,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (assignments != null && !assignments.isEmpty()) {
-            return batchAddFunctionTags(assignments, tagComments, programName);
+            return batchAddFunctionTags(assignments, tagComments, program);
         }
-        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required (or pass assignments[] for bulk)");
-        List<String> tagNames = splitTagList(tagsCsv);
+        if (func == null) return Response.err("function is required (or pass assignments[] for bulk)");
+        List<String> tagNames = ServiceUtils.csvTokens(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
-        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (funcLookup.hasError()) return funcLookup.error();
-        Function func = funcLookup.function();
 List<String> added = new ArrayList<>();
         List<String> alreadyPresent = new ArrayList<>();
         List<String> created = new ArrayList<>();
@@ -4572,7 +4044,7 @@ List<String> added = new ArrayList<>();
             program.flushEvents();
         } catch (Exception e) {
             Msg.error(this, "Failed to add function tag(s)", e);
-            return Response.err("Failed to add tag(s): " + e.getMessage());
+            return ServiceUtils.fail("add tag(s)", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -4613,27 +4085,19 @@ List<String> added = new ArrayList<>();
              category = "function", access = ToolAccess.DESTRUCTIVE)
     public Response removeFunctionTag(
             @Param(value = "function", source = ParamSource.BODY, paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function address or name (single mode). Omit when using assignments[].") String functionRef,
+                   description = "Function address or name (single mode). Omit when using assignments[].") Function func,
             @Param(value = "tags", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated tag names to detach (single mode).") String tagsCsv,
             @Param(value = "assignments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "Bulk mode: array of {function, tags} objects. When non-empty, function/tags are ignored.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (assignments != null && !assignments.isEmpty()) {
-            return batchRemoveFunctionTags(assignments, programName);
+            return batchRemoveFunctionTags(assignments, program);
         }
-        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required (or pass assignments[] for bulk)");
-        List<String> tagNames = splitTagList(tagsCsv);
+        if (func == null) return Response.err("function is required (or pass assignments[] for bulk)");
+        List<String> tagNames = ServiceUtils.csvTokens(tagsCsv);
         if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
 
-        ServiceUtils.FunctionOrError funcLookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (funcLookup.hasError()) return funcLookup.error();
-        Function func = funcLookup.function();
 Set<String> currentBefore = new HashSet<>();
         for (FunctionTag t : func.getTags()) currentBefore.add(t.getName());
 
@@ -4654,7 +4118,7 @@ Set<String> currentBefore = new HashSet<>();
             program.flushEvents();
         } catch (Exception e) {
             Msg.error(this, "Failed to remove function tag(s)", e);
-            return Response.err("Failed to remove tag(s): " + e.getMessage());
+            return ServiceUtils.fail("remove tag(s)", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -4673,14 +4137,9 @@ Set<String> currentBefore = new HashSet<>();
                    description = "Number of tag definitions to skip before this page starts; 0 begins at "
                                + "the first. Negative values are clamped to 0.") int offset,
             @Param(value = "limit", defaultValue = "500",
-                   description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+                   description = "Maximum number of tags to return (default 500, which covers most programs in full). "
+                               + "0 or less: no limit.") int limit,
+            @Param(value = "program", defaultValue = "") Program program) {
         FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
         List<? extends FunctionTag> all = mgr.getAllFunctionTags();
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -4688,16 +4147,7 @@ Set<String> currentBefore = new HashSet<>();
             rows.add(serializeTag(tag, mgr.getUseCount(tag)));
         }
         rows.sort(Comparator.comparing(m -> ((String) m.get("name"))));
-
-        int total = rows.size();
-        int from = Math.max(0, offset);
-        int to = Math.min(total, from + Math.max(0, limit));
-        List<Map<String, Object>> page = from < to ? rows.subList(from, to) : List.of();
-        return Response.ok(JsonHelper.mapOf(
-                "total", total,
-                "offset", from,
-                "limit", limit,
-                "tags", page));
+        return ServiceUtils.paged("tags", rows, offset, limit);
     }
 
     @McpTool(path = "/delete_function_tag", method = "POST",
@@ -4706,12 +4156,7 @@ Set<String> currentBefore = new HashSet<>();
     public Response deleteFunctionTag(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "Tag name to delete program-wide") String name,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
 
         FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
@@ -4727,7 +4172,7 @@ Set<String> currentBefore = new HashSet<>();
             program.flushEvents();
         } catch (Exception e) {
             Msg.error(this, "Failed to delete function tag", e);
-            return Response.err("Failed to delete tag: " + e.getMessage());
+            return ServiceUtils.fail("delete tag", e);
         }
         return Response.ok(JsonHelper.mapOf(
                 "status", "success",
@@ -4743,12 +4188,7 @@ Set<String> currentBefore = new HashSet<>();
                    description = "Tag name") String name,
             @Param(value = "comment", source = ParamSource.BODY,
                    description = "New comment text (pass an empty string to clear)") String comment,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
 
         FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
@@ -4764,7 +4204,7 @@ Set<String> currentBefore = new HashSet<>();
             program.flushEvents();
         } catch (Exception e) {
             Msg.error(this, "Failed to update tag comment", e);
-            return Response.err("Failed to update comment: " + e.getMessage());
+            return ServiceUtils.fail("update comment", e);
         }
         return Response.ok(JsonHelper.mapOf(
                 "status", "success",
@@ -4777,19 +4217,15 @@ Set<String> currentBefore = new HashSet<>();
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
             Map<String, String> tagComments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
 
-        List<Map<String, Object>> results = new ArrayList<>();
-        AtomicInteger tagsAdded = new AtomicInteger(0);
-        AtomicInteger funcsTouched = new AtomicInteger(0);
+        record TagAddCounts(int tagsAdded, int funcsTouched, List<Map<String, Object>> results) {}
         try {
-            threadingStrategy.executeWrite(program, "Batch add function tags via HTTP", () -> {
+            TagAddCounts counts = threadingStrategy.executeWrite(program, "Batch add function tags via HTTP", () -> {
+                List<Map<String, Object>> results = new ArrayList<>();
+                int tagsAdded = 0;
+                int funcsTouched = 0;
                 for (Map<String, String> entry : assignments) {
                     String ref = entry.get("function");
                     String tagsCsv = entry.get("tags");
@@ -4809,7 +4245,7 @@ Set<String> currentBefore = new HashSet<>();
                         continue;
                     }
                     Function func = lookup.function();
-                    List<String> names = splitTagList(tagsCsv);
+                    List<String> names = ServiceUtils.csvTokens(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");
                         row.put("error", "missing/empty tags field");
@@ -4820,8 +4256,8 @@ Set<String> currentBefore = new HashSet<>();
                     List<String> already = new ArrayList<>();
                     List<String> made = new ArrayList<>();
                     attachTags(func, names, tagComments, added, already, made);
-                    tagsAdded.addAndGet(added.size());
-                    if (!added.isEmpty()) funcsTouched.incrementAndGet();
+                    tagsAdded += added.size();
+                    if (!added.isEmpty()) funcsTouched++;
                     row.put("status", "success");
                     row.put("address", func.getEntryPoint().toString());
                     row.put("added", added);
@@ -4829,18 +4265,18 @@ Set<String> currentBefore = new HashSet<>();
                     row.put("created", made);
                     results.add(row);
                 }
-                return null;
+                return new TagAddCounts(tagsAdded, funcsTouched, results);
             });
             program.flushEvents();
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "functions_touched", counts.funcsTouched(),
+                    "tags_added", counts.tagsAdded(),
+                    "results", counts.results()));
         } catch (Exception e) {
             Msg.error(this, "Batch add function tags failed", e);
-            return Response.err("Batch failed: " + e.getMessage());
+            return ServiceUtils.fail("Batch", e);
         }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "functions_touched", funcsTouched.get(),
-                "tags_added", tagsAdded.get(),
-                "results", results));
     }
 
     // Bulk helper for remove_function_tag(assignments=[...]). Merged into remove_function_tag
@@ -4848,19 +4284,15 @@ Set<String> currentBefore = new HashSet<>();
     public Response batchRemoveFunctionTags(
             @Param(value = "assignments", source = ParamSource.BODY,
                    description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
 
-        List<Map<String, Object>> results = new ArrayList<>();
-        AtomicInteger tagsRemoved = new AtomicInteger(0);
-        AtomicInteger funcsTouched = new AtomicInteger(0);
+        record TagRemoveCounts(int tagsRemoved, int funcsTouched, List<Map<String, Object>> results) {}
         try {
-            threadingStrategy.executeWrite(program, "Batch remove function tags via HTTP", () -> {
+            TagRemoveCounts counts = threadingStrategy.executeWrite(program, "Batch remove function tags via HTTP", () -> {
+                List<Map<String, Object>> results = new ArrayList<>();
+                int tagsRemoved = 0;
+                int funcsTouched = 0;
                 for (Map<String, String> entry : assignments) {
                     String ref = entry.get("function");
                     String tagsCsv = entry.get("tags");
@@ -4880,7 +4312,7 @@ Set<String> currentBefore = new HashSet<>();
                         continue;
                     }
                     Function func = lookup.function();
-                    List<String> names = splitTagList(tagsCsv);
+                    List<String> names = ServiceUtils.csvTokens(tagsCsv);
                     if (names.isEmpty()) {
                         row.put("status", "error");
                         row.put("error", "missing/empty tags field");
@@ -4899,25 +4331,25 @@ Set<String> currentBefore = new HashSet<>();
                             notPresent.add(n);
                         }
                     }
-                    tagsRemoved.addAndGet(removed.size());
-                    if (!removed.isEmpty()) funcsTouched.incrementAndGet();
+                    tagsRemoved += removed.size();
+                    if (!removed.isEmpty()) funcsTouched++;
                     row.put("status", "success");
                     row.put("address", func.getEntryPoint().toString());
                     row.put("removed", removed);
                     row.put("not_present", notPresent);
                     results.add(row);
                 }
-                return null;
+                return new TagRemoveCounts(tagsRemoved, funcsTouched, results);
             });
             program.flushEvents();
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "functions_touched", counts.funcsTouched(),
+                    "tags_removed", counts.tagsRemoved(),
+                    "results", counts.results()));
         } catch (Exception e) {
             Msg.error(this, "Batch remove function tags failed", e);
-            return Response.err("Batch failed: " + e.getMessage());
+            return ServiceUtils.fail("Batch", e);
         }
-        return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "functions_touched", funcsTouched.get(),
-                "tags_removed", tagsRemoved.get(),
-                "results", results));
     }
 }

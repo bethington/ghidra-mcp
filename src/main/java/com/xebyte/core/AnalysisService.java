@@ -36,10 +36,8 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
-import javax.swing.SwingUtilities;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -197,11 +195,7 @@ public class AnalysisService {
 
     @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response listAnalyzers(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
             List<String> names = options.getOptionNames();
@@ -214,9 +208,9 @@ public class AnalysisService {
                     // Not a boolean option -- skip non-analyzer properties
                 }
             }
-            return Response.ok(JsonHelper.mapOf("analyzers", entries, "count", entries.size()));
+            return ServiceUtils.listed("analyzers", entries);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -235,16 +229,10 @@ public class AnalysisService {
                    description = "Analyzer name exactly as Ghidra registers it, e.g. Decompiler Parameter ID.") String analyzerName,
             @Param(value = "enabled", source = ParamSource.BODY, defaultValue = "",
                    description = "True enables the analyzer, false disables it. Omitting it leaves the current setting alone and only reports it.") Boolean enabled,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (analyzerName == null || analyzerName.isBlank()) {
             return Response.err("name is required");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
         if (!options.contains(analyzerName)) {
             return Response.err("Analyzer not found: " + analyzerName
@@ -263,7 +251,7 @@ public class AnalysisService {
                 "enabled", options.getBoolean(analyzerName, false),
                 "changed", enabled != null));
         } catch (Exception e) {
-            return Response.err("Failed to configure analyzer: " + e.getMessage());
+            return ServiceUtils.fail("configure analyzer", e);
         }
     }
 
@@ -272,13 +260,7 @@ public class AnalysisService {
      */
     @McpTool(path = "/run_analysis", dryRun = false, method = "POST", description = "Trigger auto-analysis on program", category = "analysis", access = ToolAccess.WRITE)
     public Response runAnalysis(
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             long start = System.currentTimeMillis();
             int before = program.getFunctionManager().getFunctionCount();
@@ -305,15 +287,11 @@ public class AnalysisService {
                 "program", program.getName()
             ));
         } catch (Exception e) {
-            return Response.err("Analysis failed: " + e.getMessage());
+            return ServiceUtils.fail("Analysis", e);
         }
     }
 
-    public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap,
-                                    boolean includeBoundaryDetection) {
-        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeBoundaryDetection, null);
-    }
+
 
     @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response analyzeDataRegion(
@@ -322,7 +300,7 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddressStr,
+                               + "address is unambiguous.") Address startAddr,
 @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024",
                    description = "How many BYTES forward from `address` to walk while collecting "
                                + "references and hunting the next named symbol (default 1024). String "
@@ -340,17 +318,9 @@ public class AnalysisService {
                                + "is not a DAT_ autogen, so the region ends where the next documented global "
                                + "begins. False scans the full max_scan_bytes whatever symbols it "
                                + "crosses.") boolean includeBoundaryDetection,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
-            Address startAddr = ServiceUtils.parseAddress(program, startAddressStr);
-            if (startAddr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             ReferenceManager refMgr = program.getReferenceManager();
             Listing listing = program.getListing();
 
@@ -489,17 +459,15 @@ public class AnalysisService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
+
+    
 
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public Response detectArrayBounds(String addressStr, int maxScanRange) {
-        return detectArrayBounds(addressStr, maxScanRange, null);
-    }
-
     @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.WRITE)
     public Response detectArrayBounds(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
@@ -507,21 +475,13 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
 @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048",
                    description = "How many BYTES forward from `address` to scan for references while "
                                + "estimating the array's extent (default 2048).") int maxScanRange,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             ReferenceManager refMgr = program.getReferenceManager();
 
             // Scan for xrefs to detect array bounds
@@ -556,17 +516,15 @@ public class AnalysisService {
             arrayResult.put("detection_method", "xref_analysis");
             return Response.ok(arrayResult);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
+
+    
 
     /**
      * GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
      */
-    public Response getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
-        return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
-    }
-
     @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFieldAccessContext(
             @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
@@ -574,14 +532,14 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String structAddressStr,
+                               + "address is unambiguous.") Address structAddr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0",
                    description = "BYTE offset of the field inside the struct at struct_address; context is "
                                + "gathered at struct_address + this. Must be 0 to 65536.") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5",
                    description = "How many referencing sites to report: 1 to 50, default 5. A value "
                                + "outside that range is REJECTED, not clamped.") int numExamples,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -590,90 +548,69 @@ public class AnalysisService {
             return Response.err("numExamples must be between 1 and " + MAX_FIELD_EXAMPLES);
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program resolvedProgram = pe.program();
 
-        // Resolve address before entering SwingUtilities lambda
-        Address structAddr = ServiceUtils.parseAddress(resolvedProgram, structAddressStr);
-        if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
-        final AtomicReference<Response> result = new AtomicReference<>();
-
-        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    Program program = resolvedProgram;
 
-                    // Calculate field address with overflow protection
-                    Address fieldAddr;
-                    try {
-                        fieldAddr = structAddr.add(fieldOffset);
-                    } catch (Exception e) {
-                        result.set(Response.err("Field offset overflow: " + fieldOffset));
-                        return;
-                    }
+            // Calculate field address with overflow protection
+            Address fieldAddr;
+            try {
+                fieldAddr = structAddr.add(fieldOffset);
+            } catch (Exception e) {
+                return Response.err("Field offset overflow: " + fieldOffset);
+            }
 
-                    Msg.info(this, "Getting field access context for " + fieldAddr + " (offset " + fieldOffset + ")");
+            Msg.info(this, "Getting field access context for " + fieldAddr + " (offset " + fieldOffset + ")");
 
-                    // Get xrefs to the field address (or nearby addresses)
-                    ReferenceManager refMgr = program.getReferenceManager();
-                    ReferenceIterator refIter = refMgr.getReferencesTo(fieldAddr);
+            // Get xrefs to the field address (or nearby addresses)
+            ReferenceManager refMgr = program.getReferenceManager();
+            ReferenceIterator refIter = refMgr.getReferencesTo(fieldAddr);
 
-                    List<Map<String, Object>> examples = new ArrayList<>();
-                    int exampleCount = 0;
+            List<Map<String, Object>> examples = new ArrayList<>();
+            int exampleCount = 0;
 
-                    while (refIter.hasNext() && exampleCount < numExamples) {
-                        Reference ref = refIter.next();
-                        Address fromAddr = ref.getFromAddress();
+            while (refIter.hasNext() && exampleCount < numExamples) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
 
-                        Map<String, Object> example = new LinkedHashMap<>();
-                        example.put("access_address", fromAddr.toString());
-                        example.put("ref_type", ref.getReferenceType().getName());
+                Map<String, Object> example = new LinkedHashMap<>();
+                example.put("access_address", fromAddr.toString());
+                example.put("ref_type", ref.getReferenceType().getName());
 
-                        // Get assembly context with null check
-                        Listing listing = program.getListing();
-                        Instruction instr = listing.getInstructionAt(fromAddr);
-                        example.put("assembly", instr != null ? instr.toString() : "");
+                // Get assembly context with null check
+                Listing listing = program.getListing();
+                Instruction instr = listing.getInstructionAt(fromAddr);
+                example.put("assembly", instr != null ? instr.toString() : "");
 
-                        // Get function context with null check
-                        Function func = program.getFunctionManager().getFunctionContaining(fromAddr);
-                        example.put("function_name", func != null ? func.getName() : "");
-                        example.put("function_address", func != null ? func.getEntryPoint().toString() : "");
+                // Get function context with null check
+                Function func = program.getFunctionManager().getFunctionContaining(fromAddr);
+                example.put("function_name", func != null ? func.getName() : "");
+                example.put("function_address", func != null ? func.getEntryPoint().toString() : "");
 
-                        examples.add(example);
-                        exampleCount++;
-                    }
+                examples.add(example);
+                exampleCount++;
+            }
 
-                    Msg.info(this, "Found " + exampleCount + " field access examples");
-                    result.set(Response.ok(JsonHelper.mapOf(
-                        "struct_address", structAddressStr,
-                        "field_offset", fieldOffset,
-                        "field_address", fieldAddr.toString(),
-                        "examples", examples
-                    )));
+            Msg.info(this, "Found " + exampleCount + " field access examples");
+            return Response.ok(JsonHelper.mapOf(
+                "struct_address", structAddr.toString(),
+                "field_offset", fieldOffset,
+                "field_address", fieldAddr.toString(),
+                "examples", examples
+            ));
 
-                } catch (Exception e) {
-                    Msg.error(this, "Error in getFieldAccessContext", e);
-                    result.set(Response.err(e.getMessage()));
-                }
-            });
         } catch (Exception e) {
-            Msg.error(this, "Thread synchronization error in getFieldAccessContext", e);
-            return Response.err("Thread synchronization error: " + e.getMessage());
+            Msg.error(this, "Error in getFieldAccessContext", e);
+            return ServiceUtils.fail(e);
         }
-
-        return result.get();
     }
+
+    
 
     /**
      * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
      */
-    public Response inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
-        return inspectMemoryContent(addressStr, length, detectStrings, null);
-    }
-
     @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response inspectMemoryContent(
             @Param(value = "address", paramType = "address",
@@ -681,20 +618,12 @@ public class AnalysisService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             Memory memory = program.getMemory();
             int MAX_READ_BYTES = 16 * 1024 * 1024; // 16 MB safety limit
             if (length <= 0 || length > MAX_READ_BYTES) {
@@ -778,7 +707,7 @@ public class AnalysisService {
             }
 
             Map<String, Object> resultMap = new LinkedHashMap<>();
-            resultMap.put("address", addressStr);
+            resultMap.put("address", addr.toString());
             resultMap.put("bytes_read", bytesRead);
             resultMap.put("hex_dump", hexDump.toString().trim());
             resultMap.put("ascii_repr", asciiRepr.toString().trim());
@@ -793,23 +722,16 @@ public class AnalysisService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
     /**
      * Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)
      */
-    public Response detectCryptoConstants() {
-        return detectCryptoConstants(null);
-    }
-
     @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware", access = ToolAccess.READ_ONLY)
     public Response detectCryptoConstants(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             // This is a placeholder implementation
             List<Map<String, Object>> results = new ArrayList<>();
@@ -820,26 +742,18 @@ public class AnalysisService {
             ));
             return Response.ok(results);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
     /**
      * Search for byte patterns with optional wildcards
      */
-    public Response searchBytePatterns(String pattern, String mask) {
-        return searchBytePatterns(pattern, mask, null);
-    }
-
     @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
             @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (pattern == null || pattern.trim().isEmpty()) {
             return Response.err("Pattern is required");
         }
@@ -870,6 +784,29 @@ public class AnalysisService {
                 byteIndex++;
             }
 
+            // A supplied mask takes effect per byte, replacing the pattern's inline wildcards:
+            // 00 (or ?? or ..) leaves the byte free, and any other hex value compares exactly
+            // the bits it sets. It must name every byte of the pattern.
+            if (mask != null && !mask.trim().isEmpty()) {
+                String cleanMask = mask.trim().toUpperCase().replaceAll("\\s+", "");
+                if (cleanMask.length() != patternLen * 2) {
+                    return Response.err("Mask must be " + patternLen + " bytes (" + patternLen * 2
+                            + " hex digits), the length of the pattern");
+                }
+                for (int i = 0; i < patternLen; i++) {
+                    String maskByte = cleanMask.substring(i * 2, i * 2 + 2);
+                    if (maskByte.equals("??") || maskByte.equals("..")) {
+                        maskBytes[i] = 0;
+                    } else {
+                        try {
+                            maskBytes[i] = (byte) Integer.parseInt(maskByte, 16);
+                        } catch (NumberFormatException e) {
+                            return Response.err("Mask byte '" + maskByte + "' is not a hex pair, ?? or ..");
+                        }
+                    }
+                }
+            }
+
             // Search memory for pattern
             Memory memory = program.getMemory();
             List<Map<String, Object>> matches = new ArrayList<>();
@@ -891,7 +828,7 @@ public class AnalysisService {
                 for (int i = 0; i <= blockData.length - patternBytes.length; i++) {
                     boolean matchFound = true;
                     for (int j = 0; j < patternBytes.length; j++) {
-                        if (maskBytes[j] != 0 && blockData[i + j] != patternBytes[j]) {
+                        if (maskBytes[j] != 0 && ((blockData[i + j] ^ patternBytes[j]) & (maskBytes[j] & 0xFF)) != 0) {
                             matchFound = false;
                             break;
                         }
@@ -917,7 +854,7 @@ public class AnalysisService {
 
             return Response.ok(matches);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -945,14 +882,10 @@ public class AnalysisService {
             @Param(value = "operand_pattern", defaultValue = "",
                 description = "Case-insensitive substring matched against the joined operand string (e.g. '[ecx+0xd0]', 'eax', '0x10001000'). Omit to match any operand.") String operandPattern,
             @Param(value = "function", defaultValue = "",
-                description = "Restrict search to this function (by name or entry-point address). Omit to search the whole program.") String functionScope,
+                description = "Restrict search to this function (by name or entry-point address). Omit to search the whole program.") Function functionScope,
             @Param(value = "limit", defaultValue = "500",
                 description = "Maximum matches returned. Walking stops as soon as the cap is hit.") int limit,
-            @Param(value = "program", defaultValue = "",
-                description = "Target program name (omit to use the active program — always specify when multiple programs are open).") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         String wantMnemonic = mnemonic == null ? "" : mnemonic.trim();
         String wantOperand = operandPattern == null ? "" : operandPattern.trim().toLowerCase();
@@ -969,11 +902,8 @@ public class AnalysisService {
 
             // Build the address set we'll iterate.
             AddressSetView searchSet;
-            if (functionScope != null && !functionScope.trim().isEmpty()) {
-                ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionScope);
-                if (resolved.hasError()) return resolved.error();
-                Function f = resolved.function();
-                searchSet = f.getBody();
+            if (functionScope != null) {
+                searchSet = functionScope.getBody();
             } else {
                 searchSet = program.getMemory();
             }
@@ -1046,9 +976,9 @@ public class AnalysisService {
             result.put("match_count", matches.size());
             result.put("instructions_scanned", scanned);
             result.put("truncated", truncated);
-            result.put("scope", functionScope == null || functionScope.trim().isEmpty()
+            result.put("scope", functionScope == null
                     ? "program"
-                    : "function:" + functionScope);
+                    : "function:" + functionScope.getName());
             // Echo the filters back as plain strings (empty == "no filter") so
             // both keys are always present in the JSON. Gson drops null fields
             // by default, which left clients unable to tell "field absent
@@ -1057,38 +987,20 @@ public class AnalysisService {
             result.put("operand_filter", wantOperand);
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("search_instructions failed: " + e.getMessage());
+            return ServiceUtils.fail("search_instructions", e);
         }
     }
 
-    /**
-     * Find functions structurally similar to the target function
-     * Uses basic block count, instruction count, call count, and cyclomatic complexity
-     */
-    public Response findSimilarFunctions(String targetFunction, double threshold) {
-        return findSimilarFunctions(targetFunction, threshold, null);
-    }
+    
 
     @McpTool(path = "/find_similar_functions", description = "Find structurally similar functions", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findSimilarFunctions(
-            @Param(value = "target_function", description = "Function name") String targetFunction,
+            @Param(value = "target_function", description = "Function name") Function targetFunc,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (targetFunction == null || targetFunction.trim().isEmpty()) {
-            return Response.err("Target function name is required");
-        }
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-
-            // Find the target function by name or address
-            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, targetFunction);
-            if (resolved.hasError()) return resolved.error();
-            Function targetFunc = resolved.function();
 
             // Calculate metrics for target function
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -1098,7 +1010,7 @@ public class AnalysisService {
             List<Map<String, Object>> similarFunctions = new ArrayList<>();
 
             for (Function func : functionManager.getFunctions(true)) {
-                if (func.getName().equals(targetFunction)) continue;
+                if (func.getEntryPoint().equals(targetFunc.getEntryPoint())) continue;
                 if (func.isThunk()) continue;
 
                 FunctionMetrics funcMetrics = calculateFunctionMetrics(func, blockModel, program);
@@ -1126,7 +1038,7 @@ public class AnalysisService {
             }
 
             return Response.ok(JsonHelper.mapOf(
-                "target_function", targetFunction,
+                "target_function", targetFunc.getName(),
                 "target_metrics", JsonHelper.mapOf(
                     "basic_blocks", targetMetrics.basicBlockCount,
                     "instructions", targetMetrics.instructionCount,
@@ -1138,37 +1050,19 @@ public class AnalysisService {
                 "similar_functions", similarFunctions
             ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
-    /**
-     * Analyze function control flow complexity
-     * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
-     */
-    public Response analyzeControlFlow(String functionName) {
-        return analyzeControlFlow(functionName, null);
-    }
+    
 
     @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeControlFlow(
-            @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        if (functionName == null || functionName.trim().isEmpty()) {
-            return Response.err("Function name is required");
-        }
+            @Param(value = "function_name", description = "Function name") Function func,
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-
-            // Find the function by name or address
-            ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionName);
-            if (resolved.hasError()) return resolved.error();
-            Function func = resolved.function();
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
             Listing listing = program.getListing();
@@ -1282,7 +1176,7 @@ public class AnalysisService {
 
             Address ep = func.getEntryPoint();
             Map<String, Object> cfResult = new LinkedHashMap<>();
-            cfResult.put("function_name", functionName);
+            cfResult.put("function_name", func.getName());
             cfResult.put("entry_point", ep.toString(false));
             if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
                 cfResult.put("entry_point_full", ep.toString());
@@ -1304,24 +1198,17 @@ public class AnalysisService {
             cfResult.put("basic_block_details", blockDetails);
             return Response.ok(cfResult);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
     /**
      * Find potentially unreachable code blocks
      */
-    public Response findDeadCode(String functionName) {
-        return findDeadCode(functionName, null);
-    }
-
     @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (functionName == null || functionName.trim().isEmpty()) {
             return Response.err("Function name is required");
         }
@@ -1336,23 +1223,8 @@ public class AnalysisService {
             ));
             return Response.ok(results);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-    }
-
-    /**
-     * Analyze function documentation completeness
-     */
-    public Response analyzeFunctionCompleteness(String functionAddress) {
-        return analyzeFunctionCompleteness(functionAddress, false, null);
-    }
-
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact) {
-        return analyzeFunctionCompleteness(functionAddress, compact, null);
-    }
-
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
-        return analyzeFunctionCompleteness(functionAddress, compact, "", programName);
     }
 
     /**
@@ -1363,642 +1235,618 @@ public class AnalysisService {
     @McpTool(path = "/analyze_function_completeness", description = "Check documentation completeness for ONE function (function_address) OR MANY (addresses=comma-separated list). On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_analyze_completeness.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionCompleteness(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function address (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") String functionAddress,
+                   description = "Function name or any address within the function (single mode). 0x<hex> or <space>:<hex>. Omit when using addresses=.") Function func,
             @Param(value = "compact", defaultValue = "false", description = "Compact output (single mode)") boolean compact,
             @Param(value = "addresses", defaultValue = "",
                    description = "Bulk mode: comma-separated addresses. When set, function_address/compact are ignored.") String addressesCsv,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressesCsv != null && !addressesCsv.trim().isEmpty()) {
-            return batchAnalyzeCompleteness(addressesCsv, programName);
+            return batchAnalyzeCompleteness(addressesCsv, program);
         }
 
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        return computeFunctionCompleteness(program, func.getEntryPoint(), func.getName(), compact);
+    }
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
+    private Response computeFunctionCompleteness(Program program, Address addr, String functionAddress,
+            boolean compact) {
         try {
-            // EDT-safe: if already on EDT (e.g. called from analyzeForDocumentation),
-            // run directly to avoid nested invokeAndWait deadlock.
-            Runnable completenessWork = () -> {
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorMsg.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    // Classify function using shared utility
-                    String classification = classifyFunction(func, program);
-                    boolean isThunk = "thunk".equals(classification);
-                    boolean isStub = "stub".equals(classification);
-                    int instructionCount = getInstructionCount(func, program);
-                    String decompiledCodeForContext = null;
-                    boolean isCompilerHelper = looksLikeCompilerRuntimeHelper(func, null, instructionCount, isThunk, isStub);
-
-                    Map<String, Object> data = new LinkedHashMap<>();
-                    data.put("function_name", func.getName());
-                    data.put("classification", classification);
-                    data.put("is_thunk", isThunk);
-                    data.put("has_custom_name", !ServiceUtils.isAutoGeneratedName(func.getName()));
-                    data.put("has_prototype", func.getSignature() != null);
-                    data.put("has_calling_convention", func.getCallingConvention() != null);
-                    data.put("is_stub", isStub);
-                    data.put("is_compiler_helper", isCompilerHelper);
-                    data.put("documentation_profile", isCompilerHelper ? "compiler_helper" : classification);
-
-                    // v3.0.1: Check if return type is unresolved (undefined)
-                    String returnTypeName = func.getReturnType().getName();
-                    boolean returnTypeUndefined = returnTypeName.startsWith("undefined");
-                    data.put("return_type", returnTypeName);
-                    data.put("return_type_resolved", !returnTypeUndefined);
-
-                    // Enhanced plate comment validation
-                    String plateComment = func.getComment();
-                    boolean hasPlateComment = plateComment != null && !plateComment.isEmpty();
-                    data.put("has_plate_comment", hasPlateComment);
-
-                    // Validate plate comment structure and content
-                    List<String> plateCommentIssues = new ArrayList<>();
-                    if (hasPlateComment) {
-                        validatePlateCommentStructure(plateComment, plateCommentIssues, func, isThunk, isCompilerHelper);
-                    }
-
-                    if (compact) {
-                        data.put("plate_issues", plateCommentIssues.size());
-                    } else {
-                        data.put("plate_comment_issues", plateCommentIssues);
-                    }
-
-                    // Check for undefined variables (both names and types)
-                    // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
-                    // v3.2.0: For thunk functions (single JMP), all decompiler variables belong to the
-                    // callee body, not this function. Mark them all as unfixable at the thunk level.
-                    List<String> undefinedVars = new ArrayList<>();
-                    List<String> phantomVars = new ArrayList<>();
-                    int unfixableUndefinedCount = 0;
-                    boolean decompilationAvailable = false;
-
-                    // Build set of variable names from low-level Variable API (hoisted for use in Hungarian check)
-                    java.util.Set<String> localVarNames = new java.util.HashSet<>();
-                    for (Variable local : func.getLocalVariables()) {
-                        localVarNames.add(local.getName());
-                    }
-
-                    // Try to use decompilation-based detection (high-level API).
-                    // Use the no-retry variant: in the scoring path, we cannot
-                    // afford the 60→120→180s retry escalation (total 360s per
-                    // function worst case) because abandoned retries leak
-                    // DecompInterface contexts on the EDT and eventually OOM
-                    // Ghidra. Single 60s attempt is sufficient for scoring;
-                    // a clean null return lets the caller record a miss.
-                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-                    if (decompResults != null && decompResults.decompileCompleted()) {
-                        decompilationAvailable = true;
-                        ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
-
-                        if (highFunction != null) {
-                            // Check parameters (same as before, from Function API)
-                            for (Parameter param : func.getParameters()) {
-                                // Check for generic parameter names
-                                if (param.getName().startsWith("param_")) {
-                                    undefinedVars.add(param.getName() + " (generic name)");
-                                }
-                                // Check for undefined data types
-                                String typeName = param.getDataType().getName();
-                                if (typeName.startsWith("undefined")) {
-                                    undefinedVars.add(param.getName() + " (type: " + typeName + ")");
-                                    // Detect type-rename ordering violation on parameters
-                                    if (!param.getName().startsWith("param_")) {
-                                        String impliedType = inferTypeFromHungarianPrefix(param.getName());
-                                        if (impliedType != null) {
-                                            undefinedVars.add(param.getName() + " (WORKFLOW: renamed with '" + impliedType +
-                                                "' prefix but type is still " + typeName +
-                                                " — fix: set_function_prototype() with correct param type, then rename)");
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Check locals from HIGH-LEVEL decompiled symbol map (not low-level stack frame)
-                            // This avoids phantom variables that exist in stack analysis but not decompilation
-                            java.util.Set<String> checkedVarNames = new java.util.HashSet<>();
-
-                            // v3.2.0: For thunks with no real locals, skip local variable checks entirely.
-                            // The decompiler projects the callee body's variables through the thunk view,
-                            // but these are display artifacts -- the thunk has no actual locals to fix.
-                            boolean thunkWithNoLocals = isThunk && localVarNames.isEmpty();
-
-                            Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
-                            while (symbols.hasNext()) {
-                                ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
-                                String name = symbol.getName();
-                                String typeName = symbol.getDataType().getName();
-                                checkedVarNames.add(name);
-
-                                // v3.0.1: Skip phantom decompiler artifacts (extraout_*, in_*)
-                                // These cannot be renamed or typed -- exclude from scoring
-                                if (name.startsWith("extraout_") || name.startsWith("in_")) {
-                                    phantomVars.add(name + " (type: " + typeName + ", phantom)");
-                                    continue;
-                                }
-
-                                // v3.2.0: Thunks with no real locals -- all decompiler variables are
-                                // body-projected artifacts. Skip entirely (don't penalize at all).
-                                if (thunkWithNoLocals) {
-                                    continue;
-                                }
-
-                                // v3.2.0: For thunks with some locals, or register-only vars
-                                boolean isRegisterOnly = isThunk || !localVarNames.contains(name);
-
-                                // Check for generic local names (local_XX or XVar patterns)
-                                if (name.startsWith("local_") ||
-                                    name.matches(".*Var\\d+") ||  // pvVar1, iVar2, etc.
-                                    name.matches("(i|u|d|f|p|b)Var\\d+")) {  // specific type patterns
-                                    undefinedVars.add(name + " (generic name)");
-                                    if (isRegisterOnly) unfixableUndefinedCount++;
-                                }
-
-                                // Check for undefined data types (decompiler display type)
-                                if (typeName.startsWith("undefined")) {
-                                    undefinedVars.add(name + " (type: " + typeName + ")");
-                                    if (isRegisterOnly) unfixableUndefinedCount++;
-
-                                    // Detect type-rename ordering violation: variable has a meaningful
-                                    // Hungarian prefix implying a resolved type, but actual type is still undefined.
-                                    // This means the AI renamed before setting the type — a workflow error.
-                                    if (!name.startsWith("local_") && !name.startsWith("param_") &&
-                                        !name.matches(".*Var\\d+") && !name.startsWith("extraout_") &&
-                                        !name.startsWith("in_")) {
-                                        // Variable was renamed (not auto-generated) but type is still undefined
-                                        String impliedType = inferTypeFromHungarianPrefix(name);
-                                        if (impliedType != null) {
-                                            String fixAction = isRegisterOnly
-                                                ? " — fix: type may be register-only, try set_variable_type('" + name + "', '" + impliedType.split("/")[0] + "'), on failure use PRE_COMMENT"
-                                                : " — fix: set_variable_type('" + name + "', '" + impliedType.split("/")[0] + "')";
-                                            undefinedVars.add(name + " (WORKFLOW: renamed with '" + impliedType +
-                                                "' prefix but type is still " + typeName + fixAction + ")");
-                                        }
-                                    }
-
-                                    // Detect large byte-array buffers that likely need struct definitions
-                                    java.util.regex.Matcher arrayMatcher = java.util.regex.Pattern.compile("undefined1\\[(\\d+)\\]").matcher(typeName);
-                                    if (arrayMatcher.matches()) {
-                                        int arraySize = Integer.parseInt(arrayMatcher.group(1));
-                                        if (arraySize > 8) {
-                                            String bufferHint = name.toLowerCase();
-                                            boolean suggestStruct = bufferHint.contains("context") || bufferHint.contains("buffer") ||
-                                                bufferHint.contains("record") || bufferHint.contains("info") ||
-                                                bufferHint.contains("data") || bufferHint.contains("callback") ||
-                                                bufferHint.contains("param") || bufferHint.contains("state");
-                                            if (suggestStruct) {
-                                                undefinedVars.add(name + " (STRUCT: " + arraySize + "-byte buffer with struct-like name — create struct with create_struct(), then set_variable_type('" + name + "', 'YourStructName'))");
-                                            } else if (arraySize >= 16) {
-                                                // Large buffers always suggest struct even without name hints
-                                                undefinedVars.add(name + " (STRUCT: " + arraySize + "-byte buffer — likely needs struct definition via create_struct())");
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // v3.0.1: Cross-check storage types from low-level Variable API
-                            // The decompiler may show resolved types (e.g. "short *") while the
-                            // actual storage type is still "undefined4". Catch these mismatches.
-                            for (Variable local : func.getLocalVariables()) {
-                                String localName = local.getName();
-                                String storageName = local.getDataType().getName();
-                                // Only check variables that exist in decompiled code (not stack phantoms)
-                                if (checkedVarNames.contains(localName) && storageName.startsWith("undefined")) {
-                                    String flag = localName + " (storage type: " + storageName + ", decompiler shows resolved type)";
-                                    if (!undefinedVars.contains(flag)) {
-                                        undefinedVars.add(flag);
-                                    }
-                                }
-                            }
-                            // Also check register-based HighSymbols whose storage type may be undefined
-                            // These may not appear in func.getLocalVariables() at all
-                            Iterator<ghidra.program.model.pcode.HighSymbol> storageCheckSymbols = highFunction.getLocalSymbolMap().getSymbols();
-                            while (storageCheckSymbols.hasNext()) {
-                                ghidra.program.model.pcode.HighSymbol sym = storageCheckSymbols.next();
-                                String symName = sym.getName();
-                                if (symName.startsWith("extraout_") || symName.startsWith("in_")) continue;
-                                ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
-                                if (highVar != null) {
-                                    // Get the representative varnode to check actual storage
-                                    ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
-                                    if (rep != null && rep.getSize() > 0) {
-                                        // Check if the HighVariable's declared type differs from what Ghidra stores
-                                        DataType highType = highVar.getDataType();
-                                        DataType symType = sym.getDataType();
-                                        // If symbol storage reports undefined but decompiler infers a type
-                                        if (symType != null && symType.getName().startsWith("undefined") &&
-                                            highType != null && !highType.getName().startsWith("undefined")) {
-                                            String flag = symName + " (storage type: " + symType.getName() + ", decompiler shows: " + highType.getName() + ")";
-                                            if (!undefinedVars.stream().anyMatch(v -> v.startsWith(symName + " "))) {
-                                                undefinedVars.add(flag);
-                                                // v3.1.1: Track as unfixable if register-only (not in func.getLocalVariables())
-                                                if (!localVarNames.contains(symName)) {
-                                                    unfixableUndefinedCount++;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Fallback to low-level API if decompilation failed (with warning in output)
-                    if (!decompilationAvailable) {
-                        // Check parameters
-                        for (Parameter param : func.getParameters()) {
-                            if (param.getName().startsWith("param_")) {
-                                undefinedVars.add(param.getName() + " (generic name)");
-                            }
-                            String typeName = param.getDataType().getName();
-                            if (typeName.startsWith("undefined")) {
-                                undefinedVars.add(param.getName() + " (type: " + typeName + ")");
-                            }
-                        }
-
-                        // Use low-level API with phantom variable warning
-                        for (Variable local : func.getLocalVariables()) {
-                            if (local.getName().startsWith("local_")) {
-                                undefinedVars.add(local.getName() + " (generic name, may be phantom variable)");
-                            }
-                            String typeName = local.getDataType().getName();
-                            if (typeName.startsWith("undefined")) {
-                                undefinedVars.add(local.getName() + " (type: " + typeName + ", may be phantom variable)");
-                            }
-                        }
-                    }
-
-                    data.put("decompilation_available", decompilationAvailable);
-
-                    // Bulk stack-array heuristic: functions with a very high count of
-                    // generic locals (e.g., data table initializers with 1,000+ decomposed
-                    // array slots) are impractical to fix via individual API calls.
-                    // Reclassify the excess above a reasonable threshold as structural.
-                    int BULK_UNDEFINED_THRESHOLD = 100;
-                    int BULK_FIXABLE_ALLOWANCE = 20; // still count first 20 as fixable
-                    int totalFixableUndefined = undefinedVars.size() - unfixableUndefinedCount;
-                    if (totalFixableUndefined > BULK_UNDEFINED_THRESHOLD) {
-                        int reclassified = totalFixableUndefined - BULK_FIXABLE_ALLOWANCE;
-                        unfixableUndefinedCount += reclassified;
-                        data.put("bulk_array_reclassified", reclassified);
-                    }
-
-                    if (compact) {
-                        data.put("undefined_count", undefinedVars.size());
-                        data.put("phantom_count", phantomVars.size());
-                    } else {
-                        data.put("undefined_variables", undefinedVars);
-
-                        // v3.0.1: Report phantom variables separately (not counted in scoring)
-                        data.put("phantom_variables", phantomVars);
-                    }
-
-                    // Check Hungarian notation compliance
-                    // v3.2.0: Track unfixable Hungarian violations (register-only/thunk variables)
-                    List<String> hungarianViolations = new ArrayList<>();
-                    int unfixableHungarianCount = 0;
-                    boolean funcIsThiscall = false;
-                    try {
-                        funcIsThiscall = "__thiscall".equals(func.getCallingConventionName());
-                    } catch (Exception ignored) {}
-
-                    for (Parameter param : func.getParameters()) {
-                        int prevSize = hungarianViolations.size();
-                        validateHungarianNotation(param.getName(), param.getDataType().getName(), false, true, hungarianViolations);
-                        // __thiscall ECX this auto-param: any violation is structural (can't retype via API)
-                        if (hungarianViolations.size() > prevSize && funcIsThiscall
-                                && "this".equals(param.getName()) && param.isAutoParameter()) {
-                            unfixableHungarianCount += (hungarianViolations.size() - prevSize);
-                        }
-                    }
-
-                    // Use decompilation-based locals if available, otherwise fallback to low-level API
-                    if (decompilationAvailable && decompResults != null && decompResults.getHighFunction() != null) {
-                        ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
-                        Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
-                        while (symbols.hasNext()) {
-                            ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
-                            int prevSize = hungarianViolations.size();
-                            validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, false, hungarianViolations);
-                            // If a new violation was added and the variable is register-only or thunk-owned, it's unfixable
-                            if (hungarianViolations.size() > prevSize && (isThunk || !localVarNames.contains(symbol.getName()))) {
-                                unfixableHungarianCount += (hungarianViolations.size() - prevSize);
-                            }
-                        }
-                    } else {
-                        // Fallback to low-level API
-                        for (Variable local : func.getLocalVariables()) {
-                            validateHungarianNotation(local.getName(), local.getDataType().getName(), false, false, hungarianViolations);
-                        }
-                    }
-
-                    // Enhanced validation: Check parameter type quality
-                    // Pass existing decompilation to avoid redundant re-decompile (which can silently fail)
-                    List<String> typeQualityIssues = new ArrayList<>();
-                    ghidra.program.model.pcode.HighFunction hf = (decompilationAvailable && decompResults != null) ? decompResults.getHighFunction() : null;
-                    validateParameterTypeQuality(func, typeQualityIssues, hf);
-
-                    if (compact) {
-                        data.put("hungarian_violations", hungarianViolations.size());
-                        data.put("type_quality_issues", typeQualityIssues.size());
-                    } else {
-                        data.put("hungarian_notation_violations", hungarianViolations);
-                        data.put("type_quality_issues", typeQualityIssues);
-                    }
-
-                    // NEW: Check for unrenamed DAT_* globals, LAB_* labels, and undocumented Ordinal calls in decompiled code
-                    List<String> unrenamedGlobals = new ArrayList<>();
-                    List<String> unrenamedLabels = new ArrayList<>();
-                    List<String> undocumentedOrdinals = new ArrayList<>();
-                    int inlineCommentCount = 0;
-                    int codeLineCount = 0;
-
-                    if (decompilationAvailable && decompResults != null) {
-                        String decompiledCode = decompResults.getDecompiledFunction().getC();
-                        if (decompiledCode != null) {
-                            decompiledCodeForContext = decompiledCode;
-                            if (!isCompilerHelper) {
-                                isCompilerHelper = looksLikeCompilerRuntimeHelper(func, decompiledCodeForContext, instructionCount, isThunk, isStub);
-                                data.put("is_compiler_helper", isCompilerHelper);
-                                data.put("documentation_profile", isCompilerHelper ? "compiler_helper" : classification);
-                            }
-                            // Count lines of code and inline comments
-                            // We need to distinguish between:
-                            // 1. Plate comments (before function body) - don't count
-                            // 2. Body comments (inside function braces) - count these
-                            String[] lines = decompiledCode.split("\n");
-                            boolean inFunctionBody = false;
-                            boolean inPlateComment = false;
-                            int braceDepth = 0;
-
-                            for (String line : lines) {
-                                String trimmed = line.trim();
-
-                                // Track plate comment block (before function signature)
-                                if (!inFunctionBody && trimmed.startsWith("/*")) {
-                                    inPlateComment = true;
-                                }
-                                if (inPlateComment && trimmed.endsWith("*/")) {
-                                    inPlateComment = false;
-                                    continue;
-                                }
-                                if (inPlateComment) continue;
-
-                                // Track function body by counting braces
-                                for (char c : trimmed.toCharArray()) {
-                                    if (c == '{') {
-                                        braceDepth++;
-                                        inFunctionBody = true;
-                                    } else if (c == '}') {
-                                        braceDepth--;
-                                    }
-                                }
-
-                                // Count code lines (non-empty, non-comment lines inside function)
-                                if (inFunctionBody && !trimmed.isEmpty() &&
-                                    !trimmed.startsWith("/*") && !trimmed.startsWith("*") && !trimmed.startsWith("//")) {
-                                    codeLineCount++;
-                                }
-
-                                // Count comments inside function body
-                                // This includes both standalone comment lines and trailing comments
-                                if (inFunctionBody && trimmed.contains("/*")) {
-                                    // Exclude WARNING comments from decompiler (they're not user-added)
-                                    if (!trimmed.contains("WARNING:")) {
-                                        inlineCommentCount++;
-                                    }
-                                }
-                                // Also count // style comments
-                                if (inFunctionBody && trimmed.contains("//")) {
-                                    inlineCommentCount++;
-                                }
-                            }
-
-                            // Find DAT_* references (unrenamed globals)
-                            java.util.regex.Pattern datPattern = java.util.regex.Pattern.compile("DAT_[0-9a-fA-F]+");
-                            java.util.regex.Matcher datMatcher = datPattern.matcher(decompiledCode);
-                            java.util.Set<String> foundDats = new java.util.HashSet<>();
-                            while (datMatcher.find()) {
-                                foundDats.add(datMatcher.group());
-                            }
-                            unrenamedGlobals.addAll(foundDats);
-
-                            // Find undocumented Ordinal calls in the function body
-                            // v3.2.0: Use callee-based detection instead of text scanning.
-                            // This correctly counts only functions THIS function calls (not callers
-                            // mentioned in the plate comment) and excludes self-referencing artifacts
-                            // from unresolved IAT indirect jumps.
-                            java.util.Set<String> calleeOrdinals = new java.util.HashSet<>();
-                            for (Function callee : func.getCalledFunctions(new ConsoleTaskMonitor())) {
-                                if (callee.getName().startsWith("Ordinal_")) {
-                                    calleeOrdinals.add(callee.getName());
-                                }
-                            }
-
-                            // For each callee ordinal, check if it has a nearby comment in the decompiled body
-                            int bodyStart = decompiledCode.indexOf('{');
-                            String bodyCode = bodyStart >= 0 ? decompiledCode.substring(bodyStart) : decompiledCode;
-
-                            // Find LAB_* references (unrenamed labels within function body)
-                            java.util.regex.Pattern labPattern = java.util.regex.Pattern.compile("LAB_[0-9a-fA-F]+");
-                            java.util.regex.Matcher labMatcher = labPattern.matcher(bodyCode);
-                            java.util.Set<String> foundLabs = new java.util.HashSet<>();
-                            while (labMatcher.find()) {
-                                foundLabs.add(labMatcher.group());
-                            }
-                            unrenamedLabels.addAll(foundLabs);
-
-                            for (String ordinal : calleeOrdinals) {
-                                java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(ordinal));
-                                java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(bodyCode);
-                                boolean documented = false;
-                                while (ordinalMatcher.find()) {
-                                    int pos = ordinalMatcher.start();
-                                    int lineStart = bodyCode.lastIndexOf('\n', pos);
-                                    int lineEnd = bodyCode.indexOf('\n', pos);
-                                    if (lineEnd == -1) lineEnd = bodyCode.length();
-                                    String currentLine = bodyCode.substring(Math.max(0, lineStart + 1), lineEnd);
-                                    if (currentLine.contains("/*") || currentLine.contains("//")) {
-                                        documented = true;
-                                        break;
-                                    }
-                                    if (lineStart > 0) {
-                                        int prevLineStart = bodyCode.lastIndexOf('\n', lineStart - 1);
-                                        String prevLine = bodyCode.substring(Math.max(0, prevLineStart + 1), lineStart).trim();
-                                        if ((prevLine.contains("/*") || prevLine.contains("//")) && prevLine.contains(ordinal)) {
-                                            documented = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if (!documented) {
-                                    undocumentedOrdinals.add(ordinal);
-                                }
-                            }
-                        }
-                    }
-
-                    // Count disassembly EOL comments and detect undocumented magic numbers
-                    int disasmCommentCount = 0;
-                    List<String> undocumentedMagicNumbers = new ArrayList<>();
-                    ghidra.program.model.listing.InstructionIterator disasmIter =
-                        program.getListing().getInstructions(func.getBody(), true);
-                    while (disasmIter.hasNext()) {
-                        ghidra.program.model.listing.Instruction instr = disasmIter.next();
-                        String eolComment = program.getListing().getComment(
-                            ghidra.program.model.listing.CodeUnit.EOL_COMMENT, instr.getAddress());
-                        boolean hasComment = eolComment != null && !eolComment.isEmpty();
-                        if (hasComment) {
-                            disasmCommentCount++;
-                        }
-
-                        // Detect magic number constants in instruction operands
-                        if (!hasComment) {
-                            for (int opIdx = 0; opIdx < instr.getNumOperands(); opIdx++) {
-                                int opType = instr.getOperandType(opIdx);
-                                // Check for scalar (immediate) operand
-                                if ((opType & ghidra.program.model.lang.OperandType.SCALAR) != 0) {
-                                    ghidra.program.model.scalar.Scalar scalar = instr.getScalar(opIdx);
-                                    if (scalar != null) {
-                                        long val = scalar.getUnsignedValue();
-                                        // Flag non-trivial constants: skip 0, 1, -1, small powers of 2
-                                        if (val > 1 && val != 0xFFFFFFFFL && val != 2 && val != 4 && val != 8 && val != 16) {
-                                            String hex = String.format("0x%X", val);
-                                            undocumentedMagicNumbers.add(hex + " at " + instr.getAddress().toString());
-                                            break; // one finding per instruction is enough
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Include disassembly comments in total for density calculation
-                    int totalCommentCount = inlineCommentCount + disasmCommentCount;
-
-                    // Detect unresolved struct field accesses in decompiled code
-                    // Patterns: *(type *)(var + 0xNN), var[0xNN], *(int *)(param + 0xNN)
-                    List<String> unresolvedStructAccesses = new ArrayList<>();
-                    if (decompiledCodeForContext != null) {
-                        int bodyStart2 = decompiledCodeForContext.indexOf('{');
-                        String bodyForStruct = bodyStart2 >= 0 ? decompiledCodeForContext.substring(bodyStart2) : decompiledCodeForContext;
-                        // Match raw hex offset dereferences: *(type *)(expr + 0xNN) or *(expr + 0xNN)
-                        java.util.regex.Pattern rawOffsetPattern = java.util.regex.Pattern.compile(
-                            "\\*\\s*\\([^)]*\\)\\s*\\([^)]+\\+\\s*(0x[0-9a-fA-F]+)\\)");
-                        java.util.regex.Matcher rawMatcher = rawOffsetPattern.matcher(bodyForStruct);
-                        java.util.Set<String> seenOffsets = new java.util.HashSet<>();
-                        while (rawMatcher.find()) {
-                            String offset = rawMatcher.group(1);
-                            if (seenOffsets.add(offset)) {
-                                unresolvedStructAccesses.add("raw offset dereference at +" + offset);
-                            }
-                        }
-                    }
-
-                    if (compact) {
-                        data.put("globals_unrenamed", unrenamedGlobals.size());
-                        data.put("labels_unrenamed", unrenamedLabels.size());
-                        data.put("ordinals_undocumented", undocumentedOrdinals.size());
-                        data.put("magic_numbers_undocumented", undocumentedMagicNumbers.size());
-                        data.put("struct_accesses_unresolved", unresolvedStructAccesses.size());
-                    } else {
-                        data.put("unrenamed_globals", unrenamedGlobals);
-                        data.put("unrenamed_labels", unrenamedLabels);
-                        data.put("undocumented_ordinals", undocumentedOrdinals);
-                        data.put("undocumented_magic_numbers", undocumentedMagicNumbers);
-                        data.put("unresolved_struct_accesses", unresolvedStructAccesses);
-                    }
-
-                    data.put("inline_comment_count", inlineCommentCount);
-                    data.put("disasm_comment_count", disasmCommentCount);
-                    data.put("code_line_count", codeLineCount);
-
-                    // Calculate comment density using total comments (decompiler + disassembly)
-                    double commentDensity = codeLineCount > 0 ? (totalCommentCount * 10.0 / codeLineCount) : 0;
-                    data.put("comment_density", Math.round(commentDensity * 100.0) / 100.0);
-
-                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), unrenamedLabels.size(), undocumentedOrdinals.size(), undocumentedMagicNumbers.size(), unresolvedStructAccesses.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount, unfixableHungarianCount, isThunk, isStub, isCompilerHelper);
-                    data.put("completeness_score", scoreResult.score);
-                    data.put("effective_score", scoreResult.effectiveScore);
-                    data.put("all_deductions_unfixable", scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0);
-                    data.put("fixable_deductions", scoreResult.fixablePenalty);
-                    data.put("structural_deductions", scoreResult.structuralPenalty);
-                    data.put("max_achievable_score", scoreResult.maxAchievableScore);
-
-                    if (compact) {
-                        data.put("deduction_count", scoreResult.deductionBreakdown.size());
-                    } else {
-                        data.put("deduction_breakdown", scoreResult.deductionBreakdown);
-                    }
-
-                    // PROP-0002: Report whether function has renameable variables (not register-only SSA)
-                    data.put("has_renameable_variables", !localVarNames.isEmpty());
-
-                    if (!compact) {
-                        // Generate workflow-aligned recommendations (skipped in compact mode -- AI has these in its prompt)
-                        List<String> recommendations = generateWorkflowRecommendations(
-                            func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
-                            unrenamedGlobals, unrenamedLabels, undocumentedOrdinals, undocumentedMagicNumbers, unresolvedStructAccesses,
-                            commentDensity, scoreResult, codeLineCount, isThunk, isStub, isCompilerHelper
-                        );
-
-                        List<Map<String, Object>> remediationActions = generateRemediationActions(
-                            func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
-                            unrenamedGlobals, unrenamedLabels, undocumentedOrdinals, undocumentedMagicNumbers, unresolvedStructAccesses,
-                            commentDensity, scoreResult, isThunk, isStub, isCompilerHelper
-                        );
-
-                        data.put("recommendations", recommendations);
-                        data.put("remediation_actions", remediationActions);
-                    }
-
-                    resultData.set(data);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            };
-
-            threadingStrategy.runOnUi(completenessWork);
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) {
+                return Response.err("No function at address: " + functionAddress);
             }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
 
-        return Response.ok(resultData.get());
+            // Classify function using shared utility
+            String classification = classifyFunction(func, program);
+            boolean isThunk = "thunk".equals(classification);
+            boolean isStub = "stub".equals(classification);
+            int instructionCount = getInstructionCount(func, program);
+            String decompiledCodeForContext = null;
+            boolean isCompilerHelper = looksLikeCompilerRuntimeHelper(func, null, instructionCount, isThunk, isStub);
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("function_name", func.getName());
+            data.put("classification", classification);
+            data.put("is_thunk", isThunk);
+            data.put("has_custom_name", !ServiceUtils.isAutoGeneratedName(func.getName()));
+            data.put("has_prototype", func.getSignature() != null);
+            data.put("has_calling_convention", func.getCallingConvention() != null);
+            data.put("is_stub", isStub);
+            data.put("is_compiler_helper", isCompilerHelper);
+            data.put("documentation_profile", isCompilerHelper ? "compiler_helper" : classification);
+
+            // v3.0.1: Check if return type is unresolved (undefined)
+            String returnTypeName = func.getReturnType().getName();
+            boolean returnTypeUndefined = returnTypeName.startsWith("undefined");
+            data.put("return_type", returnTypeName);
+            data.put("return_type_resolved", !returnTypeUndefined);
+
+            // Enhanced plate comment validation
+            String plateComment = func.getComment();
+            boolean hasPlateComment = plateComment != null && !plateComment.isEmpty();
+            data.put("has_plate_comment", hasPlateComment);
+
+            // Validate plate comment structure and content
+            List<String> plateCommentIssues = new ArrayList<>();
+            if (hasPlateComment) {
+                validatePlateCommentStructure(plateComment, plateCommentIssues, func, isThunk, isCompilerHelper);
+            }
+
+            if (compact) {
+                data.put("plate_issues", plateCommentIssues.size());
+            } else {
+                data.put("plate_comment_issues", plateCommentIssues);
+            }
+
+            // Check for undefined variables (both names and types)
+            // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
+            // v3.2.0: For thunk functions (single JMP), all decompiler variables belong to the
+            // callee body, not this function. Mark them all as unfixable at the thunk level.
+            List<String> undefinedVars = new ArrayList<>();
+            List<String> phantomVars = new ArrayList<>();
+            int unfixableUndefinedCount = 0;
+            boolean decompilationAvailable = false;
+
+            // Build set of variable names from low-level Variable API (hoisted for use in Hungarian check)
+            java.util.Set<String> localVarNames = new java.util.HashSet<>();
+            for (Variable local : func.getLocalVariables()) {
+                localVarNames.add(local.getName());
+            }
+
+            // Try to use decompilation-based detection (high-level API).
+            // Use the no-retry variant: in the scoring path, we cannot
+            // afford the 60→120→180s retry escalation (total 360s per
+            // function worst case), and abandoned retries leak
+            // DecompInterface contexts and eventually OOM Ghidra. Single 60s attempt is sufficient for scoring;
+            // a clean null return lets the caller record a miss.
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
+            if (decompResults != null && decompResults.decompileCompleted()) {
+                decompilationAvailable = true;
+                ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
+
+                if (highFunction != null) {
+                    // Check parameters (same as before, from Function API)
+                    for (Parameter param : func.getParameters()) {
+                        // Check for generic parameter names
+                        if (param.getName().startsWith("param_")) {
+                            undefinedVars.add(param.getName() + " (generic name)");
+                        }
+                        // Check for undefined data types
+                        String typeName = param.getDataType().getName();
+                        if (typeName.startsWith("undefined")) {
+                            undefinedVars.add(param.getName() + " (type: " + typeName + ")");
+                            // Detect type-rename ordering violation on parameters
+                            if (!param.getName().startsWith("param_")) {
+                                String impliedType = inferTypeFromHungarianPrefix(param.getName());
+                                if (impliedType != null) {
+                                    undefinedVars.add(param.getName() + " (WORKFLOW: renamed with '" + impliedType +
+                                        "' prefix but type is still " + typeName +
+                                        " — fix: set_function_prototype() with correct param type, then rename)");
+                                }
+                            }
+                        }
+                    }
+
+                    // Check locals from HIGH-LEVEL decompiled symbol map (not low-level stack frame)
+                    // This avoids phantom variables that exist in stack analysis but not decompilation
+                    java.util.Set<String> checkedVarNames = new java.util.HashSet<>();
+
+                    // v3.2.0: For thunks with no real locals, skip local variable checks entirely.
+                    // The decompiler projects the callee body's variables through the thunk view,
+                    // but these are display artifacts -- the thunk has no actual locals to fix.
+                    boolean thunkWithNoLocals = isThunk && localVarNames.isEmpty();
+
+                    Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                    while (symbols.hasNext()) {
+                        ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                        String name = symbol.getName();
+                        String typeName = symbol.getDataType().getName();
+                        checkedVarNames.add(name);
+
+                        // v3.0.1: Skip phantom decompiler artifacts (extraout_*, in_*)
+                        // These cannot be renamed or typed -- exclude from scoring
+                        if (name.startsWith("extraout_") || name.startsWith("in_")) {
+                            phantomVars.add(name + " (type: " + typeName + ", phantom)");
+                            continue;
+                        }
+
+                        // v3.2.0: Thunks with no real locals -- all decompiler variables are
+                        // body-projected artifacts. Skip entirely (don't penalize at all).
+                        if (thunkWithNoLocals) {
+                            continue;
+                        }
+
+                        // v3.2.0: For thunks with some locals, or register-only vars
+                        boolean isRegisterOnly = isThunk || !localVarNames.contains(name);
+
+                        // Check for generic local names (local_XX or XVar patterns)
+                        if (name.startsWith("local_") ||
+                            name.matches(".*Var\\d+") ||  // pvVar1, iVar2, etc.
+                            name.matches("(i|u|d|f|p|b)Var\\d+")) {  // specific type patterns
+                            undefinedVars.add(name + " (generic name)");
+                            if (isRegisterOnly) unfixableUndefinedCount++;
+                        }
+
+                        // Check for undefined data types (decompiler display type)
+                        if (typeName.startsWith("undefined")) {
+                            undefinedVars.add(name + " (type: " + typeName + ")");
+                            if (isRegisterOnly) unfixableUndefinedCount++;
+
+                            // Detect type-rename ordering violation: variable has a meaningful
+                            // Hungarian prefix implying a resolved type, but actual type is still undefined.
+                            // This means the AI renamed before setting the type — a workflow error.
+                            if (!name.startsWith("local_") && !name.startsWith("param_") &&
+                                !name.matches(".*Var\\d+") && !name.startsWith("extraout_") &&
+                                !name.startsWith("in_")) {
+                                // Variable was renamed (not auto-generated) but type is still undefined
+                                String impliedType = inferTypeFromHungarianPrefix(name);
+                                if (impliedType != null) {
+                                    String fixAction = isRegisterOnly
+                                        ? " — fix: type may be register-only, try set_variable_type('" + name + "', '" + impliedType.split("/")[0] + "'), on failure use PRE_COMMENT"
+                                        : " — fix: set_variable_type('" + name + "', '" + impliedType.split("/")[0] + "')";
+                                    undefinedVars.add(name + " (WORKFLOW: renamed with '" + impliedType +
+                                        "' prefix but type is still " + typeName + fixAction + ")");
+                                }
+                            }
+
+                            // Detect large byte-array buffers that likely need struct definitions
+                            java.util.regex.Matcher arrayMatcher = java.util.regex.Pattern.compile("undefined1\\[(\\d+)\\]").matcher(typeName);
+                            if (arrayMatcher.matches()) {
+                                int arraySize = Integer.parseInt(arrayMatcher.group(1));
+                                if (arraySize > 8) {
+                                    String bufferHint = name.toLowerCase();
+                                    boolean suggestStruct = bufferHint.contains("context") || bufferHint.contains("buffer") ||
+                                        bufferHint.contains("record") || bufferHint.contains("info") ||
+                                        bufferHint.contains("data") || bufferHint.contains("callback") ||
+                                        bufferHint.contains("param") || bufferHint.contains("state");
+                                    if (suggestStruct) {
+                                        undefinedVars.add(name + " (STRUCT: " + arraySize + "-byte buffer with struct-like name — create struct with create_struct(), then set_variable_type('" + name + "', 'YourStructName'))");
+                                    } else if (arraySize >= 16) {
+                                        // Large buffers always suggest struct even without name hints
+                                        undefinedVars.add(name + " (STRUCT: " + arraySize + "-byte buffer — likely needs struct definition via create_struct())");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // v3.0.1: Cross-check storage types from low-level Variable API
+                    // The decompiler may show resolved types (e.g. "short *") while the
+                    // actual storage type is still "undefined4". Catch these mismatches.
+                    for (Variable local : func.getLocalVariables()) {
+                        String localName = local.getName();
+                        String storageName = local.getDataType().getName();
+                        // Only check variables that exist in decompiled code (not stack phantoms)
+                        if (checkedVarNames.contains(localName) && storageName.startsWith("undefined")) {
+                            String flag = localName + " (storage type: " + storageName + ", decompiler shows resolved type)";
+                            if (!undefinedVars.contains(flag)) {
+                                undefinedVars.add(flag);
+                            }
+                        }
+                    }
+                    // Also check register-based HighSymbols whose storage type may be undefined
+                    // These may not appear in func.getLocalVariables() at all
+                    Iterator<ghidra.program.model.pcode.HighSymbol> storageCheckSymbols = highFunction.getLocalSymbolMap().getSymbols();
+                    while (storageCheckSymbols.hasNext()) {
+                        ghidra.program.model.pcode.HighSymbol sym = storageCheckSymbols.next();
+                        String symName = sym.getName();
+                        if (symName.startsWith("extraout_") || symName.startsWith("in_")) continue;
+                        ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
+                        if (highVar != null) {
+                            // Get the representative varnode to check actual storage
+                            ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
+                            if (rep != null && rep.getSize() > 0) {
+                                // Check if the HighVariable's declared type differs from what Ghidra stores
+                                DataType highType = highVar.getDataType();
+                                DataType symType = sym.getDataType();
+                                // If symbol storage reports undefined but decompiler infers a type
+                                if (symType != null && symType.getName().startsWith("undefined") &&
+                                    highType != null && !highType.getName().startsWith("undefined")) {
+                                    String flag = symName + " (storage type: " + symType.getName() + ", decompiler shows: " + highType.getName() + ")";
+                                    if (!undefinedVars.stream().anyMatch(v -> v.startsWith(symName + " "))) {
+                                        undefinedVars.add(flag);
+                                        // v3.1.1: Track as unfixable if register-only (not in func.getLocalVariables())
+                                        if (!localVarNames.contains(symName)) {
+                                            unfixableUndefinedCount++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback to low-level API if decompilation failed (with warning in output)
+            if (!decompilationAvailable) {
+                // Check parameters
+                for (Parameter param : func.getParameters()) {
+                    if (param.getName().startsWith("param_")) {
+                        undefinedVars.add(param.getName() + " (generic name)");
+                    }
+                    String typeName = param.getDataType().getName();
+                    if (typeName.startsWith("undefined")) {
+                        undefinedVars.add(param.getName() + " (type: " + typeName + ")");
+                    }
+                }
+
+                // Use low-level API with phantom variable warning
+                for (Variable local : func.getLocalVariables()) {
+                    if (local.getName().startsWith("local_")) {
+                        undefinedVars.add(local.getName() + " (generic name, may be phantom variable)");
+                    }
+                    String typeName = local.getDataType().getName();
+                    if (typeName.startsWith("undefined")) {
+                        undefinedVars.add(local.getName() + " (type: " + typeName + ", may be phantom variable)");
+                    }
+                }
+            }
+
+            data.put("decompilation_available", decompilationAvailable);
+            if (!decompilationAvailable) {
+                // Why the score fell back to the low-level API -- e.g. a native
+                // decompiler that failed to initialise (#654).
+                data.put("decompile_error", decompAttempt.failureReason());
+            }
+
+            // Bulk stack-array heuristic: functions with a very high count of
+            // generic locals (e.g., data table initializers with 1,000+ decomposed
+            // array slots) are impractical to fix via individual API calls.
+            // Reclassify the excess above a reasonable threshold as structural.
+            int BULK_UNDEFINED_THRESHOLD = 100;
+            int BULK_FIXABLE_ALLOWANCE = 20; // still count first 20 as fixable
+            int totalFixableUndefined = undefinedVars.size() - unfixableUndefinedCount;
+            if (totalFixableUndefined > BULK_UNDEFINED_THRESHOLD) {
+                int reclassified = totalFixableUndefined - BULK_FIXABLE_ALLOWANCE;
+                unfixableUndefinedCount += reclassified;
+                data.put("bulk_array_reclassified", reclassified);
+            }
+
+            if (compact) {
+                data.put("undefined_count", undefinedVars.size());
+                data.put("phantom_count", phantomVars.size());
+            } else {
+                data.put("undefined_variables", undefinedVars);
+
+                // v3.0.1: Report phantom variables separately (not counted in scoring)
+                data.put("phantom_variables", phantomVars);
+            }
+
+            // Check Hungarian notation compliance
+            // v3.2.0: Track unfixable Hungarian violations (register-only/thunk variables)
+            List<String> hungarianViolations = new ArrayList<>();
+            int unfixableHungarianCount = 0;
+            boolean funcIsThiscall = false;
+            try {
+                funcIsThiscall = "__thiscall".equals(func.getCallingConventionName());
+            } catch (Exception ignored) {}
+
+            for (Parameter param : func.getParameters()) {
+                int prevSize = hungarianViolations.size();
+                validateHungarianNotation(param.getName(), param.getDataType().getName(), false, true, hungarianViolations);
+                // __thiscall ECX this auto-param: any violation is structural (can't retype via API)
+                if (hungarianViolations.size() > prevSize && funcIsThiscall
+                        && "this".equals(param.getName()) && param.isAutoParameter()) {
+                    unfixableHungarianCount += (hungarianViolations.size() - prevSize);
+                }
+            }
+
+            // Use decompilation-based locals if available, otherwise fallback to low-level API
+            if (decompilationAvailable && decompResults != null && decompResults.getHighFunction() != null) {
+                ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
+                Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                while (symbols.hasNext()) {
+                    ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                    int prevSize = hungarianViolations.size();
+                    validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, false, hungarianViolations);
+                    // If a new violation was added and the variable is register-only or thunk-owned, it's unfixable
+                    if (hungarianViolations.size() > prevSize && (isThunk || !localVarNames.contains(symbol.getName()))) {
+                        unfixableHungarianCount += (hungarianViolations.size() - prevSize);
+                    }
+                }
+            } else {
+                // Fallback to low-level API
+                for (Variable local : func.getLocalVariables()) {
+                    validateHungarianNotation(local.getName(), local.getDataType().getName(), false, false, hungarianViolations);
+                }
+            }
+
+            // Enhanced validation: Check parameter type quality
+            // Pass existing decompilation to avoid redundant re-decompile (which can silently fail)
+            List<String> typeQualityIssues = new ArrayList<>();
+            ghidra.program.model.pcode.HighFunction hf = (decompilationAvailable && decompResults != null) ? decompResults.getHighFunction() : null;
+            validateParameterTypeQuality(func, typeQualityIssues, hf);
+
+            if (compact) {
+                data.put("hungarian_violations", hungarianViolations.size());
+                data.put("type_quality_issues", typeQualityIssues.size());
+            } else {
+                data.put("hungarian_notation_violations", hungarianViolations);
+                data.put("type_quality_issues", typeQualityIssues);
+            }
+
+            // NEW: Check for unrenamed DAT_* globals, LAB_* labels, and undocumented Ordinal calls in decompiled code
+            List<String> unrenamedGlobals = new ArrayList<>();
+            List<String> unrenamedLabels = new ArrayList<>();
+            List<String> undocumentedOrdinals = new ArrayList<>();
+            int inlineCommentCount = 0;
+            int codeLineCount = 0;
+
+            if (decompilationAvailable && decompResults != null) {
+                String decompiledCode = decompResults.getDecompiledFunction().getC();
+                if (decompiledCode != null) {
+                    decompiledCodeForContext = decompiledCode;
+                    if (!isCompilerHelper) {
+                        isCompilerHelper = looksLikeCompilerRuntimeHelper(func, decompiledCodeForContext, instructionCount, isThunk, isStub);
+                        data.put("is_compiler_helper", isCompilerHelper);
+                        data.put("documentation_profile", isCompilerHelper ? "compiler_helper" : classification);
+                    }
+                    // Count lines of code and inline comments
+                    // We need to distinguish between:
+                    // 1. Plate comments (before function body) - don't count
+                    // 2. Body comments (inside function braces) - count these
+                    String[] lines = decompiledCode.split("\n");
+                    boolean inFunctionBody = false;
+                    boolean inPlateComment = false;
+                    int braceDepth = 0;
+
+                    for (String line : lines) {
+                        String trimmed = line.trim();
+
+                        // Track plate comment block (before function signature)
+                        if (!inFunctionBody && trimmed.startsWith("/*")) {
+                            inPlateComment = true;
+                        }
+                        if (inPlateComment && trimmed.endsWith("*/")) {
+                            inPlateComment = false;
+                            continue;
+                        }
+                        if (inPlateComment) continue;
+
+                        // Track function body by counting braces
+                        for (char c : trimmed.toCharArray()) {
+                            if (c == '{') {
+                                braceDepth++;
+                                inFunctionBody = true;
+                            } else if (c == '}') {
+                                braceDepth--;
+                            }
+                        }
+
+                        // Count code lines (non-empty, non-comment lines inside function)
+                        if (inFunctionBody && !trimmed.isEmpty() &&
+                            !trimmed.startsWith("/*") && !trimmed.startsWith("*") && !trimmed.startsWith("//")) {
+                            codeLineCount++;
+                        }
+
+                        // Count comments inside function body
+                        // This includes both standalone comment lines and trailing comments
+                        if (inFunctionBody && trimmed.contains("/*")) {
+                            // Exclude WARNING comments from decompiler (they're not user-added)
+                            if (!trimmed.contains("WARNING:")) {
+                                inlineCommentCount++;
+                            }
+                        }
+                        // Also count // style comments
+                        if (inFunctionBody && trimmed.contains("//")) {
+                            inlineCommentCount++;
+                        }
+                    }
+
+                    // Find DAT_* references (unrenamed globals)
+                    java.util.regex.Pattern datPattern = java.util.regex.Pattern.compile("DAT_[0-9a-fA-F]+");
+                    java.util.regex.Matcher datMatcher = datPattern.matcher(decompiledCode);
+                    java.util.Set<String> foundDats = new java.util.HashSet<>();
+                    while (datMatcher.find()) {
+                        foundDats.add(datMatcher.group());
+                    }
+                    unrenamedGlobals.addAll(foundDats);
+
+                    // Find undocumented Ordinal calls in the function body
+                    // v3.2.0: Use callee-based detection instead of text scanning.
+                    // This correctly counts only functions THIS function calls (not callers
+                    // mentioned in the plate comment) and excludes self-referencing artifacts
+                    // from unresolved IAT indirect jumps.
+                    java.util.Set<String> calleeOrdinals = new java.util.HashSet<>();
+                    for (Function callee : func.getCalledFunctions(new ConsoleTaskMonitor())) {
+                        if (callee.getName().startsWith("Ordinal_")) {
+                            calleeOrdinals.add(callee.getName());
+                        }
+                    }
+
+                    // For each callee ordinal, check if it has a nearby comment in the decompiled body
+                    int bodyStart = decompiledCode.indexOf('{');
+                    String bodyCode = bodyStart >= 0 ? decompiledCode.substring(bodyStart) : decompiledCode;
+
+                    // Find LAB_* references (unrenamed labels within function body)
+                    java.util.regex.Pattern labPattern = java.util.regex.Pattern.compile("LAB_[0-9a-fA-F]+");
+                    java.util.regex.Matcher labMatcher = labPattern.matcher(bodyCode);
+                    java.util.Set<String> foundLabs = new java.util.HashSet<>();
+                    while (labMatcher.find()) {
+                        foundLabs.add(labMatcher.group());
+                    }
+                    unrenamedLabels.addAll(foundLabs);
+
+                    for (String ordinal : calleeOrdinals) {
+                        java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(ordinal));
+                        java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(bodyCode);
+                        boolean documented = false;
+                        while (ordinalMatcher.find()) {
+                            int pos = ordinalMatcher.start();
+                            int lineStart = bodyCode.lastIndexOf('\n', pos);
+                            int lineEnd = bodyCode.indexOf('\n', pos);
+                            if (lineEnd == -1) lineEnd = bodyCode.length();
+                            String currentLine = bodyCode.substring(Math.max(0, lineStart + 1), lineEnd);
+                            if (currentLine.contains("/*") || currentLine.contains("//")) {
+                                documented = true;
+                                break;
+                            }
+                            if (lineStart > 0) {
+                                int prevLineStart = bodyCode.lastIndexOf('\n', lineStart - 1);
+                                String prevLine = bodyCode.substring(Math.max(0, prevLineStart + 1), lineStart).trim();
+                                if ((prevLine.contains("/*") || prevLine.contains("//")) && prevLine.contains(ordinal)) {
+                                    documented = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!documented) {
+                            undocumentedOrdinals.add(ordinal);
+                        }
+                    }
+                }
+            }
+
+            // Count disassembly EOL comments and detect undocumented magic numbers
+            int disasmCommentCount = 0;
+            List<String> undocumentedMagicNumbers = new ArrayList<>();
+            ghidra.program.model.listing.InstructionIterator disasmIter =
+                program.getListing().getInstructions(func.getBody(), true);
+            while (disasmIter.hasNext()) {
+                ghidra.program.model.listing.Instruction instr = disasmIter.next();
+                String eolComment = program.getListing().getComment(
+                    ghidra.program.model.listing.CodeUnit.EOL_COMMENT, instr.getAddress());
+                boolean hasComment = eolComment != null && !eolComment.isEmpty();
+                if (hasComment) {
+                    disasmCommentCount++;
+                }
+
+                // Detect magic number constants in instruction operands
+                if (!hasComment) {
+                    for (int opIdx = 0; opIdx < instr.getNumOperands(); opIdx++) {
+                        int opType = instr.getOperandType(opIdx);
+                        // Check for scalar (immediate) operand
+                        if ((opType & ghidra.program.model.lang.OperandType.SCALAR) != 0) {
+                            ghidra.program.model.scalar.Scalar scalar = instr.getScalar(opIdx);
+                            if (scalar != null) {
+                                long val = scalar.getUnsignedValue();
+                                // Flag non-trivial constants: skip 0, 1, -1, small powers of 2
+                                if (val > 1 && val != 0xFFFFFFFFL && val != 2 && val != 4 && val != 8 && val != 16) {
+                                    String hex = String.format("0x%X", val);
+                                    undocumentedMagicNumbers.add(hex + " at " + instr.getAddress().toString());
+                                    break; // one finding per instruction is enough
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Include disassembly comments in total for density calculation
+            int totalCommentCount = inlineCommentCount + disasmCommentCount;
+
+            // Detect unresolved struct field accesses in decompiled code
+            // Patterns: *(type *)(var + 0xNN), var[0xNN], *(int *)(param + 0xNN)
+            List<String> unresolvedStructAccesses = new ArrayList<>();
+            if (decompiledCodeForContext != null) {
+                int bodyStart2 = decompiledCodeForContext.indexOf('{');
+                String bodyForStruct = bodyStart2 >= 0 ? decompiledCodeForContext.substring(bodyStart2) : decompiledCodeForContext;
+                // Match raw hex offset dereferences: *(type *)(expr + 0xNN) or *(expr + 0xNN)
+                java.util.regex.Pattern rawOffsetPattern = java.util.regex.Pattern.compile(
+                    "\\*\\s*\\([^)]*\\)\\s*\\([^)]+\\+\\s*(0x[0-9a-fA-F]+)\\)");
+                java.util.regex.Matcher rawMatcher = rawOffsetPattern.matcher(bodyForStruct);
+                java.util.Set<String> seenOffsets = new java.util.HashSet<>();
+                while (rawMatcher.find()) {
+                    String offset = rawMatcher.group(1);
+                    if (seenOffsets.add(offset)) {
+                        unresolvedStructAccesses.add("raw offset dereference at +" + offset);
+                    }
+                }
+            }
+
+            if (compact) {
+                data.put("globals_unrenamed", unrenamedGlobals.size());
+                data.put("labels_unrenamed", unrenamedLabels.size());
+                data.put("ordinals_undocumented", undocumentedOrdinals.size());
+                data.put("magic_numbers_undocumented", undocumentedMagicNumbers.size());
+                data.put("struct_accesses_unresolved", unresolvedStructAccesses.size());
+            } else {
+                data.put("unrenamed_globals", unrenamedGlobals);
+                data.put("unrenamed_labels", unrenamedLabels);
+                data.put("undocumented_ordinals", undocumentedOrdinals);
+                data.put("undocumented_magic_numbers", undocumentedMagicNumbers);
+                data.put("unresolved_struct_accesses", unresolvedStructAccesses);
+            }
+
+            data.put("inline_comment_count", inlineCommentCount);
+            data.put("disasm_comment_count", disasmCommentCount);
+            data.put("code_line_count", codeLineCount);
+
+            // Calculate comment density using total comments (decompiler + disassembly)
+            double commentDensity = codeLineCount > 0 ? (totalCommentCount * 10.0 / codeLineCount) : 0;
+            data.put("comment_density", Math.round(commentDensity * 100.0) / 100.0);
+
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), unrenamedLabels.size(), undocumentedOrdinals.size(), undocumentedMagicNumbers.size(), unresolvedStructAccesses.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount, unfixableHungarianCount, isThunk, isStub, isCompilerHelper);
+            data.put("completeness_score", scoreResult.score);
+            data.put("effective_score", scoreResult.effectiveScore);
+            data.put("all_deductions_unfixable", scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0);
+            data.put("fixable_deductions", scoreResult.fixablePenalty);
+            data.put("structural_deductions", scoreResult.structuralPenalty);
+            data.put("max_achievable_score", scoreResult.maxAchievableScore);
+
+            if (compact) {
+                data.put("deduction_count", scoreResult.deductionBreakdown.size());
+            } else {
+                data.put("deduction_breakdown", scoreResult.deductionBreakdown);
+            }
+
+            // PROP-0002: Report whether function has renameable variables (not register-only SSA)
+            data.put("has_renameable_variables", !localVarNames.isEmpty());
+
+            if (!compact) {
+                // Generate workflow-aligned recommendations (skipped in compact mode -- AI has these in its prompt)
+                List<String> recommendations = generateWorkflowRecommendations(
+                    func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
+                    unrenamedGlobals, unrenamedLabels, undocumentedOrdinals, undocumentedMagicNumbers, unresolvedStructAccesses,
+                    commentDensity, scoreResult, codeLineCount, isThunk, isStub, isCompilerHelper
+                );
+
+                List<Map<String, Object>> remediationActions = generateRemediationActions(
+                    func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
+                    unrenamedGlobals, unrenamedLabels, undocumentedOrdinals, undocumentedMagicNumbers, unresolvedStructAccesses,
+                    commentDensity, scoreResult, isThunk, isStub, isCompilerHelper
+                );
+
+                data.put("recommendations", recommendations);
+                data.put("remediation_actions", remediationActions);
+            }
+
+            return Response.ok(data);
+        } catch (Exception e) {
+            return ServiceUtils.fail(e);
+        }
     }
 
     // Bulk helper for analyze_function_completeness(addresses=...). Merged in 7.0.0.
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         final List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
         } else if (addressesObj instanceof String s) {
-            List<String> parsed = new ArrayList<>();
-            for (String part : s.split(",")) {
-                String trimmed = part.trim();
-                if (!trimmed.isEmpty()) {
-                    parsed.add(trimmed);
-                }
-            }
-            addresses = parsed;
+            addresses = ServiceUtils.csvTokens(s);
         } else {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }
@@ -2006,131 +1854,28 @@ public class AnalysisService {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }
 
-        // Process one function per invokeAndWait so the EDT is never held for
-        // long stretches. Earlier attempts tried chunks of 5 to amortize the
-        // invokeAndWait overhead, but under concurrent HTTP load (thread pool
-        // allowing multiple callers simultaneously), chunks of 5 held the EDT
-        // 300-2000 ms per call. With 3+ concurrent callers, the EDT queue
-        // depth exceeded Ghidra's 20s Swing.runNow deadlock timeout and
-        // internal flushEvents / auto-analysis tasks started failing with
-        // "Timed-out waiting to run a Swing task--potential deadlock".
-        //
-        // Single-function chunks hold the EDT for ~50-200 ms each and yield
-        // between calls, so Ghidra's internal tasks can always slot in.
-        // Trade-off: slightly more invokeAndWait overhead per address, but
-        // GUI stays responsive and internal deadlocks don't happen.
-        final int CHUNK_SIZE = 1;
+        // On the request thread, like the single-function call: nothing here needs the Swing
+        // thread, and a runaway decompile is bounded by the decompiler's own timeout. One
+        // function's failure is that function's result; the rest of the batch still runs.
         List<Object> results = new ArrayList<>();
-
-        for (int chunkStart = 0; chunkStart < addresses.size(); chunkStart += CHUNK_SIZE) {
-            final int start = chunkStart;
-            final int end = Math.min(chunkStart + CHUNK_SIZE, addresses.size());
-            final List<Object> chunkOut = new ArrayList<>();
-            final AtomicReference<String> chunkErr = new AtomicReference<>(null);
-
-            Runnable chunkWork = () -> {
-                try {
-                    for (int i = start; i < end; i++) {
-                        Response r = analyzeFunctionCompleteness(addresses.get(i), false, programName);
-                        if (r instanceof Response.Ok ok) {
-                            chunkOut.add(ok.data());
-                        } else if (r instanceof Response.Err err) {
-                            chunkOut.add(JsonHelper.mapOf("error", err.message()));
-                        } else {
-                            chunkOut.add(JsonHelper.mapOf("error", "Unexpected response shape"));
-                        }
-                    }
-                } catch (Exception e) {
-                    chunkErr.set(e.getMessage());
-                }
-            };
-
-            // Submit the chunk to the EDT non-blockingly and wait on a future
-            // with a hard timeout. If the decompile inside the chunk runs away
-            // (pathological function), we release the HTTP thread and continue
-            // processing the REMAINING addresses in the batch instead of
-            // aborting the whole batch. This is critical: a dense cluster of
-            // pathological functions (e.g. glide3x 0x101e_-0x101f3_) would
-            // otherwise discard every successful function in each batch.
-            //
-            // The runaway work STILL executes on the EDT in the background —
-            // we cannot cancel Swing tasks — but at least our HTTP thread is
-            // freed and the Python scan side records this function as failed
-            // and keeps processing the rest of the batch.
-            // 90s = 60s decompile (DECOMPILE_TIMEOUT_SECONDS, the hard cap
-            // inside DecompInterface.decompileFunction) + 30s buffer for the
-            // rest of analyzeFunctionCompleteness (classification, deduction
-            // analysis, Hungarian checks, etc.). Any function that takes more
-            // than 60s on the decompile itself has failed at the decompiler
-            // level and will return null cleanly — no need to wait longer.
-            final int PER_CHUNK_TIMEOUT_SEC = 90;
-            boolean chunkTimedOut = false;
-            if (SwingUtilities.isEventDispatchThread()) {
-                // Already on EDT (nested call) — run directly, no future needed
-                chunkWork.run();
-                if (chunkErr.get() != null) {
-                    // Inline the error as this chunk's placeholder result and
-                    // continue with the next chunk rather than aborting
-                    results.add(JsonHelper.mapOf("error", "chunk_error: " + chunkErr.get()));
-                    continue;
-                }
-            } else {
-                java.util.concurrent.CompletableFuture<Void> chunkFuture =
-                    new java.util.concurrent.CompletableFuture<>();
-                SwingUtilities.invokeLater(() -> {
-                    try {
-                        chunkWork.run();
-                        chunkFuture.complete(null);
-                    } catch (Throwable t) {
-                        chunkFuture.completeExceptionally(t);
-                    }
-                });
-                try {
-                    chunkFuture.get(PER_CHUNK_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS);
-                } catch (java.util.concurrent.TimeoutException e) {
-                    chunkTimedOut = true;
-                } catch (Exception e) {
-                    // Other exception — inline as error and continue
-                    results.add(JsonHelper.mapOf("error", "chunk_exception: " + e.getMessage()));
-                    continue;
-                }
-                if (chunkTimedOut) {
-                    // Pathological decompile — log the address, insert an
-                    // error placeholder for this ONE function, and continue
-                    // with the rest of the batch. The stuck decompile is
-                    // still running on the EDT but we're no longer waiting.
-                    String addr = addresses.get(start);
-                    Msg.warn(this, String.format(
-                        "analyze_function_completeness: function %s (index %d) exceeded %ds — skipping to next",
-                        addr, start, PER_CHUNK_TIMEOUT_SEC
-                    ));
-                    results.add(JsonHelper.mapOf("error",
-                        "chunk_timeout: " + addr + " exceeded " + PER_CHUNK_TIMEOUT_SEC + "s on EDT"));
-                    continue;
-                }
-                if (chunkErr.get() != null) {
-                    // Inner exception — inline as error and continue
-                    results.add(JsonHelper.mapOf("error", "chunk_error: " + chunkErr.get()));
-                    continue;
-                }
+        for (String address : addresses) {
+            Response r;
+            try {
+                ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, address);
+                if (resolved.hasError()) { r = resolved.error(); }
+                else { r = analyzeFunctionCompleteness(resolved.function(), false, "", program); }
+            } catch (Exception e) {
+                r = ServiceUtils.fail(e);
             }
-
-            results.addAll(chunkOut);
-
-            // Yield between chunks so the EDT can service queued GUI events
-            // (mouse clicks, keyboard input, paint events). Without this pause,
-            // back-to-back invokeLater calls never give the EDT a chance to
-            // process user input and Ghidra appears frozen.
-            if (end < addresses.size()) {
-                try {
-                    Thread.sleep(5);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+            if (r instanceof Response.Ok ok) {
+                results.add(ok.data());
+            } else if (r instanceof Response.Err err) {
+                results.add(JsonHelper.mapOf("error", err.message()));
+            } else {
+                results.add(JsonHelper.mapOf("error", "Unexpected response shape"));
             }
         }
-        return Response.ok(JsonHelper.mapOf("results", results, "count", addresses.size()));
+        return ServiceUtils.listed("results", results);
     }
 
     /**
@@ -2138,94 +1883,64 @@ public class AnalysisService {
      */
     @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response findNextUndefinedFunction(
-            @Param(value = "start_address", paramType = "address",
+            @Param(value = "start_address", paramType = "address", defaultValue = "",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String startAddress,
+                               + "address is unambiguous.") Address start,
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        // Resolve address before entering SwingUtilities lambda
-        final Address startAddr;
-        if (startAddress != null && !startAddress.isEmpty()) {
-            startAddr = ServiceUtils.parseAddress(program, startAddress);
-            if (startAddr == null) return Response.err(ServiceUtils.getLastParseError());
-        } else {
-            startAddr = program.getMinAddress();
-        }
-
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+            @Param(value = "program", defaultValue = "") Program program) {
+        final Address startAddr = start != null ? start : program.getMinAddress();
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    FunctionManager funcMgr = program.getFunctionManager();
-                    Address start = startAddr;
+            FunctionManager funcMgr = program.getFunctionManager();
 
-                    String searchPattern = pattern; // null means match all auto-generated names
-                    boolean ascending = !"descending".equals(direction);
+            String searchPattern = pattern; // null means match all auto-generated names
+            boolean ascending = !"descending".equals(direction);
 
-                    FunctionIterator iter = ascending ?
-                        funcMgr.getFunctions(start, true) :
-                        funcMgr.getFunctions(start, false);
+            Address scanFrom = startAddr;
 
-                    Function found = null;
-                    while (iter.hasNext()) {
-                        Function func = iter.next();
-                        boolean matches = (searchPattern != null)
-                            ? func.getName().startsWith(searchPattern)
-                            : ServiceUtils.isAutoGeneratedName(func.getName());
-                        if (matches) {
-                            found = func;
-                            break;
-                        }
-                    }
+            FunctionIterator iter = ascending ?
+                funcMgr.getFunctions(scanFrom, true) :
+                funcMgr.getFunctions(scanFrom, false);
 
-                    if (found != null) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "found", true,
-                            "function_name", found.getName(),
-                            "function_address", found.getEntryPoint().toString(),
-                            "xref_count", found.getSymbol().getReferenceCount()
-                        )));
-                    } else {
-                        responseRef.set(Response.ok(JsonHelper.mapOf("found", false)));
-                    }
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
+            Function found = null;
+            while (iter.hasNext()) {
+                Function func = iter.next();
+                boolean matches = (searchPattern != null)
+                    ? func.getName().startsWith(searchPattern)
+                    : ServiceUtils.isAutoGeneratedName(func.getName());
+                if (matches) {
+                    found = func;
+                    break;
                 }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
             }
+
+            if (found != null) {
+                return Response.ok(JsonHelper.mapOf(
+                    "found", true,
+                    "function_name", found.getName(),
+                    "function_address", found.getEntryPoint().toString(),
+                    "xref_count", found.getSymbol().getReferenceCount()
+                ));
+            }
+            return Response.ok(JsonHelper.mapOf("found", false));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        return responseRef.get();
     }
 
-    // Backward compatibility overload
-    public Response findNextUndefinedFunction(String startAddress, String criteria,
-                                            String pattern, String direction) {
-        return findNextUndefinedFunction(startAddress, criteria, pattern, direction, null);
-    }
+
 
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For decompile+callers+comments+xrefs in one read prefer /get_functions. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.", category = "analysis", access = ToolAccess.READ_ONLY)
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address. For a cacheable read of decompile+callers+comments+xrefs prefer ghidra://function/{program}/{address} (or /get_functions). decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeFunctionComplete(
-            @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") String name,
+            @Param(value = "function", aliases = {"name", "address", "function_address", "function_name"}, description = "Function reference (name or address)") Function func,
             @Param(value = "include_xrefs", defaultValue = "true",
                    description = "True (the default) adds `xrefs` — the sources referencing the entry "
                                + "point — capped at the first 100. `xref_count` counts what was listed, so "
@@ -2247,251 +1962,225 @@ public class AnalysisService {
                    description = "True (the default) adds the function's parameters and locals with their "
                                + "types and storage.") boolean includeVariables,
             @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "variant", defaultValue = "",
                    description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.") String variant) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+        // Null -- the common case, including every call that omits variant= -- means
+        // nothing contradicts the caller and the pseudocode field may travel.
+        return buildAnalyzeFunctionCompleteResult(program, func, includeXrefs, includeCallees,
+                includeCallers, includeDisasm, includeVariables, includeCompleteness,
+                ServiceUtils.variantRejectionData(program, variant));
+    }
 
-        // Resolved before the lambda so the lambda captures a final value. Null -- the
-        // common case, including every call that omits variant= -- means nothing
-        // contradicts the caller and the pseudocode field may travel.
-        final Map<String, Object> variantIssue = ServiceUtils.variantRejectionData(program, variant);
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
+    private Response buildAnalyzeFunctionCompleteResult(Program program, Function func, boolean includeXrefs,
+            boolean includeCallees, boolean includeCallers, boolean includeDisasm, boolean includeVariables,
+            boolean includeCompleteness, Map<String, Object> variantIssue) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, name);
-                    if (lookup.hasError()) {
-                        errorMsg.set(lookup.message());
-                        return;
-                    }
-                    Function func = lookup.function();
 
-                    // Build structured data for Gson serialization
-                    Map<String, Object> data = new LinkedHashMap<>();
-                    data.put("name", func.getName());
-                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
-                    data.put("classification", classifyFunction(func, program));
-                    data.put("signature", func.getSignature().toString());
+            // Build structured data for Gson serialization
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("name", func.getName());
+            data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            data.put("classification", classifyFunction(func, program));
+            data.put("signature", func.getSignature().toString());
 
-                    // v3.0.1: Flag undefined return type
-                    String retTypeName = func.getReturnType().getName();
-                    if (retTypeName.startsWith("undefined")) {
-                        data.put("return_type_resolved", false);
-                        data.put("return_type_warning", "Return type is '" + retTypeName
-                              + "' -- verify EAX at RET. Do not trust decompiler void display.");
+            // v3.0.1: Flag undefined return type
+            String retTypeName = func.getReturnType().getName();
+            if (retTypeName.startsWith("undefined")) {
+                data.put("return_type_resolved", false);
+                data.put("return_type_warning", "Return type is '" + retTypeName
+                      + "' -- verify EAX at RET. Do not trust decompiler void display.");
+            } else {
+                data.put("return_type_resolved", true);
+            }
+
+            // v3.0.1: Include decompiled code (previously only in headless version)
+            // HOTFIX v5.3.1: use no-retry variant. The retry wrapper's
+            // 60→120→180s escalation saturates the HTTP thread pool on
+            // pathological functions and gives MCP handlers no way to
+            // fail fast. A clean miss here is preferable to a 6-minute
+            // thread stall.
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
+            if (decompResults != null && decompResults.decompileCompleted() &&
+                decompResults.getDecompiledFunction() != null) {
+                String decompiledCode = decompResults.getDecompiledFunction().getC();
+                if (decompiledCode != null) {
+                    // Stamped like get_functions: the dialect that produced the C
+                    // travels with it, plus the ambiguity advisory where the loader
+                    // had a real choice to get wrong.
+                    //
+                    // variantIssue is non-null only when the caller NAMED a variant
+                    // the program contradicts. Withholding this one field, rather
+                    // than failing the whole composite, keeps the analysis useful
+                    // while closing the route that would otherwise hand out exactly
+                    // what get_functions just refused.
+                    if (variantIssue == null) {
+                        ServiceUtils.putLanguageSelection(data, program);
+                        data.put("decompiled_code", decompiledCode);
                     } else {
-                        data.put("return_type_resolved", true);
+                        data.put("decompiled_code_withheld", variantIssue);
                     }
+                }
+            } else {
+                // Same keys get_functions uses. Without them a decompiler that never
+                // started was indistinguishable from a field nobody asked for (#654).
+                data.put("decompile_failed", true);
+                data.put("decompile_error", decompAttempt.failureReason());
+            }
 
-                    // v3.0.1: Include decompiled code (previously only in headless version)
-                    // HOTFIX v5.3.1: use no-retry variant. The retry wrapper's
-                    // 60→120→180s escalation saturates the HTTP thread pool on
-                    // pathological functions and gives MCP handlers no way to
-                    // fail fast. A clean miss here is preferable to a 6-minute
-                    // thread stall.
-                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-                    if (decompResults != null && decompResults.decompileCompleted() &&
-                        decompResults.getDecompiledFunction() != null) {
-                        String decompiledCode = decompResults.getDecompiledFunction().getC();
-                        if (decompiledCode != null) {
-                            // Stamped like get_functions: the dialect that produced the C
-                            // travels with it, plus the ambiguity advisory where the loader
-                            // had a real choice to get wrong.
-                            //
-                            // variantIssue is non-null only when the caller NAMED a variant
-                            // the program contradicts. Withholding this one field, rather
-                            // than failing the whole composite, keeps the analysis useful
-                            // while closing the route that would otherwise hand out exactly
-                            // what get_functions just refused.
-                            if (variantIssue == null) {
-                                ServiceUtils.putLanguageSelection(data, program);
-                                data.put("decompiled_code", decompiledCode);
-                            } else {
-                                data.put("decompiled_code_withheld", variantIssue);
-                            }
+            // Include xrefs
+            if (includeXrefs) {
+                List<Map<String, Object>> xrefList = new ArrayList<>();
+                ReferenceIterator refs = program.getReferenceManager().getReferencesTo(func.getEntryPoint());
+                int refCount = 0;
+                while (refs.hasNext() && refCount < 100) {
+                    Reference ref = refs.next();
+                    Address fromAddr = ref.getFromAddress();
+                    Map<String, Object> xrefItem = new LinkedHashMap<>();
+                    xrefItem.put("from", fromAddr.toString(false));
+                    if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                        xrefItem.put("from_full", fromAddr.toString());
+                        xrefItem.put("from_space", fromAddr.getAddressSpace().getName());
+                    }
+                    xrefList.add(xrefItem);
+                    refCount++;
+                }
+                data.put("xrefs", xrefList);
+                data.put("xref_count", refCount);
+            }
+
+            // Include callees
+            if (includeCallees) {
+                Set<Function> calledFuncs = func.getCalledFunctions(null);
+                List<String> calleeNames = new ArrayList<>();
+                for (Function called : calledFuncs) {
+                    calleeNames.add(called.getName());
+                }
+                data.put("callees", calleeNames);
+
+                // v3.0.1: Wrapper return propagation hint
+                // If function has exactly 1 callee and <=15 instructions, check callee return type
+                if (calleeNames.size() == 1 && retTypeName.startsWith("undefined")) {
+                    Function callee = calledFuncs.iterator().next();
+                    String calleeRetType = callee.getReturnType().getName();
+                    if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
+                        // Count instructions to confirm wrapper pattern
+                        Listing tmpListing = program.getListing();
+                        InstructionIterator tmpIter = tmpListing.getInstructions(func.getBody(), true);
+                        int instrTotal = 0;
+                        while (tmpIter.hasNext()) { tmpIter.next(); instrTotal++; }
+                        if (instrTotal <= 15) {
+                            data.put("wrapper_hint", "Callee '" + callee.getName()
+                                  + "' returns " + calleeRetType
+                                  + ". This wrapper likely returns the same type -- verify EAX is not clobbered before RET.");
                         }
                     }
+                }
+            }
 
-                    // Include xrefs
-                    if (includeXrefs) {
-                        List<Map<String, Object>> xrefList = new ArrayList<>();
-                        ReferenceIterator refs = program.getReferenceManager().getReferencesTo(func.getEntryPoint());
-                        int refCount = 0;
-                        while (refs.hasNext() && refCount < 100) {
-                            Reference ref = refs.next();
-                            Address fromAddr = ref.getFromAddress();
-                            Map<String, Object> xrefItem = new LinkedHashMap<>();
-                            xrefItem.put("from", fromAddr.toString(false));
-                            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
-                                xrefItem.put("from_full", fromAddr.toString());
-                                xrefItem.put("from_space", fromAddr.getAddressSpace().getName());
-                            }
-                            xrefList.add(xrefItem);
-                            refCount++;
-                        }
-                        data.put("xrefs", xrefList);
-                        data.put("xref_count", refCount);
-                    }
+            // Include callers
+            if (includeCallers) {
+                List<String> callerNames = new ArrayList<>();
+                Set<Function> callingFuncs = func.getCallingFunctions(null);
+                for (Function caller : callingFuncs) {
+                    callerNames.add(caller.getName());
+                }
+                data.put("callers", callerNames);
+            }
 
-                    // Include callees
-                    if (includeCallees) {
-                        Set<Function> calledFuncs = func.getCalledFunctions(null);
-                        List<String> calleeNames = new ArrayList<>();
-                        for (Function called : calledFuncs) {
-                            calleeNames.add(called.getName());
-                        }
-                        data.put("callees", calleeNames);
+            // Include disassembly
+            if (includeDisasm) {
+                List<Map<String, Object>> disasmList = new ArrayList<>();
+                Listing listing = program.getListing();
+                AddressSetView body = func.getBody();
+                InstructionIterator instrIter = listing.getInstructions(body, true);
+                int instrCount = 0;
+                while (instrIter.hasNext() && instrCount < 100) {
+                    Instruction instr = instrIter.next();
+                    Map<String, Object> instrItem = new LinkedHashMap<>();
+                    instrItem.putAll(ServiceUtils.addressToJson(instr.getAddress(), program));
+                    instrItem.put("mnemonic", instr.getMnemonicString());
+                    disasmList.add(instrItem);
+                    instrCount++;
+                }
+                data.put("disassembly", disasmList);
+            }
 
-                        // v3.0.1: Wrapper return propagation hint
-                        // If function has exactly 1 callee and <=15 instructions, check callee return type
-                        if (calleeNames.size() == 1 && retTypeName.startsWith("undefined")) {
-                            Function callee = calledFuncs.iterator().next();
-                            String calleeRetType = callee.getReturnType().getName();
-                            if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
-                                // Count instructions to confirm wrapper pattern
-                                Listing tmpListing = program.getListing();
-                                InstructionIterator tmpIter = tmpListing.getInstructions(func.getBody(), true);
-                                int instrTotal = 0;
-                                while (tmpIter.hasNext()) { tmpIter.next(); instrTotal++; }
-                                if (instrTotal <= 15) {
-                                    data.put("wrapper_hint", "Callee '" + callee.getName()
-                                          + "' returns " + calleeRetType
-                                          + ". This wrapper likely returns the same type -- verify EAX is not clobbered before RET.");
+            // Include variables (v3.0.1: use HighFunction for locals to capture register-based vars)
+            if (includeVariables) {
+                List<Map<String, Object>> paramList = new ArrayList<>();
+                Parameter[] params = func.getParameters();
+                for (Parameter param : params) {
+                    paramList.add(JsonHelper.mapOf(
+                        "name", param.getName(),
+                        "type", param.getDataType().getName(),
+                        "storage", param.getVariableStorage().toString()
+                    ));
+                }
+                data.put("parameters", paramList);
+
+                List<Map<String, Object>> localList = new ArrayList<>();
+
+                // Use HighFunction symbol map for locals (captures register-based and SSA variables)
+                if (decompResults != null && decompResults.decompileCompleted()) {
+                    ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
+                    if (highFunc != null) {
+                        java.util.Iterator<ghidra.program.model.pcode.HighSymbol> symbols =
+                            highFunc.getLocalSymbolMap().getSymbols();
+                        while (symbols.hasNext()) {
+                            ghidra.program.model.pcode.HighSymbol sym = symbols.next();
+                            String symName = sym.getName();
+                            boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
+                            // Get storage location from HighVariable
+                            String storageStr = "";
+                            ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
+                            if (highVar != null && highVar.getRepresentative() != null) {
+                                ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
+                                if (rep.getAddress() != null) {
+                                    storageStr = rep.getAddress().toString() + ":" + rep.getSize();
                                 }
                             }
-                        }
-                    }
-
-                    // Include callers
-                    if (includeCallers) {
-                        List<String> callerNames = new ArrayList<>();
-                        Set<Function> callingFuncs = func.getCallingFunctions(null);
-                        for (Function caller : callingFuncs) {
-                            callerNames.add(caller.getName());
-                        }
-                        data.put("callers", callerNames);
-                    }
-
-                    // Include disassembly
-                    if (includeDisasm) {
-                        List<Map<String, Object>> disasmList = new ArrayList<>();
-                        Listing listing = program.getListing();
-                        AddressSetView body = func.getBody();
-                        InstructionIterator instrIter = listing.getInstructions(body, true);
-                        int instrCount = 0;
-                        while (instrIter.hasNext() && instrCount < 100) {
-                            Instruction instr = instrIter.next();
-                            Map<String, Object> instrItem = new LinkedHashMap<>();
-                            instrItem.putAll(ServiceUtils.addressToJson(instr.getAddress(), program));
-                            instrItem.put("mnemonic", instr.getMnemonicString());
-                            disasmList.add(instrItem);
-                            instrCount++;
-                        }
-                        data.put("disassembly", disasmList);
-                    }
-
-                    // Include variables (v3.0.1: use HighFunction for locals to capture register-based vars)
-                    if (includeVariables) {
-                        List<Map<String, Object>> paramList = new ArrayList<>();
-                        Parameter[] params = func.getParameters();
-                        for (Parameter param : params) {
-                            paramList.add(JsonHelper.mapOf(
-                                "name", param.getName(),
-                                "type", param.getDataType().getName(),
-                                "storage", param.getVariableStorage().toString()
+                            localList.add(JsonHelper.mapOf(
+                                "name", symName,
+                                "type", sym.getDataType().getName(),
+                                "storage", storageStr,
+                                "is_phantom", isPhantom,
+                                "in_decompiled_code", true
                             ));
                         }
-                        data.put("parameters", paramList);
-
-                        List<Map<String, Object>> localList = new ArrayList<>();
-
-                        // Use HighFunction symbol map for locals (captures register-based and SSA variables)
-                        if (decompResults != null && decompResults.decompileCompleted()) {
-                            ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
-                            if (highFunc != null) {
-                                java.util.Iterator<ghidra.program.model.pcode.HighSymbol> symbols =
-                                    highFunc.getLocalSymbolMap().getSymbols();
-                                while (symbols.hasNext()) {
-                                    ghidra.program.model.pcode.HighSymbol sym = symbols.next();
-                                    String symName = sym.getName();
-                                    boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
-                                    // Get storage location from HighVariable
-                                    String storageStr = "";
-                                    ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
-                                    if (highVar != null && highVar.getRepresentative() != null) {
-                                        ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
-                                        if (rep.getAddress() != null) {
-                                            storageStr = rep.getAddress().toString() + ":" + rep.getSize();
-                                        }
-                                    }
-                                    localList.add(JsonHelper.mapOf(
-                                        "name", symName,
-                                        "type", sym.getDataType().getName(),
-                                        "storage", storageStr,
-                                        "is_phantom", isPhantom,
-                                        "in_decompiled_code", true
-                                    ));
-                                }
-                            }
-                        }
-
-                        // Fallback: if decompilation unavailable, use low-level API
-                        if (decompResults == null || !decompResults.decompileCompleted()) {
-                            Variable[] locals = func.getLocalVariables();
-                            for (Variable local : locals) {
-                                localList.add(JsonHelper.mapOf(
-                                    "name", local.getName(),
-                                    "type", local.getDataType().getName(),
-                                    "storage", local.getVariableStorage().toString(),
-                                    "is_phantom", false,
-                                    "in_decompiled_code", false
-                                ));
-                            }
-                        }
-                        data.put("locals", localList);
                     }
-
-                    // Include completeness scoring (GitHub #109)
-                    if (includeCompleteness) {
-                        String addrStr = func.getEntryPoint().toString(false);
-                        Response completenessResp = analyzeFunctionCompleteness(addrStr, true, programName);
-                        if (completenessResp instanceof Response.Ok ok) {
-                            data.put("completeness", ok.data());
-                        }
-                    }
-
-                    resultData.set(data);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
                 }
-            });
 
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+                // Fallback: if decompilation unavailable, use low-level API
+                if (decompResults == null || !decompResults.decompileCompleted()) {
+                    Variable[] locals = func.getLocalVariables();
+                    for (Variable local : locals) {
+                        localList.add(JsonHelper.mapOf(
+                            "name", local.getName(),
+                            "type", local.getDataType().getName(),
+                            "storage", local.getVariableStorage().toString(),
+                            "is_phantom", false,
+                            "in_decompiled_code", false
+                        ));
+                    }
+                }
+                data.put("locals", localList);
             }
+
+            // Include completeness scoring (GitHub #109)
+            if (includeCompleteness) {
+                Response completenessResp = analyzeFunctionCompleteness(func, true, "", program);
+                if (completenessResp instanceof Response.Ok ok) {
+                    data.put("completeness", ok.data());
+                }
+            }
+
+            return Response.ok(data);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        return Response.ok(resultData.get());
-    }
-
-    // Backward compatibility overloads
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, null, "");
-    }
-
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-                                          String programName) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, programName, "");
     }
 
     /**
@@ -2689,6 +2378,7 @@ public class AnalysisService {
                     int missingPlateCount = 0;
                     for (Address gAddr : globalAddrs) {
                         Map<String, Object> audit = DataTypeService.auditGlobalAt(scoringProgram, gAddr);
+                        if (Boolean.FALSE.equals(audit.get("applicable"))) continue;
                         @SuppressWarnings("unchecked")
                         List<String> issues = (List<String>) audit.get("issues");
                         if (issues == null) continue;
@@ -4172,229 +3862,213 @@ public class AnalysisService {
     @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. decompiled_code is stamped with language_id + variant, and carries variant_ambiguous where the processor offers more than one SLEIGH decoder (PowerPC vs PowerPC VLE). variant= is optional and checked: name one the program is not loaded under and that single field is withheld (decompiled_code_withheld explains why) while the rest of the analysis is returned as usual. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis", access = ToolAccess.READ_ONLY)
     public Response analyzeForDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName,
+                               + "address is unambiguous.") Function func,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "variant", defaultValue = "",
                    description = "OPTIONAL assertion of the SLEIGH language variant you believe this program is loaded under (e.g. default, PowerISA-VLE-64-32addr, Cortex), or the full language id. Omit it and decompiled_code is returned, labelled with whatever actually ran. Supply one the program is not loaded under and that field alone is withheld, with decompiled_code_withheld explaining the omission; the rest of the analysis is returned either way. get_language_metadata reports available_variants.") String variant) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+        // See analyze_function_complete: null means nothing contradicts the caller and
+        // the pseudocode field may travel.
+        return buildAnalyzeForDocumentationResult(program, func.getEntryPoint(), func.getName(),
+                ServiceUtils.variantRejectionData(program, variant));
+    }
 
-        // See analyze_function_complete: resolved before the lambda, null means nothing
-        // contradicts the caller and the pseudocode field may travel.
-        final Map<String, Object> variantIssue = ServiceUtils.variantRejectionData(program, variant);
-
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
+    private Response buildAnalyzeForDocumentationResult(Program program, Address addr, String functionAddress,
+            Map<String, Object> variantIssue) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    // Resolve function by address
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        func = program.getFunctionManager().getFunctionContaining(addr);
-                    }
-                    if (func == null) {
-                        errorMsg.set("No function at address: " + functionAddress);
-                        return;
-                    }
-
-                    // Build structured data
-                    Map<String, Object> data = new LinkedHashMap<>();
-
-                    // Basic info
-                    data.put("name", func.getName());
-                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
-                    data.put("signature", func.getSignature().toString());
-
-                    // Classification
-                    String classification = classifyFunction(func, program);
-                    data.put("classification", classification);
-
-                    // Return type analysis
-                    String retTypeName = func.getReturnType().getName();
-                    data.put("return_type", retTypeName);
-                    data.put("return_type_resolved", !retTypeName.startsWith("undefined"));
-
-                    // Decompile (single decompilation reused for code + variables)
-                    // HOTFIX v5.3.1: use no-retry variant. See comment on the
-                    // matching change in analyze_function_complete above —
-                    // retrying pathological functions at 60→120→180s wedges
-                    // the HTTP thread pool for 6+ minutes per function.
-                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-                    if (decompResults != null && decompResults.decompileCompleted() &&
-                        decompResults.getDecompiledFunction() != null) {
-                        String decompiledCode = decompResults.getDecompiledFunction().getC();
-                        if (decompiledCode != null) {
-                            // Stamped like get_functions: the dialect that produced the C
-                            // travels with it, plus the ambiguity advisory where the loader
-                            // had a real choice to get wrong.
-                            //
-                            // variantIssue is non-null only when the caller NAMED a variant
-                            // the program contradicts. Withholding this one field, rather
-                            // than failing the whole composite, keeps the analysis useful
-                            // while closing the route that would otherwise hand out exactly
-                            // what get_functions just refused.
-                            if (variantIssue == null) {
-                                ServiceUtils.putLanguageSelection(data, program);
-                                data.put("decompiled_code", decompiledCode);
-                            } else {
-                                data.put("decompiled_code_withheld", variantIssue);
-                            }
-                        }
-                    }
-
-                    // Callees with ordinal and documentation status
-                    List<Map<String, Object>> calleeList = new ArrayList<>();
-                    Set<Function> calledFuncs = func.getCalledFunctions(null);
-                    int ordinalCalleeCount = 0;
-                    for (Function called : calledFuncs) {
-                        String calleeName = called.getName();
-                        boolean isUndocumented = calleeName.startsWith("FUN_") || calleeName.startsWith("thunk_FUN_");
-                        boolean isOrdinal = calleeName.startsWith("Ordinal_") || calleeName.startsWith("thunk_Ordinal_");
-                        if (isOrdinal) ordinalCalleeCount++;
-                        Map<String, Object> calleeEntry = new LinkedHashMap<>();
-                        calleeEntry.put("name", calleeName);
-                        if (isUndocumented) calleeEntry.put("undocumented", true);
-                        if (isOrdinal) calleeEntry.put("is_ordinal", true);
-                        if (called.isThunk()) calleeEntry.put("is_thunk", true);
-                        calleeList.add(calleeEntry);
-                    }
-                    data.put("callees", calleeList);
-                    data.put("callee_count", calleeList.size());
-                    data.put("ordinal_callee_count", ordinalCalleeCount);
-
-                    // Wrapper hint
-                    if (calleeList.size() == 1 && retTypeName.startsWith("undefined")) {
-                        Function callee = calledFuncs.iterator().next();
-                        String calleeRetType = callee.getReturnType().getName();
-                        if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
-                            data.put("wrapper_hint", "Callee '" + callee.getName()
-                                  + "' returns " + calleeRetType);
-                        }
-                    }
-
-                    // Parameters with pre-analysis
-                    List<Map<String, Object>> paramList = new ArrayList<>();
-                    Parameter[] params = func.getParameters();
-                    for (Parameter param : params) {
-                        String pName = param.getName();
-                        String pType = param.getDataType().getName();
-                        String pStorage = param.getVariableStorage().toString();
-                        boolean needsType = pType.startsWith("undefined");
-                        boolean needsRename = pName.matches("param_\\d+");
-                        Map<String, Object> paramEntry = new LinkedHashMap<>();
-                        paramEntry.put("name", pName);
-                        paramEntry.put("type", pType);
-                        paramEntry.put("storage", pStorage);
-                        paramEntry.put("needs_type", needsType);
-                        paramEntry.put("needs_rename", needsRename);
-                        if (needsType) {
-                            paramEntry.put("suggested_type", FunctionService.suggestType(pType));
-                            paramEntry.put("suggested_prefix", FunctionService.suggestHungarianPrefix(FunctionService.suggestType(pType)));
-                        } else {
-                            paramEntry.put("suggested_prefix", FunctionService.suggestHungarianPrefix(pType));
-                        }
-                        paramList.add(paramEntry);
-                    }
-                    data.put("parameters", paramList);
-
-                    // Local variables with pre-analysis (from HighFunction)
-                    List<Map<String, Object>> localList = new ArrayList<>();
-                    if (decompResults != null && decompResults.decompileCompleted()) {
-                        HighFunction highFunc = decompResults.getHighFunction();
-                        if (highFunc != null) {
-                            Iterator<HighSymbol> symbols = highFunc.getLocalSymbolMap().getSymbols();
-                            while (symbols.hasNext()) {
-                                HighSymbol sym = symbols.next();
-                                String symName = sym.getName();
-                                String symType = sym.getDataType().getName();
-                                boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
-                                String storageStr = "";
-                                HighVariable highVar = sym.getHighVariable();
-                                if (highVar != null && highVar.getRepresentative() != null) {
-                                    Varnode rep = highVar.getRepresentative();
-                                    if (rep.getAddress() != null) {
-                                        storageStr = rep.getAddress().toString() + ":" + rep.getSize();
-                                    }
-                                }
-                                boolean needsType = !isPhantom && symType.startsWith("undefined");
-                                boolean needsRename = !isPhantom && symName.matches("local_[0-9a-fA-F]+|[a-zA-Z]Var\\d+");
-                                Map<String, Object> localEntry = new LinkedHashMap<>();
-                                localEntry.put("name", symName);
-                                localEntry.put("type", symType);
-                                localEntry.put("storage", storageStr);
-                                localEntry.put("is_phantom", isPhantom);
-                                if (needsType) {
-                                    localEntry.put("needs_type", true);
-                                    localEntry.put("suggested_type", FunctionService.suggestType(symType));
-                                }
-                                if (needsRename) {
-                                    localEntry.put("needs_rename", true);
-                                    String prefix = needsType ? FunctionService.suggestHungarianPrefix(FunctionService.suggestType(symType))
-                                                             : FunctionService.suggestHungarianPrefix(symType);
-                                    localEntry.put("suggested_prefix", prefix);
-                                }
-                                localList.add(localEntry);
-                            }
-                        }
-                    }
-                    data.put("locals", localList);
-
-                    // DAT global count (unrenamed globals referenced).
-                    // getReferenceIterator(minAddr) yields ALL outgoing
-                    // references from that address through the end of the
-                    // program — for a function near the start of a large
-                    // binary the old loop walked millions of references per
-                    // call. getReferenceSourceIterator(body, true) is bounded
-                    // to addresses inside the function body (and handles
-                    // non-contiguous bodies correctly).
-                    int datGlobalCount = 0;
-                    ReferenceManager refMgr = program.getReferenceManager();
-                    AddressIterator srcIter = refMgr.getReferenceSourceIterator(func.getBody(), true);
-                    while (srcIter.hasNext()) {
-                        Address fromAddr = srcIter.next();
-                        for (Reference ref : refMgr.getReferencesFrom(fromAddr)) {
-                            Address toAddr = ref.getToAddress();
-                            Symbol sym = program.getSymbolTable().getPrimarySymbol(toAddr);
-                            if (sym != null && sym.getName().startsWith("DAT_")) {
-                                datGlobalCount++;
-                            }
-                        }
-                    }
-                    data.put("dat_global_count", datGlobalCount);
-
-                    // Compact completeness score. Forward programName so the
-                    // nested call resolves the same program the caller asked
-                    // for via ?program=, not the active one (matches L2383).
-                    Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, programName);
-                    if (completenessResponse instanceof Response.Ok ok) {
-                        data.put("completeness", ok.data());
-                    }
-
-                    resultData.set(data);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) {
+                func = program.getFunctionManager().getFunctionContaining(addr);
             }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
+            if (func == null) {
+                return Response.err("No function at address: " + functionAddress);
+            }
 
-        return Response.ok(resultData.get());
+            // Build structured data
+            Map<String, Object> data = new LinkedHashMap<>();
+
+            // Basic info
+            data.put("name", func.getName());
+            data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            data.put("signature", func.getSignature().toString());
+
+            // Classification
+            String classification = classifyFunction(func, program);
+            data.put("classification", classification);
+
+            // Return type analysis
+            String retTypeName = func.getReturnType().getName();
+            data.put("return_type", retTypeName);
+            data.put("return_type_resolved", !retTypeName.startsWith("undefined"));
+
+            // Decompile (single decompilation reused for code + variables)
+            // HOTFIX v5.3.1: use no-retry variant. See comment on the
+            // matching change in analyze_function_complete above —
+            // retrying pathological functions at 60→120→180s wedges
+            // the HTTP thread pool for 6+ minutes per function.
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
+            if (decompResults != null && decompResults.decompileCompleted() &&
+                decompResults.getDecompiledFunction() != null) {
+                String decompiledCode = decompResults.getDecompiledFunction().getC();
+                if (decompiledCode != null) {
+                    // Stamped like get_functions: the dialect that produced the C
+                    // travels with it, plus the ambiguity advisory where the loader
+                    // had a real choice to get wrong.
+                    //
+                    // variantIssue is non-null only when the caller NAMED a variant
+                    // the program contradicts. Withholding this one field, rather
+                    // than failing the whole composite, keeps the analysis useful
+                    // while closing the route that would otherwise hand out exactly
+                    // what get_functions just refused.
+                    if (variantIssue == null) {
+                        ServiceUtils.putLanguageSelection(data, program);
+                        data.put("decompiled_code", decompiledCode);
+                    } else {
+                        data.put("decompiled_code_withheld", variantIssue);
+                    }
+                }
+            } else {
+                // Same keys get_functions uses. Without them a decompiler that never
+                // started was indistinguishable from a field nobody asked for (#654).
+                data.put("decompile_failed", true);
+                data.put("decompile_error", decompAttempt.failureReason());
+            }
+
+            // Callees with ordinal and documentation status
+            List<Map<String, Object>> calleeList = new ArrayList<>();
+            Set<Function> calledFuncs = func.getCalledFunctions(null);
+            int ordinalCalleeCount = 0;
+            for (Function called : calledFuncs) {
+                String calleeName = called.getName();
+                boolean isUndocumented = calleeName.startsWith("FUN_") || calleeName.startsWith("thunk_FUN_");
+                boolean isOrdinal = calleeName.startsWith("Ordinal_") || calleeName.startsWith("thunk_Ordinal_");
+                if (isOrdinal) ordinalCalleeCount++;
+                Map<String, Object> calleeEntry = new LinkedHashMap<>();
+                calleeEntry.put("name", calleeName);
+                if (isUndocumented) calleeEntry.put("undocumented", true);
+                if (isOrdinal) calleeEntry.put("is_ordinal", true);
+                if (called.isThunk()) calleeEntry.put("is_thunk", true);
+                calleeList.add(calleeEntry);
+            }
+            data.put("callees", calleeList);
+            data.put("callee_count", calleeList.size());
+            data.put("ordinal_callee_count", ordinalCalleeCount);
+
+            // Wrapper hint
+            if (calleeList.size() == 1 && retTypeName.startsWith("undefined")) {
+                Function callee = calledFuncs.iterator().next();
+                String calleeRetType = callee.getReturnType().getName();
+                if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
+                    data.put("wrapper_hint", "Callee '" + callee.getName()
+                          + "' returns " + calleeRetType);
+                }
+            }
+
+            // Parameters with pre-analysis
+            List<Map<String, Object>> paramList = new ArrayList<>();
+            Parameter[] params = func.getParameters();
+            for (Parameter param : params) {
+                String pName = param.getName();
+                String pType = param.getDataType().getName();
+                String pStorage = param.getVariableStorage().toString();
+                boolean needsType = pType.startsWith("undefined");
+                boolean needsRename = pName.matches("param_\\d+");
+                Map<String, Object> paramEntry = new LinkedHashMap<>();
+                paramEntry.put("name", pName);
+                paramEntry.put("type", pType);
+                paramEntry.put("storage", pStorage);
+                paramEntry.put("needs_type", needsType);
+                paramEntry.put("needs_rename", needsRename);
+                if (needsType) {
+                    paramEntry.put("suggested_type", FunctionService.suggestType(pType));
+                    paramEntry.put("suggested_prefix", FunctionService.suggestHungarianPrefix(FunctionService.suggestType(pType)));
+                } else {
+                    paramEntry.put("suggested_prefix", FunctionService.suggestHungarianPrefix(pType));
+                }
+                paramList.add(paramEntry);
+            }
+            data.put("parameters", paramList);
+
+            // Local variables with pre-analysis (from HighFunction)
+            List<Map<String, Object>> localList = new ArrayList<>();
+            if (decompResults != null && decompResults.decompileCompleted()) {
+                HighFunction highFunc = decompResults.getHighFunction();
+                if (highFunc != null) {
+                    Iterator<HighSymbol> symbols = highFunc.getLocalSymbolMap().getSymbols();
+                    while (symbols.hasNext()) {
+                        HighSymbol sym = symbols.next();
+                        String symName = sym.getName();
+                        String symType = sym.getDataType().getName();
+                        boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
+                        String storageStr = "";
+                        HighVariable highVar = sym.getHighVariable();
+                        if (highVar != null && highVar.getRepresentative() != null) {
+                            Varnode rep = highVar.getRepresentative();
+                            if (rep.getAddress() != null) {
+                                storageStr = rep.getAddress().toString() + ":" + rep.getSize();
+                            }
+                        }
+                        boolean needsType = !isPhantom && symType.startsWith("undefined");
+                        boolean needsRename = !isPhantom && symName.matches("local_[0-9a-fA-F]+|[a-zA-Z]Var\\d+");
+                        Map<String, Object> localEntry = new LinkedHashMap<>();
+                        localEntry.put("name", symName);
+                        localEntry.put("type", symType);
+                        localEntry.put("storage", storageStr);
+                        localEntry.put("is_phantom", isPhantom);
+                        if (needsType) {
+                            localEntry.put("needs_type", true);
+                            localEntry.put("suggested_type", FunctionService.suggestType(symType));
+                        }
+                        if (needsRename) {
+                            localEntry.put("needs_rename", true);
+                            String prefix = needsType ? FunctionService.suggestHungarianPrefix(FunctionService.suggestType(symType))
+                                                     : FunctionService.suggestHungarianPrefix(symType);
+                            localEntry.put("suggested_prefix", prefix);
+                        }
+                        localList.add(localEntry);
+                    }
+                }
+            }
+            data.put("locals", localList);
+
+            // DAT global count (unrenamed globals referenced).
+            // getReferenceIterator(minAddr) yields ALL outgoing
+            // references from that address through the end of the
+            // program — for a function near the start of a large
+            // binary the old loop walked millions of references per
+            // call. getReferenceSourceIterator(body, true) is bounded
+            // to addresses inside the function body (and handles
+            // non-contiguous bodies correctly).
+            int datGlobalCount = 0;
+            ReferenceManager refMgr = program.getReferenceManager();
+            AddressIterator srcIter = refMgr.getReferenceSourceIterator(func.getBody(), true);
+            while (srcIter.hasNext()) {
+                Address fromAddr = srcIter.next();
+                for (Reference ref : refMgr.getReferencesFrom(fromAddr)) {
+                    Address toAddr = ref.getToAddress();
+                    Symbol sym = program.getSymbolTable().getPrimarySymbol(toAddr);
+                    if (sym != null && sym.getName().startsWith("DAT_")) {
+                        datGlobalCount++;
+                    }
+                }
+            }
+            data.put("dat_global_count", datGlobalCount);
+
+            // Compact completeness score; pass the same Program through.
+            Response completenessResponse = analyzeFunctionCompleteness(func, true, "", program);
+            if (completenessResponse instanceof Response.Ok ok) {
+                data.put("completeness", ok.data());
+            }
+
+            return Response.ok(data);
+        } catch (Exception e) {
+            return ServiceUtils.fail(e);
+        }
     }
 
     /**
@@ -4413,109 +4087,82 @@ public class AnalysisService {
                    description = "Number of gaps to skip before this page starts; 0 begins at the first. "
                                + "Applied after the min_size filter.") int offset,
             @Param(value = "limit", defaultValue = "100",
-                   description = "Maximum gaps returned in this page (default 100). This endpoint slices "
-                               + "directly, so 0 returns an EMPTY page rather than everything — page with "
-                               + "offset against the `total` the response reports.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+                   description = "Maximum gaps returned in this page (default 100). 0 or less: no limit.") int limit,
+            @Param(value = "program", defaultValue = "") Program program) {
+        return findCodeGapsBody(program, minSize, offset, limit);
+    }
 
-        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
+    private Response findCodeGapsBody(Program program, int minSize, int offset, int limit) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    FunctionManager funcMgr = program.getFunctionManager();
-                    Listing listing = program.getListing();
-                    Memory memory = program.getMemory();
+            FunctionManager funcMgr = program.getFunctionManager();
+            Listing listing = program.getListing();
+            Memory memory = program.getMemory();
 
-                    // Union of all function bodies
-                    AddressSet functionUnion = new AddressSet();
-                    for (Function f : funcMgr.getFunctions(true)) {
-                        functionUnion.add(f.getBody());
-                    }
-
-                    // Executable, non-external memory blocks
-                    AddressSet execMemory = new AddressSet();
-                    for (MemoryBlock block : memory.getBlocks()) {
-                        if (block.isExecute() && !block.isExternalBlock()) {
-                            execMemory.add(block.getStart(), block.getEnd());
-                        }
-                    }
-
-                    // Gaps = executable memory not covered by any function body
-                    AddressSet gapSet = execMemory.subtract(functionUnion);
-
-                    List<Map<String, Object>> gaps = new ArrayList<>();
-                    boolean multiSpace = ServiceUtils.getPhysicalSpaceCount(program) > 1;
-
-                    AddressRangeIterator rangeIter = gapSet.getAddressRanges();
-                    while (rangeIter.hasNext()) {
-                        AddressRange range = rangeIter.next();
-                        long size = range.getLength();
-                        if (size < minSize) continue;
-
-                        Address gapStart = range.getMinAddress();
-                        Address gapEnd   = range.getMaxAddress();
-
-                        AddressSet thisGap = new AddressSet(gapStart, gapEnd);
-                        boolean hasUndefined     = listing.getUndefinedDataAt(gapStart) != null;
-                        boolean hasInstructions  = listing.getInstructions(thisGap, true).hasNext();
-
-                        FunctionIterator bIter = funcMgr.getFunctions(gapStart, false);
-                        Function before = bIter.hasNext() ? bIter.next() : null;
-
-                        Address nextAddr = gapEnd.next();
-                        Function after = null;
-                        if (nextAddr != null) {
-                            FunctionIterator aIter = funcMgr.getFunctions(nextAddr, true);
-                            if (aIter.hasNext()) after = aIter.next();
-                        }
-
-                        Map<String, Object> gap = new java.util.LinkedHashMap<>();
-                        gap.put("start", gapStart.toString(false));
-                        gap.put("end",   gapEnd.toString(false));
-                        if (multiSpace) {
-                            gap.put("start_full",    gapStart.toString());
-                            gap.put("end_full",      gapEnd.toString());
-                            gap.put("address_space", gapStart.getAddressSpace().getName());
-                        }
-                        gap.put("size",                    size);
-                        gap.put("has_undefined_bytes",     hasUndefined);
-                        gap.put("has_orphaned_instructions", hasInstructions);
-                        gap.put("before_function",         before != null ? before.getName() : null);
-                        gap.put("before_function_address", before != null ? before.getEntryPoint().toString(false) : null);
-                        gap.put("after_function",          after != null ? after.getName() : null);
-                        gap.put("after_function_address",  after != null ? after.getEntryPoint().toString(false) : null);
-                        gaps.add(gap);
-                    }
-
-                    int total    = gaps.size();
-                    int endIndex = Math.min(offset + limit, total);
-                    List<Map<String, Object>> page = gaps.subList(Math.min(offset, total), endIndex);
-
-                    responseRef.set(Response.ok(JsonHelper.mapOf(
-                        "total",  total,
-                        "offset", offset,
-                        "limit",  limit,
-                        "gaps",   page
-                    )));
-
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+            // Union of all function bodies
+            AddressSet functionUnion = new AddressSet();
+            for (Function f : funcMgr.getFunctions(true)) {
+                functionUnion.add(f.getBody());
             }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
 
-        return responseRef.get();
+            // Executable, non-external memory blocks
+            AddressSet execMemory = new AddressSet();
+            for (MemoryBlock block : memory.getBlocks()) {
+                if (block.isExecute() && !block.isExternalBlock()) {
+                    execMemory.add(block.getStart(), block.getEnd());
+                }
+            }
+
+            // Gaps = executable memory not covered by any function body
+            AddressSet gapSet = execMemory.subtract(functionUnion);
+
+            List<Map<String, Object>> gaps = new ArrayList<>();
+            boolean multiSpace = ServiceUtils.getPhysicalSpaceCount(program) > 1;
+
+            AddressRangeIterator rangeIter = gapSet.getAddressRanges();
+            while (rangeIter.hasNext()) {
+                AddressRange range = rangeIter.next();
+                long size = range.getLength();
+                if (size < minSize) continue;
+
+                Address gapStart = range.getMinAddress();
+                Address gapEnd   = range.getMaxAddress();
+
+                AddressSet thisGap = new AddressSet(gapStart, gapEnd);
+                boolean hasUndefined     = listing.getUndefinedDataAt(gapStart) != null;
+                boolean hasInstructions  = listing.getInstructions(thisGap, true).hasNext();
+
+                FunctionIterator bIter = funcMgr.getFunctions(gapStart, false);
+                Function before = bIter.hasNext() ? bIter.next() : null;
+
+                Address nextAddr = gapEnd.next();
+                Function after = null;
+                if (nextAddr != null) {
+                    FunctionIterator aIter = funcMgr.getFunctions(nextAddr, true);
+                    if (aIter.hasNext()) after = aIter.next();
+                }
+
+                Map<String, Object> gap = new java.util.LinkedHashMap<>();
+                gap.put("start", gapStart.toString(false));
+                gap.put("end",   gapEnd.toString(false));
+                if (multiSpace) {
+                    gap.put("start_full",    gapStart.toString());
+                    gap.put("end_full",      gapEnd.toString());
+                    gap.put("address_space", gapStart.getAddressSpace().getName());
+                }
+                gap.put("size",                    size);
+                gap.put("has_undefined_bytes",     hasUndefined);
+                gap.put("has_orphaned_instructions", hasInstructions);
+                gap.put("before_function",         before != null ? before.getName() : null);
+                gap.put("before_function_address", before != null ? before.getEntryPoint().toString(false) : null);
+                gap.put("after_function",          after != null ? after.getName() : null);
+                gap.put("after_function_address",  after != null ? after.getEntryPoint().toString(false) : null);
+                gaps.add(gap);
+            }
+
+            return ServiceUtils.paged("gaps", gaps, offset, limit);
+        } catch (Exception e) {
+            return ServiceUtils.fail(e);
+        }
     }
 
     // ========================================================================
@@ -4535,7 +4182,7 @@ public class AnalysisService {
     public Response analyzeDataflow(
             @Param(value = "address", paramType = "address",
                    description = "Address inside the target function where the value is observed. "
-                               + "Accepts 0x<hex> or <space>:<hex>.") String addressStr,
+                               + "Accepts 0x<hex> or <space>:<hex>.") Address anchorAddr,
             @Param(value = "variable",
                    description = "Anchor selector. Register name (EAX, RCX), HighVariable name (param_1, local_14, "
                                + "iVar1), or empty to use the PcodeOp output at the address.",
@@ -4547,15 +4194,10 @@ public class AnalysisService {
                    description = "Cap on nodes visited. Default 20, max 200.",
                    defaultValue = "20") int maxSteps,
             @Param(value = "program",
-                   description = "Target program name (omit to use the active program — always specify when multiple programs are open)",
-                   defaultValue = "") String programName) {
+                   defaultValue = "") Program program) {
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program resolvedProgram = pe.program();
 
-        Address anchorAddr = ServiceUtils.parseAddress(resolvedProgram, addressStr);
-        if (anchorAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        
 
         boolean backward;
         if (direction == null || direction.isEmpty() || "backward".equalsIgnoreCase(direction)) {
@@ -4568,72 +4210,66 @@ public class AnalysisService {
 
         int stepCap = maxSteps <= 0 ? DATAFLOW_DEFAULT_STEPS : Math.min(maxSteps, DATAFLOW_MAX_STEPS);
 
-        final AtomicReference<Response> result = new AtomicReference<>();
-        try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    Program program = resolvedProgram;
-                    Function func = program.getFunctionManager().getFunctionContaining(anchorAddr);
-                    if (func == null) {
-                        result.set(Response.err("No function contains address: " + addressStr));
-                        return;
-                    }
 
-                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-                    if (decompResults == null || !decompResults.decompileCompleted()) {
-                        result.set(Response.err("Decompile failed for function " + func.getName()
-                            + (decompResults != null && decompResults.getErrorMessage() != null
-                                ? ": " + decompResults.getErrorMessage() : "")));
-                        return;
-                    }
-                    HighFunction hf = decompResults.getHighFunction();
-                    if (hf == null) {
-                        result.set(Response.err("No HighFunction available for " + func.getName()));
-                        return;
-                    }
-
-                    AnchorResolution anchor = resolveAnchorVarnode(hf, anchorAddr, variableHint, program);
-                    if (anchor.varnode == null) {
-                        result.set(Response.err(anchor.error != null ? anchor.error
-                            : "Could not resolve anchor varnode at " + addressStr
-                              + (variableHint == null || variableHint.isEmpty() ? "" : " for '" + variableHint + "'")));
-                        return;
-                    }
-
-                    DataflowChain chain = backward
-                        ? traceBackward(anchor.varnode, stepCap, program)
-                        : traceForward(anchor.varnode, stepCap, program);
-
-                    Map<String, Object> data = new LinkedHashMap<>();
-                    Map<String, Object> funcInfo = new LinkedHashMap<>();
-                    funcInfo.put("name", func.getName());
-                    funcInfo.put("entry", func.getEntryPoint().toString());
-                    data.put("function", funcInfo);
-
-                    Map<String, Object> anchorInfo = new LinkedHashMap<>();
-                    anchorInfo.put("address", anchorAddr.toString());
-                    anchorInfo.put("variable", describeVarnode(anchor.varnode, program));
-                    anchorInfo.put("resolved_from", anchor.resolvedFrom);
-                    data.put("anchor", anchorInfo);
-
-                    data.put("direction", backward ? "backward" : "forward");
-                    data.put("max_steps", stepCap);
-                    data.put("chain", chain.steps);
-                    data.put("terminated", chain.terminationReason);
-                    data.put("truncated", chain.truncated);
-
-                    result.set(Response.ok(data));
-                } catch (Exception e) {
-                    Msg.error(this, "Error in analyzeDataflow", e);
-                    result.set(Response.err(e.getMessage()));
-                }
-            });
-        } catch (Exception e) {
-            return Response.err("Thread synchronization error: " + e.getMessage());
-        }
-
-        return result.get();
+        return analyzeDataflowBody(program, anchorAddr, anchorAddr.toString(), variableHint, backward, stepCap);
     }
+
+    private Response analyzeDataflowBody(Program program, Address anchorAddr, String addressStr,
+            String variableHint, boolean backward, int stepCap) {
+        try {
+            Function func = program.getFunctionManager().getFunctionContaining(anchorAddr);
+            if (func == null) {
+                return Response.err("No function contains address: " + addressStr);
+            }
+
+            FunctionService.DecompileAttempt decompAttempt =
+                functionService.attemptDecompileNoRetry(func, program);
+            DecompileResults decompResults = decompAttempt.results();
+            if (!decompAttempt.completed()) {
+                return Response.err("Decompile failed for function " + func.getName()
+                    + ": " + decompAttempt.failureReason());
+            }
+            HighFunction hf = decompResults.getHighFunction();
+            if (hf == null) {
+                return Response.err("No HighFunction available for " + func.getName());
+            }
+
+            AnchorResolution anchor = resolveAnchorVarnode(hf, anchorAddr, variableHint, program);
+            if (anchor.varnode == null) {
+                return Response.err(anchor.error != null ? anchor.error
+                    : "Could not resolve anchor varnode at " + addressStr
+                      + (variableHint == null || variableHint.isEmpty() ? "" : " for '" + variableHint + "'"));
+            }
+
+            DataflowChain chain = backward
+                ? traceBackward(anchor.varnode, stepCap, program)
+                : traceForward(anchor.varnode, stepCap, program);
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            Map<String, Object> funcInfo = new LinkedHashMap<>();
+            funcInfo.put("name", func.getName());
+            funcInfo.put("entry", func.getEntryPoint().toString());
+            data.put("function", funcInfo);
+
+            Map<String, Object> anchorInfo = new LinkedHashMap<>();
+            anchorInfo.put("address", anchorAddr.toString());
+            anchorInfo.put("variable", describeVarnode(anchor.varnode, program));
+            anchorInfo.put("resolved_from", anchor.resolvedFrom);
+            data.put("anchor", anchorInfo);
+
+            data.put("direction", backward ? "backward" : "forward");
+            data.put("max_steps", stepCap);
+            data.put("chain", chain.steps);
+            data.put("terminated", chain.terminationReason);
+            data.put("truncated", chain.truncated);
+
+            return Response.ok(data);
+        } catch (Exception e) {
+            Msg.error(this, "Error in analyzeDataflow", e);
+            return ServiceUtils.fail(e);
+        }
+    }
+
 
     /**
      * Result of anchor varnode resolution: the chosen Varnode plus a short tag
@@ -4963,30 +4599,19 @@ public class AnalysisService {
              category = "analysis", access = ToolAccess.READ_ONLY)
     public Response getFunctionPcode(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
+                   description = "Function entry address (0x<hex> or <space>:<hex>).") Function func,
             @Param(value = "granularity", defaultValue = "high",
                    description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit for active program).") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        Function func = program.getFunctionManager().getFunctionAt(addr);
-        if (func == null) func = program.getFunctionManager().getFunctionContaining(addr);
-        if (func == null) return Response.err("No function at address: " + functionAddress);
-
-        DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
-        if (decompResults == null || !decompResults.decompileCompleted()) {
-            // Surface the underlying decompiler error so callers can diagnose
-            // (matches the convention used elsewhere in this file).
-            String detail = decompResults != null ? decompResults.getErrorMessage() : null;
-            String msg = "Decompilation failed for " + func.getName();
-            if (detail != null && !detail.isEmpty()) msg += ": " + detail;
-            return Response.err(msg);
+        FunctionService.DecompileAttempt decompAttempt =
+            functionService.attemptDecompileNoRetry(func, program);
+        DecompileResults decompResults = decompAttempt.results();
+        if (!decompAttempt.completed()) {
+            // Surface the underlying decompiler error -- or the reason it never
+            // started (#654) -- so callers can diagnose.
+            return Response.err("Decompilation failed for " + func.getName()
+                + ": " + decompAttempt.failureReason());
         }
         HighFunction hf = decompResults.getHighFunction();
         if (hf == null) {
@@ -5047,12 +4672,7 @@ public class AnalysisService {
                    description = "Include the full register list (can be hundreds of entries on x86).") boolean includeRegisters,
             @Param(value = "include_default_symbols", defaultValue = "true",
                    description = "Include the language's default symbol set (entry points, interrupt vectors).") boolean includeDefaultSymbols,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit for active program).") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         ghidra.program.model.lang.Language lang = program.getLanguage();
         ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
 

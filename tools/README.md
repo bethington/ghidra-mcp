@@ -43,8 +43,8 @@ python -m tools.setup --help
 
 # common ones
 python -m tools.setup build
-python -m tools.setup preflight      --ghidra-path F:\ghidra_12.1.4_PUBLIC
-python -m tools.setup deploy         --ghidra-path F:\ghidra_12.1.4_PUBLIC
+python -m tools.setup preflight      --ghidra-path F:\ghidra_12.2_PUBLIC
+python -m tools.setup deploy         --ghidra-path F:\ghidra_12.2_PUBLIC
 python -m tools.setup bump-version   --new 5.10.0
 python -m tools.setup verify-version
 ```

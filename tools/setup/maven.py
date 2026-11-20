@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-REQUIRED_JAVA_MAJOR = 21
+REQUIRED_JAVA_MAJOR = 25
 
 MAVEN_NOT_FOUND_MESSAGE = (
     "Unable to locate Maven. Install mvn or configure M2_HOME/USERPROFILE tools path."
@@ -60,7 +60,7 @@ def ensure_maven_java_supported(maven_command: Path) -> bool:
         file=sys.stderr,
     )
     print(
-        "Set JAVA_HOME to a JDK 21 install and put %JAVA_HOME%\\bin first on PATH.",
+        f"Set JAVA_HOME to a JDK {REQUIRED_JAVA_MAJOR} install and put %JAVA_HOME%\\bin first on PATH.",
         file=sys.stderr,
     )
     return False

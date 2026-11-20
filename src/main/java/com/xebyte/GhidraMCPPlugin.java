@@ -22,6 +22,7 @@ import docking.ActionContext;
 // Block model for control flow analysis
 
 import com.xebyte.core.VersionInfo;
+import com.xebyte.core.ServiceUtils;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.McpHttpServer;
 import com.xebyte.core.FrontEndProgramProvider;
@@ -52,7 +53,7 @@ import java.util.concurrent.TimeUnit;
     category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 205 endpoints for reverse engineering automation. " +
+                  "Provides 216 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -150,7 +151,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.analysisService = services.analysis();
         this.malwareSecurityService = services.malwareSecurity();
         this.programScriptService = services.programScript();
-        this.debuggerService = new com.xebyte.core.DebuggerService(programProvider, threadingStrategy, tool);
+        this.debuggerService = new com.xebyte.core.DebuggerService(threadingStrategy, tool);
         this.guiToolService = new com.xebyte.core.GuiToolService(tool);
         this.promptPolicyService = new com.xebyte.core.PromptPolicyService();
         Msg.info(this, "============================================");
@@ -489,51 +490,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return programProvider.getCurrentProgram();
     }
 
-    /**
-     * Get a program by name, or return the current program if name is null/empty.
-     * Delegates to FrontEndProgramProvider which checks CodeBrowser, cache, and project.
-     *
-     * @param programName The name or project path (e.g., "/Project/1.0/example.dll"), or null/empty for current
-     * @return The requested program, or null if not found
-     */
-    public Program getProgram(String programName) {
-        return programProvider.resolveProgram(programName);
-    }
-
-    /**
-     * Get a program by name with error message if not found.
-     * Returns a JSON error string if the program cannot be found.
-     *
-     * @param programName The name of the program to find
-     * @return A 2-element array: [0] = Program (or null), [1] = error message (or null if found)
-     */
-    public Object[] getProgramOrError(String programName) {
-        Program program = getProgram(programName);
-
-        if (program == null && programName != null && !programName.trim().isEmpty()) {
-            // Program was explicitly requested but not found - provide helpful error
-            StringBuilder error = new StringBuilder();
-            error.append("{\"error\": \"Program not found: ").append(escapeJson(programName)).append("\", ");
-            error.append("\"hint\": \"Use full project path (e.g., /Project/1.0/example.dll) to open on-demand\", ");
-            error.append("\"available_programs\": [");
-
-            Program[] programs = programProvider.getAllOpenPrograms();
-            for (int i = 0; i < programs.length; i++) {
-                if (i > 0) error.append(", ");
-                error.append("\"").append(escapeJson(programs[i].getName())).append("\"");
-            }
-            error.append("]}");
-
-            return new Object[] { null, error.toString() };
-        }
-
-        if (program == null) {
-            return new Object[] { null, "{\"error\": \"No program currently loaded. Use the 'program' parameter with a project path to open one.\"}" };
-        }
-
-        return new Object[] { program, null };
-    }
-
     // ----------------------------------------------------------------------------------
     // Program Management Methods
     // ----------------------------------------------------------------------------------
@@ -790,240 +746,6 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         sendResponse(exchange, response.toJson());
     }
 
-    /**
-     * Get labels within a specific function by name
-     */
-    public String getFunctionLabels(String functionName, int offset, int limit, String programName) {
-        return symbolLabelService.getFunctionLabels(functionName, offset, limit, programName).toJson();
-    }
-
-    public String getFunctionLabels(String functionName, int offset, int limit) {
-        return symbolLabelService.getFunctionLabels(functionName, offset, limit).toJson();
-    }
-
-    public String renameLabel(String addressStr, String oldName, String newName, String programName) {
-        return symbolLabelService.renameLabel(addressStr, oldName, newName, programName).toJson();
-    }
-    public String createLabel(String addressStr, String labelName, String programName) {
-        return symbolLabelService.createLabel(addressStr, labelName, programName).toJson();
-    }
-
-    public String createLabel(String addressStr, String labelName) {
-        return symbolLabelService.createLabel(addressStr, labelName).toJson();
-    }
-
-    public String batchCreateLabels(List<Map<String, String>> labels, String programName) {
-        return symbolLabelService.batchCreateLabels(labels, programName).toJson();
-    }
-
-    public String batchCreateLabels(List<Map<String, String>> labels) {
-        return symbolLabelService.batchCreateLabels(labels).toJson();
-    }
-
-    public String renameOrLabel(String addressStr, String newName, String programName) {
-        return symbolLabelService.renameOrLabel(addressStr, newName, programName).toJson();
-    }
-
-    public String renameOrLabel(String addressStr, String newName) {
-        return symbolLabelService.renameOrLabel(addressStr, newName).toJson();
-    }
-
-    public String deleteLabel(String addressStr, String labelName, String programName) {
-        return symbolLabelService.deleteLabel(addressStr, labelName, programName).toJson();
-    }
-
-    public String deleteLabel(String addressStr, String labelName) {
-        return symbolLabelService.deleteLabel(addressStr, labelName).toJson();
-    }
-
-    public String batchDeleteLabels(List<Map<String, String>> labels, String programName) {
-        return symbolLabelService.batchDeleteLabels(labels, programName).toJson();
-    }
-
-    public String batchDeleteLabels(List<Map<String, String>> labels) {
-        return symbolLabelService.batchDeleteLabels(labels).toJson();
-    }
-
-    /**
-     * Get all functions called by the specified function (callees)
-     */
-    public String getFunctionCallees(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallees(functionName, offset, limit, programName).toJson();
-    }
-
-    /**
-     * Get all functions that call the specified function (callers)
-     */
-    public String getFunctionCallers(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallers(functionName, offset, limit, programName).toJson();
-    }
-
-    /**
-     * Get a call graph subgraph centered on the specified function
-     */
-    public String getFunctionCallGraph(String functionName, int depth, String direction, String programName) {
-        return xrefCallGraphService.getFunctionCallGraph(functionName, depth, direction, programName).toJson();
-    }
-
-    /**
-     * Get the complete call graph for the entire program
-     */
-    public String getFullCallGraph(String format, int limit, String programName) {
-        return xrefCallGraphService.getFullCallGraph(format, limit, programName).toJson();
-    }
-
-    /**
-     * Enhanced call graph analysis with cycle detection and path finding
-     * Provides advanced graph algorithms for understanding function relationships
-     */
-    public String analyzeCallGraph(String startFunction, String endFunction, String analysisType, String programName) {
-        return xrefCallGraphService.analyzeCallGraph(startFunction, endFunction, analysisType, programName).toJson();
-    }
-
-    /**
-     * Create a new structure data type with specified fields
-     */
-    public String createStruct(String name, String fieldsJson) {
-        return dataTypeService.createStruct(name, fieldsJson).toJson();
-    }
-
-    /**
-     * Create a new enumeration data type with name-value pairs
-     */
-    public String createEnum(String name, String valuesJson, int size) {
-        return dataTypeService.createEnum(name, valuesJson, size).toJson();
-    }
-
-    /**
-     * Serialize a List of objects to proper JSON string
-     * Handles Map objects within the list
-     */
-    private String serializeListToJson(java.util.List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            Object item = list.get(i);
-            if (item instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) item)).append("\"");
-            } else if (item instanceof Number) {
-                sb.append(item);
-            } else if (item instanceof java.util.Map) {
-                sb.append(serializeMapToJson((java.util.Map<?, ?>) item));
-            } else if (item instanceof java.util.List) {
-                sb.append(serializeListToJson((java.util.List<?>) item));
-            } else {
-                sb.append("\"").append(escapeJsonString(item.toString())).append("\"");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Serialize a Map to proper JSON object
-     */
-    private String serializeMapToJson(java.util.Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("\"").append(escapeJsonString(entry.getKey().toString())).append("\":");
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) value)).append("\"");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else if (value instanceof java.util.Map) {
-                sb.append(serializeMapToJson((java.util.Map<?, ?>) value));
-            } else if (value instanceof java.util.List) {
-                sb.append(serializeListToJson((java.util.List<?>) value));
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value == null) {
-                sb.append("null");
-            } else {
-                sb.append("\"").append(escapeJsonString(value.toString())).append("\"");
-            }
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    /**
-     * Escape special characters in JSON string values
-     */
-    private String escapeJsonString(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
-
-    /**
-     * Apply a specific data type at the given memory address
-     */
-    public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        return dataTypeService.applyDataType(addressStr, typeName, clearExisting).toJson();
-    }
-
-    // ----------------------------------------------------------------------------------
-    // Data Type Analysis and Management Methods
-    // ----------------------------------------------------------------------------------
-
-    /**
-     * Helper method to extract JSON values from simple JSON strings
-     */
-    /**
-     * Convert an object to JSON string format
-     */
-    // ===================================================================================
-    // NEW DATA STRUCTURE MANAGEMENT METHODS
-    // ===================================================================================
-
-    // ==========================================================================
-    // HIGH-PERFORMANCE DATA ANALYSIS METHODS (v1.3.0)
-    // ==========================================================================
-
-    /**
-     * Helper to escape strings for JSON
-     */
-    private String escapeJson(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
-
-    /**
-     * === FIELD-LEVEL ANALYSIS IMPLEMENTATIONS (v1.4.0) ===
-     */
-
-    // ============================================================================
-    // MALWARE ANALYSIS IMPLEMENTATION METHODS
-    // ============================================================================
-
-    // ===================================================================================
-    // BOOKMARK METHODS (v1.9.4) - Progress tracking via Ghidra bookmarks
-    // ===================================================================================
-
-    // ==================================================================================
-    // CROSS-VERSION MATCHING TOOLS
-    // ==================================================================================
-
-    // ==========================================================================
-    // FUZZY MATCHING & DIFF HANDLERS
-    // ==========================================================================
-
-    // ==========================================================================
-    // PROJECT VERSION CONTROL HELPER METHODS
-    // Uses Ghidra's internal DomainFile/DomainFolder API
-    // ==========================================================================
-
     // ==========================================================================
     // PROJECT & TOOL MANAGEMENT HELPERS
     // ==========================================================================
@@ -1046,9 +768,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      *                        CodeBrowser when {@code headless == false};
      *                        ignored otherwise.
      */
-    private String openProject(String projectPath, boolean headless, String programToLaunch) {
+    private com.xebyte.core.Response openProject(String projectPath, boolean headless, String programToLaunch) {
         if (projectPath == null || projectPath.trim().isEmpty()) {
-            return "{\"error\": \"path parameter is required\"}";
+            return com.xebyte.core.Response.err("path parameter is required");
         }
 
         String trimmed = projectPath.trim();
@@ -1056,7 +778,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             java.nio.file.Path local = com.xebyte.core.SecurityConfig.getInstance()
                     .resolveWithinFileRoot(trimmed);
             if (local == null) {
-                return "{\"error\": \"Path is outside this server's file root\"}";
+                return com.xebyte.core.Response.err("Path is outside this server's file root");
             }
             trimmed = local.toString();
         }
@@ -1084,35 +806,40 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             name = fname;
         }
         if (location == null || location.isEmpty()) {
-            return "{\"error\": \"path must include a parent directory: " + escapeJson(projectPath) + "\"}";
+            return com.xebyte.core.Response.err("path must include a parent directory: " + projectPath);
         }
 
         ProjectLocator locator;
         try {
             locator = new ProjectLocator(location, name);
         } catch (IllegalArgumentException e) {
-            return "{\"error\": \"Invalid project path: " + escapeJson(e.getMessage()) + "\"}";
+            return com.xebyte.core.Response.err("Invalid project path: " + e.getMessage());
         }
         if (!locator.exists()) {
-            return "{\"error\": \"Project does not exist: " + escapeJson(projectPath) + "\"}";
+            return com.xebyte.core.Response.err("Project does not exist: " + projectPath);
         }
 
         Project currentProject = tool.getProject();
         if (currentProject != null && locator.equals(currentProject.getProjectLocator())) {
             // Already open — honor headless flag for CodeBrowser side-effect anyway.
-            String maybeLaunch = null;
+            Object maybeLaunch = null;
             if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-                maybeLaunch = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
+                maybeLaunch = programScriptService.openProgramFromProject(programToLaunch, false).asEmbeddable();
             }
-            return "{\"success\": true, \"project\": \"" + escapeJson(name) + "\", "
-                + "\"already_open\": true, \"headless\": " + headless
-                + (maybeLaunch != null ? ", \"program_launch_result\": " + maybeLaunch : "")
-                + "}";
+            java.util.Map<String, Object> already = new java.util.LinkedHashMap<>();
+            already.put("success", true);
+            already.put("project", name);
+            already.put("already_open", true);
+            already.put("headless", headless);
+            if (maybeLaunch != null) {
+                already.put("program_launch_result", maybeLaunch);
+            }
+            return com.xebyte.core.Response.ok(already);
         }
 
         ProjectManager pm = tool.getProjectManager();
         if (pm == null) {
-            return "{\"error\": \"ProjectManager not available on this tool\"}";
+            return com.xebyte.core.Response.err("ProjectManager not available on this tool");
         }
 
         // Must run on the EDT — FrontEndTool state updates expect Swing.
@@ -1133,31 +860,31 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                     AppInfo.setActiveProject(p);
                     opened[0] = p;
                 } catch (Exception e) {
-                    errMsg[0] = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    errMsg[0] = ServiceUtils.failureMessage(e);
                 }
             });
         } catch (Exception e) {
-            return "{\"error\": \"EDT invocation failed: " + escapeJson(e.getMessage()) + "\"}";
+            return ServiceUtils.fail("EDT invocation", e);
         }
         if (errMsg[0] != null) {
-            return "{\"error\": \"Failed to open project: " + escapeJson(errMsg[0]) + "\"}";
+            return com.xebyte.core.Response.err("Failed to open project: " + errMsg[0]);
         }
         if (opened[0] == null) {
-            return "{\"error\": \"openProject returned null without an error\"}";
+            return com.xebyte.core.Response.err("openProject returned null without an error");
         }
 
-        String launchResult = null;
+        Object launchResult = null;
         if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
-            launchResult = programScriptService.openProgramFromProject(programToLaunch, false).toJson();
+            launchResult = programScriptService.openProgramFromProject(programToLaunch, false).asEmbeddable();
         }
-        StringBuilder json = new StringBuilder(256);
-        json.append("{\"success\": true, \"project\": \"").append(escapeJson(opened[0].getName()))
-            .append("\", \"headless\": ").append(headless);
+        java.util.Map<String, Object> openedOut = new java.util.LinkedHashMap<>();
+        openedOut.put("success", true);
+        openedOut.put("project", opened[0].getName());
+        openedOut.put("headless", headless);
         if (launchResult != null) {
-            json.append(", \"program_launch_result\": ").append(launchResult);
+            openedOut.put("program_launch_result", launchResult);
         }
-        json.append("}");
-        return json.toString();
+        return com.xebyte.core.Response.ok(openedOut);
     }
 
     @Override
@@ -1230,3 +957,5 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         super.dispose();
     }
 }
+
+

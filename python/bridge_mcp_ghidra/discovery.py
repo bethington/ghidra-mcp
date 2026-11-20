@@ -3,6 +3,7 @@
 import concurrent.futures
 import http.client
 import json
+import os
 
 from . import state
 from . import transport
@@ -23,6 +24,16 @@ def _unwrap_response_data(text: str) -> dict:
     return data
 
 
+def url_is_pinned() -> bool:
+    """True when ``GHIDRA_MCP_PIN_URL`` says to use ``GHIDRA_MCP_URL`` and nothing else.
+
+    Discovery prefers any local Ghidra over a configured URL. That is right on a
+    workstation, and wrong when the URL is a tunnel to a shared headless server: opening
+    a local Ghidra just to look at something would silently move every call to it.
+    """
+    return os.getenv("GHIDRA_MCP_PIN_URL", "").strip().lower() in {"1", "true", "yes"}
+
+
 def discover_instances() -> list[dict]:
     """Scan every plausible socket directory and query each live instance.
 
@@ -34,6 +45,8 @@ def discover_instances() -> list[dict]:
     side knows about `$TMPDIR`. A socket discovered under one candidate dir
     is de-duplicated by absolute path.
     """
+    if url_is_pinned():
+        return []
     seen_paths: set[str] = set()
     instances: list[dict] = []
     uds_ok = transport.uds_supported()
@@ -111,9 +124,9 @@ def _probe_tcp_port(port: int, timeout: float, cancel_handle) -> tuple[str, dict
                 with cancel_handle.hold_send_window(conn) as can_send:
                     if not can_send:
                         return None
-                    conn.request("GET", "/mcp/instance_info")
+                    conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             else:
-                conn.request("GET", "/mcp/instance_info")
+                conn.request("GET", "/mcp/instance_info", headers=transport._auth_headers())
             resp = conn.getresponse()
             if resp.status != 200:
                 return None
@@ -257,3 +270,54 @@ def discover_active_tcp_instance() -> dict | None:
         logger.debug(f"Could not query open programs for active TCP instance {state._active_tcp}: {e}")
 
     return info
+
+
+def find_project_instances(project: str, instances: list[dict]) -> list[dict]:
+    """Find a unique project across transports, preferring UDS for one process."""
+    matches = [dict(i) for i in instances if i.get("project") == project]
+    configured_url = os.getenv("GHIDRA_MCP_URL")
+    tcp_instances = []
+    if configured_url:
+        if not validation.validate_server_url(configured_url):
+            logger.warning("Refusing to auto-connect to invalid URL: %s", configured_url)
+            return []
+        try:
+            text, status = transport.tcp_request(configured_url, "GET", "/mcp/instance_info", timeout=5)
+            info = _unwrap_response_data(text) if status == 200 else {}
+            if isinstance(info, dict):
+                tcp_instances = [(configured_url, info)]
+        except Exception as e:
+            logger.debug("Project discovery at %s failed: %s", configured_url, e)
+    else:
+        tcp_instances = list(_iter_tcp_instances())
+    for url, info in tcp_instances:
+        if info.get("project") != project:
+            continue
+        # A process may advertise the same project on UDS and TCP. Distinct
+        # project paths must remain distinct even if their process IDs match.
+        previous = next(
+            (
+                i
+                for i in matches
+                if (i.get("url") == url or (info.get("pid") is not None and i.get("pid") == info["pid"]))
+                and (
+                    not i.get("project_path")
+                    or not info.get("project_path")
+                    or i["project_path"] == info["project_path"]
+                )
+            ),
+            None,
+        )
+        if previous is None:
+            matches.append(dict(info, url=url))
+        else:
+            previous["url"] = url
+    if len(matches) != 1:
+        logger.warning(
+            "Startup project %r matched %d instances; staying disconnected. "
+            "Use list_instances() and connect_instance() to select an instance.",
+            project,
+            len(matches),
+        )
+        return []
+    return matches

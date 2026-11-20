@@ -39,7 +39,9 @@ updates:
         patterns:
           - "github/codeql-action*"
 
-  - package-ecosystem: pip
+  # uv, not pip: the pip updater edits pyproject.toml but never uv.lock, so
+  # every bump failed CI on `uv sync --locked` (#663).
+  - package-ecosystem: uv
     directory: "/"
     schedule:
       interval: weekly

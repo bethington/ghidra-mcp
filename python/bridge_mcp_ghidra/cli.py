@@ -12,6 +12,8 @@ import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 
+from . import resources  # noqa: F401  (registers MCP resources on import)
+from . import subscriptions  # noqa: F401  (registers subscribe/unsubscribe handlers)
 from . import server
 from . import state
 from .config import AUTH_TOKEN, logger
@@ -519,6 +521,14 @@ def main():
         help="Comma-separated list of default tool groups to load on connect " "(default: listing,function,program)",
     )
     parser.add_argument(
+        "--expose",
+        type=str,
+        default=None,
+        help="MCP surface: full (legacy dynamic tools, default), facade (5 stable "
+        "ghidra_* tools for Copilot-style clients), hybrid (both). "
+        "Env GHIDRA_MCP_EXPOSE overrides when the flag is absent.",
+    )
+    parser.add_argument(
         "--tools-page-size",
         type=int,
         default=0,
@@ -544,7 +554,15 @@ def main():
         "and no server-initiated notifications. Needed to run several bridge "
         "workers behind a load balancer.",
     )
+    parser.add_argument(
+        "--project",
+        default=(os.getenv("GHIDRA_MCP_PROJECT") or "").strip() or None,
+        help="Exact project name to connect on startup (env: GHIDRA_MCP_PROJECT)",
+    )
     args = parser.parse_args()
+    project = args.project.strip() if args.project is not None else None
+    if args.project is not None and not project:
+        parser.error("--project / GHIDRA_MCP_PROJECT must not be blank")
 
     # An explicit --lazy/--no-lazy wins; otherwise GHIDRA_MCP_LAZY decides, and
     # only then the built-in default. Argparse leaves args.lazy as None when
@@ -554,6 +572,16 @@ def main():
     state._lazy_mode = args.lazy if args.lazy is not None else state.lazy_mode_from_env()
     if args.default_groups is not None:
         state._default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
+
+    from . import facade as _facade
+
+    expose = args.expose or os.environ.get("GHIDRA_MCP_EXPOSE", "full")
+    _facade.apply_expose_mode(expose)
+    if state._expose_mode == "facade":
+        # Facade keeps the whole /mcp/schema in memory and dispatches by
+        # name, so group pre-loading is meaningless — force lazy so connect
+        # paths only fetch+cache the schema instead of registering tools.
+        state._lazy_mode = True
 
     if not state._lazy_mode:
         logger.info("Loading all tool groups on startup (clients that don't support tools/list_changed need this)")
@@ -573,12 +601,12 @@ def main():
             "nextCursor will see only the first page",
             args.tools_page_size,
         )
-    if not _auto_connect():
+    if not _auto_connect(project=project):
         # Ghidra may simply not be up yet. Keep looking in the background so a
         # bridge that wins the startup race still gets its tools, instead of
         # serving only the static ones for the life of the process.
         logger.info("No Ghidra tools registered at startup; retrying in the background")
-        _start_auto_connect_retry()
+        _start_auto_connect_retry(project=project)
 
     mcp.settings.log_level = "INFO"
     mcp.settings.host = args.mcp_host
@@ -592,6 +620,17 @@ def main():
         logger.warning(
             "--json-response/--stateless-http only affect streamable-http; ignored for %s",
             args.transport,
+        )
+    if args.json_response:
+        logger.warning(
+            "--json-response answers POSTs with a single JSON body, so "
+            "resources/updated, resources/list_changed, tools/list_changed and "
+            "progress notifications cannot be delivered on the response stream."
+        )
+    if args.stateless_http:
+        logger.warning(
+            "--stateless-http has no durable session: resources/subscribe is "
+            "refused and subscribe=false is advertised at initialize."
         )
     if args.stateless_http and state._lazy_mode:
         logger.warning(

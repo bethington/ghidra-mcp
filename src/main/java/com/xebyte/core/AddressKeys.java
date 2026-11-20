@@ -14,7 +14,7 @@ import java.util.Locale;
  * {@code 0x1000} and the default-space function at {@code 0x1000} are two functions with one
  * spelling. The default space stays bare, so a single-space program reads exactly as plain
  * hex. {@link ServiceUtils#parseAddress} reads both forms. {@code get_functions}, the
- * decompilation checkout and {@code ghidra://function} URIs all use this rule, so they agree.
+ * decompilation tree and {@code ghidra://function} URIs all use this rule, so they agree.
  */
 public final class AddressKeys {
 

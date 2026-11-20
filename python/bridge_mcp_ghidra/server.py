@@ -11,28 +11,31 @@ from . import state as _state
 # to this object.
 mcp = FastMCP("ghidra-mcp")
 
-# Enable tools/list_changed notifications so clients re-fetch tools after
-# dynamic registration.
+# Enable tools/list_changed and resources/list_changed so clients re-fetch after
+# dynamic registration / write-triggered invalidation.
 _orig_init_options = mcp._mcp_server.create_initialization_options
 
 
 def _patched_init_options(**kwargs):
     options = _orig_init_options(
-        notification_options=NotificationOptions(tools_changed=True), **kwargs
+        notification_options=NotificationOptions(
+            tools_changed=True,
+            resources_changed=True,
+        ),
+        **kwargs,
     )
-    _drop_unimplemented_capabilities(options)
+    _adjust_capabilities(options)
     return options
 
 
-def _drop_unimplemented_capabilities(options) -> None:
-    """Stop advertising `prompts` and `resources` while there are none.
+def _adjust_capabilities(options) -> None:
+    """Advertise only the resource/prompt features this process actually has.
 
-    FastMCP registers handlers for both unconditionally, so the handshake
-    claimed both capabilities and then answered `prompts/list` and
-    `resources/list` with empty arrays — clients render dead sections for
-    features this bridge does not provide. Gated on emptiness rather than
-    hardcoded off, so the capability reappears by itself if a prompt or
-    resource is ever registered.
+    FastMCP registers list handlers for prompts and resources unconditionally,
+    so a stock handshake claimed both capabilities and then answered with empty
+    arrays. Gate on emptiness for the whole capability, and — when resources
+    exist — flip ``subscribe`` on once a SubscribeRequest handler is registered
+    and the transport can actually deliver follow-up notifications.
     """
     capabilities = getattr(options, "capabilities", None)
     if capabilities is None:  # pragma: no cover - SDK shape changed
@@ -43,6 +46,16 @@ def _drop_unimplemented_capabilities(options) -> None:
     templates = mcp._resource_manager.list_templates()
     if not resources and not templates:
         capabilities.resources = None
+        return
+    if capabilities.resources is None:
+        capabilities.resources = types.ResourcesCapability(
+            subscribe=False, listChanged=True
+        )
+    else:
+        capabilities.resources.listChanged = True
+    subscribe_handler = types.SubscribeRequest in mcp._mcp_server.request_handlers
+    stateless = bool(getattr(mcp.settings, "stateless_http", False))
+    capabilities.resources.subscribe = bool(subscribe_handler and not stateless)
 
 
 def enable_tool_pagination(page_size: int) -> None:

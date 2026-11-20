@@ -39,6 +39,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 # ---------------------------------------------------------------------------
 
 
+class _StubSession:
+    """Weak-referenceable session double.
+
+    The bridge tracks sessions by weakref so a dropped one cannot pin a
+    ServerSession, and SimpleNamespace cannot be weak-referenced.
+    """
+
+    def __init__(self):
+        self.send_tool_list_changed = AsyncMock()
+        self.send_log_message = AsyncMock()
+
+
 def make_ctx():
     """A minimal FastMCP Context double.
 
@@ -47,10 +59,7 @@ def make_ctx():
     tools/list_changed notification was actually sent (clients that cache
     tools/list depend on it after load/unload).
     """
-    session = SimpleNamespace(
-        send_tool_list_changed=AsyncMock(),
-        send_log_message=AsyncMock(),
-    )
+    session = _StubSession()
     return SimpleNamespace(
         _request_context=object(),
         request_context=SimpleNamespace(session=session),
@@ -226,11 +235,13 @@ class TestConnectInstanceFailures(unittest.TestCase):
                 side_effect=RuntimeError("HTTP 503"),
             ),
         ):
-            data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("diablo2"))
 
-        self.assertIn("Schema fetch failed", data["error"])
-        self.assertIn("HTTP 503", data["error"])
-        self.assertEqual(data["socket"], "/tmp/d2.sock")
+        message = str(raised.exception)
+        self.assertIn("Schema fetch failed", message)
+        self.assertIn("HTTP 503", message)
+        self.assertIn("/tmp/d2.sock", message)
 
     def test_substring_project_match_is_accepted_after_exact_match_fails(self):
         """connect_instance("diablo") should find the "diablo2" project --
@@ -299,10 +310,11 @@ class TestConnectInstanceFailures(unittest.TestCase):
             patch.object(bridge.registry, "_fetch_schema") as fetch,
             patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://evil.example.com:8089"}),
         ):
-            data = json.loads(asyncio.run(bridge.connect_instance("anything")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("anything"))
 
-        self.assertIn("Refusing to connect to invalid TCP URL", data["error"])
-        self.assertIn("evil.example.com", data["error"])
+        self.assertIn("Refusing to connect to invalid TCP URL", str(raised.exception))
+        self.assertIn("evil.example.com", str(raised.exception))
         fetch.assert_not_called()
 
     def test_tcp_failure_resets_transport_state(self):
@@ -314,7 +326,7 @@ class TestConnectInstanceFailures(unittest.TestCase):
         with (
             isolated_bridge() as bridge,
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
-            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value=None),
+            patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090"),
             patch.object(
                 bridge.registry,
                 "_fetch_schema",
@@ -323,13 +335,14 @@ class TestConnectInstanceFailures(unittest.TestCase):
             patch.dict(os.environ, env, clear=True),
         ):
             bridge.state._transport_mode = "none"
-            data = json.loads(asyncio.run(bridge.connect_instance("diablo2")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("diablo2"))
 
             self.assertEqual(bridge.state._transport_mode, "none")
             self.assertIsNone(bridge.state._active_tcp)
 
-        self.assertIn("No instance matching 'diablo2'", data["error"])
-        self.assertEqual(data["available"], [])
+        self.assertIn("No instance matching 'diablo2'", str(raised.exception))
+        self.assertIn("connection refused", str(raised.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +354,10 @@ class TestListToolGroups(unittest.TestCase):
     def test_errors_without_a_connection(self):
         with isolated_bridge() as bridge:
             bridge.state._full_schema = []
-            data = json.loads(bridge.list_tool_groups())
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                bridge.list_tool_groups()
 
-        self.assertIn("connect_instance", data["error"])
+        self.assertIn("connect_instance", str(raised.exception))
 
     def test_reports_counts_loaded_and_default_flags(self):
         defs = [
@@ -377,9 +391,10 @@ class TestLoadToolGroup(unittest.TestCase):
     def test_errors_without_a_connection(self):
         with isolated_bridge() as bridge:
             bridge.state._full_schema = []
-            data = json.loads(asyncio.run(bridge.load_tool_group("function")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.load_tool_group("function"))
 
-        self.assertIn("connect_instance", data["error"])
+        self.assertIn("connect_instance", str(raised.exception))
 
     def test_loads_group_registers_tools_and_notifies(self):
         defs = [
@@ -460,10 +475,11 @@ class TestLoadToolGroup(unittest.TestCase):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = set()
             seed_schema(bridge, defs, loaded_groups=set())
-            data = json.loads(asyncio.run(bridge.load_tool_group("nope")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.load_tool_group("nope"))
 
-        self.assertIn("No tools found for group 'nope'", data["error"])
-        self.assertEqual(data["available_groups"], ["stg_alpha", "stg_beta"])
+        self.assertIn("No tools found for group 'nope'", str(raised.exception))
+        self.assertIn("Available groups: stg_alpha, stg_beta.", str(raised.exception))
 
 
 # ---------------------------------------------------------------------------
@@ -475,10 +491,11 @@ class TestUnloadToolGroup(unittest.TestCase):
     def test_default_group_is_protected(self):
         with isolated_bridge() as bridge:
             bridge.state._default_groups = {"stg_alpha"}
-            data = json.loads(asyncio.run(bridge.unload_tool_group("stg_alpha")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.unload_tool_group("stg_alpha"))
 
-        self.assertIn("Cannot unload default group", data["error"])
-        self.assertEqual(data["default_groups"], ["stg_alpha"])
+        self.assertIn("Cannot unload default group", str(raised.exception))
+        self.assertIn("Default groups: stg_alpha.", str(raised.exception))
 
     def test_unloading_removes_tools_and_notifies(self):
         defs = [
@@ -525,9 +542,10 @@ class TestCheckTools(unittest.TestCase):
 
     def test_blank_input_is_rejected(self):
         with isolated_bridge() as bridge:
-            data = json.loads(asyncio.run(bridge.check_tools("  , ,, ")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.check_tools("  , ,, "))
 
-        self.assertIn("comma-separated", data["error"])
+        self.assertIn("comma-separated", str(raised.exception))
 
     def test_classifies_static_loaded_unloaded_and_unknown(self):
         defs = [
@@ -580,9 +598,10 @@ class TestSearchTools(unittest.TestCase):
 
     def test_blank_query_is_rejected(self):
         with isolated_bridge() as bridge:
-            data = json.loads(asyncio.run(bridge.search_tools("   ")))
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.search_tools("   "))
 
-        self.assertIn("search keywords", data["error"])
+        self.assertIn("search keywords", str(raised.exception))
 
     def test_name_hits_outrank_description_hits(self):
         with isolated_bridge() as bridge:
@@ -837,6 +856,13 @@ class TestAutoConnect(unittest.TestCase):
         import bridge_mcp_ghidra as bridge
 
         self._bridge = bridge
+        self._tcp_discovery = patch.object(bridge.discovery, "_iter_tcp_instances", return_value=[])
+        self._tcp_discovery.start()
+        self.addCleanup(self._tcp_discovery.stop)
+        self._env = patch.dict(os.environ)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        os.environ.pop("GHIDRA_MCP_URL", None)
         self._saved = (
             bridge.state._active_socket,
             bridge.state._active_tcp,
@@ -855,6 +881,172 @@ class TestAutoConnect(unittest.TestCase):
             self._bridge.state._transport_mode,
             self._bridge.state._connected_project,
         ) = self._saved
+
+    def test_project_selects_one_of_multiple_uds_instances(self):
+        bridge = self._bridge
+        instances = [
+            {"socket": "/tmp/other.sock", "project": "Other"},
+            {"socket": "/tmp/chosen.sock", "project": "Chosen"},
+        ]
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=instances),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]) as fetch,
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(fetch.call_args.kwargs["connection"].active_socket, "/tmp/chosen.sock")
+        self.assertEqual(bridge.state._connected_project, "Chosen")
+
+    def test_missing_or_ambiguous_project_never_fetches_schema(self):
+        bridge = self._bridge
+        for instances in (
+            [{"socket": "/tmp/a.sock", "project": "Other"}],
+            [{"socket": "/tmp/a.sock", "project": "Chosen"}, {"socket": "/tmp/b.sock", "project": "Chosen"}],
+        ):
+            with (
+                self.subTest(instances=instances),
+                patch.object(bridge.discovery, "discover_instances", return_value=instances),
+                patch.object(bridge.discovery, "_iter_tcp_instances", return_value=[]),
+                patch.object(bridge.transport, "tcp_request", return_value=("{}", 200)),
+                patch.object(bridge.registry, "_fetch_schema") as fetch,
+            ):
+                self.assertFalse(bridge._auto_connect(project="Chosen"))
+                fetch.assert_not_called()
+                self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_selected_schema_failure_does_not_fall_back_to_other_listener(self):
+        bridge = self._bridge
+        with (
+            patch.object(
+                bridge.discovery,
+                "discover_instances",
+                return_value=[{"socket": "/tmp/chosen.sock", "project": "Chosen"}],
+            ),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", side_effect=OSError("unavailable")) as fetch,
+        ):
+            self.assertFalse(bridge._auto_connect(project="Chosen"))
+        fetch.assert_called_once()
+        self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_project_selects_tcp_only_instance(self):
+        bridge = self._bridge
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://127.0.0.1:9999"}),
+            patch.object(bridge.transport, "tcp_request", return_value=('{"data":{"project":"Chosen"}}', 200)) as info,
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        info.assert_called_once_with("http://127.0.0.1:9999", "GET", "/mcp/instance_info", timeout=5)
+        self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:9999")
+        self.assertEqual(bridge.state._connected_project, "Chosen")
+
+    def test_tcp_scan_rejects_duplicate_names_and_matches_exactly(self):
+        bridge = self._bridge
+        for found in (
+            [("http://127.0.0.1:8089", {"project": "Chosen extra"})],
+            [("http://127.0.0.1:8089", {"project": "Chosen"}), ("http://127.0.0.1:8090", {"project": "Chosen"})],
+        ):
+            with (
+                self.subTest(found=found),
+                patch.dict(os.environ),
+                patch.object(bridge.discovery, "discover_instances", return_value=[]),
+                patch.object(bridge.discovery, "_iter_tcp_instances", return_value=found),
+                patch.object(bridge.registry, "_fetch_schema") as fetch,
+            ):
+                os.environ.pop("GHIDRA_MCP_URL", None)
+                self.assertFalse(bridge._auto_connect(project="Chosen"))
+                fetch.assert_not_called()
+
+    def test_tcp_scan_selects_matching_project(self):
+        bridge = self._bridge
+        with (
+            patch.dict(os.environ),
+            patch.object(bridge.discovery, "discover_instances", return_value=[]),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[
+                    ("http://127.0.0.1:8089", {"project": "Other"}),
+                    ("http://127.0.0.1:8090", {"project": "Chosen"}),
+                ],
+            ),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            os.environ.pop("GHIDRA_MCP_URL", None)
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(bridge.state._active_tcp, "http://127.0.0.1:8090")
+
+    def test_mixed_transport_duplicate_project_stays_disconnected(self):
+        bridge = self._bridge
+        with (
+            patch.object(
+                bridge.discovery,
+                "discover_instances",
+                return_value=[{"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1}],
+            ),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 2})],
+            ),
+            patch.object(bridge.registry, "_fetch_schema") as fetch,
+        ):
+            self.assertFalse(bridge._auto_connect(project="Chosen"))
+        fetch.assert_not_called()
+        self.assertEqual(bridge.state._transport_mode, "none")
+
+    def test_same_instance_on_both_transports_is_not_ambiguous(self):
+        bridge = self._bridge
+        original = {"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1, "project_path": "/a/Chosen"}
+        with (
+            patch.object(bridge.discovery, "discover_instances", return_value=[original]),
+            patch.object(
+                bridge.discovery,
+                "_iter_tcp_instances",
+                return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 1, "project_path": "/a/Chosen"})],
+            ),
+            patch.object(bridge.transport, "uds_supported", return_value=True),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
+        ):
+            self.assertTrue(bridge._auto_connect(project="Chosen"))
+        self.assertEqual(bridge.state._active_socket, "/tmp/chosen.sock")
+        self.assertNotIn("url", original)
+
+    def test_distinct_paths_in_same_process_remain_ambiguous(self):
+        bridge = self._bridge
+        with patch.object(
+            bridge.discovery,
+            "_iter_tcp_instances",
+            return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 1, "project_path": "/b/Chosen"})],
+        ):
+            self.assertEqual(
+                bridge.discovery.find_project_instances(
+                    "Chosen",
+                    [{"socket": "/tmp/chosen.sock", "project": "Chosen", "pid": 1, "project_path": "/a/Chosen"}],
+                ),
+                [],
+            )
+
+    def test_retry_retains_project_selector(self):
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools, "_auto_connect", side_effect=[False, True]) as connect,
+            patch.object(static_tools.state, "notify_tools_changed_from_worker") as notify,
+        ):
+            thread = static_tools._start_auto_connect_retry(interval=0.001, project="Chosen")
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(connect.call_count, 2)
+        for call in connect.call_args_list:
+            self.assertEqual(call.kwargs, {"project": "Chosen"})
+        notify.assert_called_once()
 
     def test_single_uds_instance_connects_and_registers(self):
         bridge = self._bridge

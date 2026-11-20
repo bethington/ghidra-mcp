@@ -4,7 +4,10 @@ import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.Response;
 import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
+
+import static org.mockito.Mockito.mock;
 
 /**
  * Validation + guard coverage for ProgramScriptService (~2.3K LOC, previously only the
@@ -13,6 +16,8 @@ import junit.framework.TestCase;
  * before any program access, so they run offline.
  */
 public class ProgramScriptServiceValidationTest extends TestCase {
+
+    private final Program programStub = mock(Program.class);
 
     private ProgramScriptService scripts;
 
@@ -26,12 +31,6 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         Response r = scripts.closeProgram("", true);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("Program name or path is required"));
-    }
-
-    public void testSwitchProgramRequiresName() {
-        Response r = scripts.switchProgram("");
-        assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("Program name is required"));
     }
 
     public void testOpenProgramFromProjectRequiresPath() {
@@ -54,7 +53,7 @@ public class ProgramScriptServiceValidationTest extends TestCase {
     }
 
     public void testCreateFolderRequiresProject() {
-        Response r = scripts.createFolder("/test", "");
+        Response r = scripts.createFolder("/test");
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("No project is currently open"));
     }
@@ -69,21 +68,22 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         // Security gate: arbitrary-code execution is off unless GHIDRA_MCP_ALLOW_SCRIPTS is set.
         // Assert the gate only in the (default) disabled state so the test is env-independent.
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
-            Response r = scripts.runScriptInline("System.out.println(1);", "", "");
+            Response r = scripts.runScriptInline("System.out.println(1);", "", programStub);
             assertTrue(r instanceof Response.Err);
             assertTrue(((Response.Err) r).message().contains("Script execution disabled"));
         }
     }
 
     public void testSetMemoryBlockNeedsSomethingToChange() {
-        Response r = scripts.setMemoryBlock("ram", "", null, null, null, null, "");
+        Response r = scripts.setMemoryBlock("ram", null, null, null, null, null, programStub);
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("nothing to change"));
     }
 
     public void testSetMemoryBlockNeedsExactlyOneOfBlockAndAddress() {
-        Response neither = scripts.setMemoryBlock("", "", null, false, null, null, "");
-        Response both = scripts.setMemoryBlock("ram", "0x08005000", null, false, null, null, "");
+        Response neither = scripts.setMemoryBlock("", null, null, false, null, null, programStub);
+        Response both = scripts.setMemoryBlock("ram", org.mockito.Mockito.mock(ghidra.program.model.address.Address.class),
+                null, false, null, null, programStub);
         assertTrue(((Response.Err) neither).message().contains("exactly one of block or address"));
         assertTrue(((Response.Err) both).message().contains("exactly one of block or address"));
     }

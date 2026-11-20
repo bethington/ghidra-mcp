@@ -143,6 +143,11 @@ public class RegenerateEndpointsJson extends TestCase {
         }
         next.addProperty("description", description);
 
+        // Catalog keeps internal endpoints (bridge still calls them); schema omits them.
+        if (tool.internal()) {
+            next.addProperty("internal", true);
+        }
+
         return new MergeResult(next, retained);
     }
 

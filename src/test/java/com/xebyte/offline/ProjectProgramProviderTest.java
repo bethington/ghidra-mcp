@@ -1,6 +1,8 @@
 package com.xebyte.offline;
 
 import com.xebyte.core.AmbiguousProgramException;
+import com.xebyte.core.AnnotationScanner;
+import com.xebyte.core.EndpointDef;
 import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.ProjectProgramProvider;
 import com.xebyte.core.Response;
@@ -186,8 +188,11 @@ public class ProjectProgramProviderTest {
     public void closeWithSaveSavesUnsavedEdits() throws Exception {
         Fixture f = new Fixture();
         Program p = f.file("/fw/a");
-        f.getProgram("/fw/a");
+        // Stub before opening: once any test in this JVM has built the services, every open
+        // queues the tree registry's adopt hook, which reads this mock from another thread.
+        // A stub racing that read lands on the wrong method (Mockito WrongTypeOfReturnValue).
         when(p.isChanged()).thenReturn(true);
+        f.getProgram("/fw/a");
 
         assertTrue(f.closeProgram(p, true));
         verify(p.getDomainFile()).save(any(TaskMonitor.class));
@@ -199,8 +204,8 @@ public class ProjectProgramProviderTest {
     public void closeWithoutSaveDiscards() throws Exception {
         Fixture f = new Fixture();
         Program p = f.file("/fw/a");
-        f.getProgram("/fw/a");
         when(p.isChanged()).thenReturn(true);
+        f.getProgram("/fw/a");
 
         assertTrue(f.releaseCachedProgram("/fw/a", false));
         verify(p.getDomainFile(), never()).save(any(TaskMonitor.class));
@@ -226,10 +231,11 @@ public class ProjectProgramProviderTest {
     @Test
     public void headlessSwitchAmongSeveralSaysItDidNotSwitch() {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
+        Program b = programAt("/b.dll");
         provider.trackOpenProgram(programAt("/a.dll"));
-        provider.trackOpenProgram(programAt("/b.dll"));
+        provider.trackOpenProgram(b);
 
-        Response r = new ProgramScriptService(provider, new NoopThreadingStrategy()).switchProgram("b.dll");
+        Response r = new ProgramScriptService(provider, new NoopThreadingStrategy()).switchProgram(b);
 
         assertTrue("headless keeps no current program, so success would be a lie: " + r,
             r instanceof Response.Err);
@@ -238,12 +244,16 @@ public class ProjectProgramProviderTest {
     }
 
     @Test
-    public void switchToAnAmbiguousNameIsRefused() {
+    public void switchToAnAmbiguousNameIsRefused() throws Exception {
         HeadlessProgramProvider provider = new HeadlessProgramProvider();
         provider.trackOpenProgram(programAt("/1.10/D2Common.dll"));
         provider.trackOpenProgram(programAt("/1.13d/D2Common.dll"));
+        AnnotationScanner scanner = new AnnotationScanner(provider, new NoopThreadingStrategy(),
+            new ProgramScriptService(provider, new NoopThreadingStrategy()));
+        EndpointDef ep = scanner.getEndpoints().stream()
+            .filter(e -> e.path().equals("/switch_program")).findFirst().orElseThrow();
 
-        Response r = new ProgramScriptService(provider, new NoopThreadingStrategy()).switchProgram("D2Common.dll");
+        Response r = ep.handler().handle(java.util.Map.of("program", "D2Common.dll"), java.util.Map.of());
 
         assertTrue(r instanceof Response.Err);
         assertTrue(r.toString(), r.toString().contains("ambiguous"));

@@ -92,7 +92,7 @@ public final class ManualToolDescriptors {
             String path, String method, String category, String description,
             ToolAccess access, String... paramPairs) {
         m.put(path, new AnnotationScanner.ToolDescriptor(
-            path, method, description, category, "", access, params(method, paramPairs)));
+            path, method, description, category, "", access, false, params(method, paramPairs)));
     }
 
     /** Keyed by path. Built once; entries never mutate after class init. */

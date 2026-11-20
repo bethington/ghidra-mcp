@@ -83,7 +83,7 @@ public class AddressSpacesOverlayTest {
         ThreadingStrategy ts = new NoopThreadingStrategy();
 
         ProgramScriptService svc = new ProgramScriptService(provider, ts);
-        Response resp = svc.getAddressSpaces("");
+        Response resp = svc.getAddressSpaces(program);
         assertTrue("expected Response.Ok, got " + resp, resp instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) resp).data();
         List<Map<String, Object>> spaces = (List<Map<String, Object>>) body.get("address_spaces");

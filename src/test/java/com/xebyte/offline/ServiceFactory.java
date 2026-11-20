@@ -36,7 +36,7 @@ public final class ServiceFactory {
         return core.plus(
             new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager()),
             // PluginTool is only used at runtime; the scanner reflects on signatures.
-            new DebuggerService(provider, ts, null),
+            new DebuggerService(ts, null),
             new PromptPolicyService(),
             new VersionControlService(provider, new ProjectServerSession(provider)),
             new ServerLifecycleService(core.programScript(), () -> { }),
@@ -61,7 +61,7 @@ public final class ServiceFactory {
         CoreServices core = CoreServices.build(provider, ts);
         AnnotationScanner scanner = new AnnotationScanner(provider, ts,
             core.plus(
-                new DebuggerService(provider, ts, null),
+                new DebuggerService(ts, null),
                 new PromptPolicyService(),
                 new ProjectLifecycleService(new HeadlessProgramProvider()),
                 new VersionControlService(provider, new ProjectServerSession(provider)),

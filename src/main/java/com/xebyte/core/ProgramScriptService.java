@@ -28,9 +28,6 @@ import ghidra.util.task.TimeoutTaskMonitor;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for program management, script execution, memory, and bookmark operations.
@@ -167,17 +164,9 @@ public class ProgramScriptService {
      * Get metadata about the current program including name, architecture,
      * memory layout, function count, and symbol count.
      */
-    public Response getMetadata() {
-        return getMetadata(null);
-    }
-
     @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program", access = ToolAccess.READ_ONLY)
     public Response getMetadata(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         long totalSize = 0;
         int blockCount = 0;
         for (MemoryBlock block : program.getMemory().getBlocks()) {
@@ -228,7 +217,7 @@ public class ProgramScriptService {
                 "count", groups.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -242,11 +231,7 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProgramOptions(
             @Param(value = "group", defaultValue = "", description = "Option group name (e.g. 'Program Information', 'Analyzers'). Omit to list the groups.") String group,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) {
             return optionGroups(program);
         }
@@ -284,7 +269,7 @@ public class ProgramScriptService {
                 "count", options.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -333,13 +318,7 @@ public class ProgramScriptService {
             @Param(value = "value", source = ParamSource.BODY, description = "New value as a string; parsed according to the option type.") String value,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "",
                    description = "Value type: string|int|long|double|float|boolean. Optional when the option already exists (its current type is reused); defaults to string for a brand-new option.") String type,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (value == null) return Response.err("value is required");
@@ -397,7 +376,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to set option: " + e.getMessage());
+            return ServiceUtils.fail("set option", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -421,13 +400,7 @@ public class ProgramScriptService {
     public Response removeProgramOption(
             @Param(value = "group", source = ParamSource.BODY, description = "Option group name.") String group,
             @Param(value = "name", source = ParamSource.BODY, description = "Option name to remove.") String name,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (group == null || group.isEmpty()) return Response.err("group is required");
         if (name == null || name.isEmpty()) return Response.err("name is required");
         if (!program.getOptionsNames().contains(group)) {
@@ -448,7 +421,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to remove option: " + e.getMessage());
+            return ServiceUtils.fail("remove option", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -482,7 +455,7 @@ public class ProgramScriptService {
                 "count", maps.size(),
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -498,13 +471,7 @@ public class ProgramScriptService {
             @Param(value = "name", source = ParamSource.BODY, description = "Unique map name.") String name,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "string",
                    description = "Value type: int, long, string, or void.") String type,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
         final String kind = (type == null || type.isEmpty()) ? "string" : type.trim().toLowerCase();
         if (!Set.of("int", "long", "string", "void").contains(kind)) {
@@ -527,7 +494,7 @@ public class ProgramScriptService {
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to create property map: " + e.getMessage());
+            return ServiceUtils.fail("create property map", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
@@ -546,13 +513,7 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deletePropertyMap(
             @Param(value = "name", source = ParamSource.BODY, description = "Map name to delete.") String name,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (name == null || name.isEmpty()) return Response.err("name is required");
         PropertyMapManager mgr = program.getUsrPropertyManager();
         if (mgr.getPropertyMap(name) == null) {
@@ -562,18 +523,16 @@ public class ProgramScriptService {
                 "program", program.getName()));
         }
 
-        final AtomicBoolean removed = new AtomicBoolean(false);
+        final boolean removed;
         try {
-            threadingStrategy.executeWrite(program, "Delete Property Map", () -> {
-                removed.set(mgr.removePropertyMap(name));
-                return null;
-            });
+            removed = threadingStrategy.executeWrite(program, "Delete Property Map",
+                () -> mgr.removePropertyMap(name));
         } catch (Exception e) {
-            return Response.err("Failed to delete property map: " + e.getMessage());
+            return ServiceUtils.fail("delete property map", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", removed.get(),
+            "success", removed,
             "name", name,
             "note", "Call save_program to persist this change to the database.",
             "program", program.getName()));
@@ -590,29 +549,19 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.WRITE)
     public Response setProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name (list them with list_properties and no map).") String mapName,
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) Address addr,
             @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
                    description = "Value to store, as a string; parsed per the map's type. Ignored for 'void' maps.") String value,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (addr == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'. Create it with create_property_map.");
         }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
-        if (map instanceof ObjectPropertyMap) {
+if (map instanceof ObjectPropertyMap) {
             return Response.err("Object property maps cannot be written via MCP (they require a registered Saveable type).");
         }
 
@@ -638,24 +587,24 @@ public class ProgramScriptService {
         try {
             threadingStrategy.executeWrite(program, "Set Property", () -> {
                 if (map instanceof IntPropertyMap ip) {
-                    ip.add(address, (Integer) parsed);
+                    ip.add(addr, (Integer) parsed);
                 } else if (map instanceof LongPropertyMap lp) {
-                    lp.add(address, (Long) parsed);
+                    lp.add(addr, (Long) parsed);
                 } else if (map instanceof StringPropertyMap sp) {
-                    sp.add(address, (String) parsed);
+                    sp.add(addr, (String) parsed);
                 } else if (map instanceof VoidPropertyMap vp) {
-                    vp.add(address);
+                    vp.add(addr);
                 }
                 return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to set property: " + e.getMessage());
+            return ServiceUtils.fail("set property", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
             "map", mapName,
-            "address", address.toString(),
+            "address", addr.toString(),
             "value_type", propertyMapValueType(map),
             "value", parsed,
             "note", "Call save_program to persist this change to the database.",
@@ -672,38 +621,28 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getProperty(
             @Param(value = "map", defaultValue = "", description = "Property map name. Omit to list the maps.") String mapName,
-            @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "address", paramType = "address", description = ADDRESS_PARAM_DESC) Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (addr == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'.");
         }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
         try {
-            boolean hasValue = map.hasProperty(address);
-            Object value = hasValue ? renderPropertyValue(map.get(address)) : null;
+            boolean hasValue = map.hasProperty(addr);
+            Object value = hasValue ? renderPropertyValue(map.get(addr)) : null;
             return Response.ok(JsonHelper.mapOf(
                 "map", mapName,
-                "address", address.toString(),
+                "address", addr.toString(),
                 "has_value", hasValue,
                 "value_type", propertyMapValueType(map),
                 "value", value,
                 "program", program.getName()));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -715,38 +654,26 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response removeProperty(
             @Param(value = "map", source = ParamSource.BODY, description = "Property map name.") String mapName,
-            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY, description = ADDRESS_PARAM_DESC) Address address,
+            @Param(value = "program", defaultValue = "") Program program) {
         if (mapName == null || mapName.isEmpty()) return Response.err("map is required");
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        if (address == null) return Response.err("address is required");
 
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
         if (map == null) {
             return Response.err("No property map named '" + mapName + "'.");
         }
-        Address address = ServiceUtils.parseAddress(program, addressStr);
-        if (address == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
 
-        final AtomicBoolean removed = new AtomicBoolean(false);
+        final boolean removed;
         try {
-            threadingStrategy.executeWrite(program, "Remove Property", () -> {
-                removed.set(map.remove(address));
-                return null;
-            });
+            removed = threadingStrategy.executeWrite(program, "Remove Property",
+                () -> map.remove(address));
         } catch (Exception e) {
-            return Response.err("Failed to remove property: " + e.getMessage());
+            return ServiceUtils.fail("remove property", e);
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", removed.get(),
+            "success", removed,
             "map", mapName,
             "address", address.toString(),
             "note", "Call save_program to persist this change to the database.",
@@ -762,16 +689,12 @@ public class ProgramScriptService {
              category = "program", access = ToolAccess.READ_ONLY)
     public Response listProperties(
             @Param(value = "map", description = "Property map name (list them with list_properties and no map).") String mapName,
-            @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") String startStr,
-            @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") String endStr,
+            @Param(value = "start", paramType = "address", defaultValue = "", description = "Optional inclusive start address of a range filter.") Address start,
+            @Param(value = "end", paramType = "address", defaultValue = "", description = "Optional inclusive end address of a range filter (requires start).") Address end,
             @Param(value = "offset", defaultValue = "0", description = "Number of entries to skip.") int offset,
-            @Param(value = "limit", defaultValue = "100", description = "Maximum number of entries to return.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "limit", defaultValue = "100",
+                   description = "Maximum number of entries to return (default 100). 0 or less: no limit.") int limit,
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (mapName == null || mapName.isEmpty()) return propertyMaps(program);
         PropertyMap<?> map = program.getUsrPropertyManager().getPropertyMap(mapName);
@@ -779,25 +702,21 @@ public class ProgramScriptService {
             return Response.err("No property map named '" + mapName + "'.");
         }
         if (offset < 0) offset = 0;
-        if (limit <= 0) limit = 100;
 
         try {
             AddressIterator it;
-            boolean hasStart = startStr != null && !startStr.isEmpty();
-            boolean hasEnd = endStr != null && !endStr.isEmpty();
+            boolean hasStart = start != null;
+            boolean hasEnd = end != null;
             if (hasStart != hasEnd) {
                 return Response.err("Provide both start and end to filter by range, or neither.");
             }
             if (hasStart) {
-                Address start = ServiceUtils.parseAddress(program, startStr);
-                if (start == null) return Response.err("start: " + ServiceUtils.getLastParseError());
-                Address end = ServiceUtils.parseAddress(program, endStr);
-                if (end == null) return Response.err("end: " + ServiceUtils.getLastParseError());
                 it = map.getPropertyIterator(start, end);
             } else {
                 it = map.getPropertyIterator();
             }
 
+            // Skip/take from the iterator — do not materialize the whole map when limited.
             List<Map<String, Object>> entries = new ArrayList<>();
             int skipped = 0;
             while (it.hasNext()) {
@@ -806,22 +725,18 @@ public class ProgramScriptService {
                     skipped++;
                     continue;
                 }
-                if (entries.size() >= limit) break;
+                if (limit > 0 && entries.size() >= limit) break;
                 entries.add(JsonHelper.mapOf(
                     "address", addr.toString(),
                     "value", renderPropertyValue(map.get(addr))));
             }
-            return Response.ok(JsonHelper.mapOf(
-                "map", mapName,
-                "value_type", propertyMapValueType(map),
-                "entries", entries,
-                "count", entries.size(),
-                "total", map.getSize(),
-                "offset", offset,
-                "limit", limit,
-                "program", program.getName()));
+            Map<String, Object> extras = new LinkedHashMap<>();
+            extras.put("map", mapName);
+            extras.put("value_type", propertyMapValueType(map));
+            extras.put("program", program.getName());
+            return ServiceUtils.pagedWindow("entries", entries, offset, limit, map.getSize(), extras);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -864,67 +779,40 @@ public class ProgramScriptService {
     /**
      * Save the currently active program to its domain file.
      */
-    public Response saveCurrentProgram() {
-        return saveCurrentProgram(null);
-    }
-
     @McpTool(path = "/save_program", dryRun = false, description = "Save current program", category = "program", access = ToolAccess.WRITE)
     public Response saveCurrentProgram(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    ghidra.framework.model.DomainFile df = program.getDomainFile();
-                    if (df == null) {
-                        errorMsg.set("Program has no domain file");
-                        return;
-                    }
-                    // Nothing to save. Saving anyway writes the file, so a checked-out file
-                    // read modified_since_checkout=true after a save with no edits.
-                    if (!program.isChanged()) {
-                        resultData.set(JsonHelper.mapOf(
-                            "success", true,
-                            "program", program.getName(),
-                            "saved", false,
-                            "message", "No unsaved changes"
-                        ));
-                        return;
-                    }
-                    String unsaveable = ProgramSaves.unsaveableReason(program);
-                    if (unsaveable != null) {
-                        errorMsg.set(unsaveable);
-                        return;
-                    }
-                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                    resultData.set(JsonHelper.mapOf(
-                        "success", true,
-                        "program", program.getName(),
-                        "saved", true,
-                        "message", "Program saved successfully"
-                    ));
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error saving program", e);
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
+            ghidra.framework.model.DomainFile df = program.getDomainFile();
+            if (df == null) {
+                return Response.err("Program has no domain file");
             }
+            // Nothing to save. Saving anyway writes the file, so a checked-out file
+            // read modified_since_checkout=true after a save with no edits.
+            if (!program.isChanged()) {
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "program", program.getName(),
+                    "saved", false,
+                    "message", "No unsaved changes"
+                ));
+            }
+            String unsaveable = ProgramSaves.unsaveableReason(program);
+            if (unsaveable != null) {
+                return Response.err(unsaveable);
+            }
+            ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "program", program.getName(),
+                "saved", true,
+                "message", "Program saved successfully"
+            ));
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            Msg.error(this, "Error saving program", e);
             return Response.err(msg);
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     /**
@@ -946,71 +834,62 @@ public class ProgramScriptService {
             ));
         }
 
-        final AtomicReference<List<Map<String, Object>>> saved = new AtomicReference<>(new ArrayList<>());
-        final AtomicReference<List<Map<String, Object>>> errors = new AtomicReference<>(new ArrayList<>());
-        final AtomicReference<List<String>> unchanged = new AtomicReference<>(new ArrayList<>());
+        List<Map<String, Object>> saved = new ArrayList<>();
+        List<Map<String, Object>> errors = new ArrayList<>();
+        List<String> unchanged = new ArrayList<>();
 
-        Runnable saveTask = () -> {
-            Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-            for (Program program : programs) {
-                if (program == null || !seen.add(program)) {
+        Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Program program : programs) {
+            if (program == null || !seen.add(program)) {
+                continue;
+            }
+
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("program", program.getName());
+            try {
+                ghidra.framework.model.DomainFile df = program.getDomainFile();
+                if (df == null) {
+                    info.put("error", "Program has no domain file");
+                    errors.add(info);
                     continue;
                 }
-
-                Map<String, Object> info = new LinkedHashMap<>();
-                info.put("program", program.getName());
-                try {
-                    ghidra.framework.model.DomainFile df = program.getDomainFile();
-                    if (df == null) {
-                        info.put("error", "Program has no domain file");
-                        errors.get().add(info);
-                        continue;
-                    }
-                    info.put("path", df.getPathname());
-                    // Nothing to save. Saving anyway writes the file: a checked-out file then
-                    // reads modified_since_checkout=true with no edit made, and a read-only
-                    // copy reports an error for a program that loses nothing.
-                    if (!program.isChanged()) {
-                        unchanged.get().add(df.getPathname());
-                        continue;
-                    }
-                    // A DomainFile that is not in a writable project is a proxy
-                    // (no on-disk location) \u2014 calling save() on it throws the
-                    // cryptic "Location does not exist for a save operation!".
-                    // Surface a specific message so callers know to re-load
-                    // with an active project open.
-                    if (!df.isInWritableProject()) {
-                        info.put("error",
-                            "Program is not attached to a writable project "
-                            + "(transient DomainFileProxy); re-load it with a "
-                            + "project open before saving.");
-                        errors.get().add(info);
-                        continue;
-                    }
-                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                    saved.get().add(info);
-                } catch (Throwable e) {
-                    info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
-                    errors.get().add(info);
-                    Msg.error(this, "Error saving program " + program.getName(), e);
+                info.put("path", df.getPathname());
+                // Nothing to save. Saving anyway writes the file: a checked-out file then
+                // reads modified_since_checkout=true with no edit made, and a read-only
+                // copy reports an error for a program that loses nothing.
+                if (!program.isChanged()) {
+                    unchanged.add(df.getPathname());
+                    continue;
                 }
+                // A DomainFile that is not in a writable project is a proxy
+                // (no on-disk location) \u2014 calling save() on it throws the
+                // cryptic "Location does not exist for a save operation!".
+                // Surface a specific message so callers know to re-load
+                // with an active project open.
+                if (!df.isInWritableProject()) {
+                    info.put("error",
+                        "Program is not attached to a writable project "
+                        + "(transient DomainFileProxy); re-load it with a "
+                        + "project open before saving.");
+                    errors.add(info);
+                    continue;
+                }
+                ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
+                saved.add(info);
+            } catch (Throwable e) {
+                info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
+                errors.add(info);
+                Msg.error(this, "Error saving program " + program.getName(), e);
             }
-        };
-
-        try {
-            threadingStrategy.runOnUi(saveTask);
-        } catch (Throwable e) {
-            return Response.err("Failed to save all programs: " +
-                    (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
 
         return Response.ok(JsonHelper.mapOf(
-            "success", errors.get().isEmpty(),
-            "saved_count", saved.get().size(),
+            "success", errors.isEmpty(),
+            "saved_count", saved.size(),
             "open_program_count", programs.length,
-            "programs", saved.get(),
-            "unchanged", unchanged.get(),
-            "errors", errors.get()
+            "programs", saved,
+            "unchanged", unchanged,
+            "errors", errors
         ));
     }
 
@@ -1084,7 +963,7 @@ public class ProgramScriptService {
             target = ProjectProgramProvider.match(
                 java.util.Arrays.asList(programProvider.getAllOpenPrograms()), search);
         } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
         if (target == null) {
             return Response.ok(JsonHelper.mapOf(
@@ -1098,64 +977,53 @@ public class ProgramScriptService {
                 + " Pass save=false to close and discard them.");
         }
 
-        AtomicInteger closedCount = new AtomicInteger(0);
-        AtomicReference<String> error = new AtomicReference<>();
+        int closedCount = 0;
+        String error = null;
         ghidra.framework.model.DomainFile targetFile = target.getDomainFile();
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    for (ProgramManager pm : programManagers()) {
-                        for (Program program : pm.getAllOpenPrograms()) {
-                            boolean same = program == target || (targetFile != null
-                                && program.getDomainFile() != null
-                                && program.getDomainFile().getPathname().equals(targetFile.getPathname()));
-                            if (!same) {
-                                continue;
-                            }
-                            if (save && program.isChanged()) {
-                                ghidra.framework.model.DomainFile df = program.getDomainFile();
-                                if (df != null && df.isInWritableProject()) {
-                                    ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
-                                }
-                            }
-                            // ignoreChanges=true unconditionally: the fate of unsaved edits
-                            // was decided above (saved, or deliberately discarded), so Ghidra
-                            // must never fall back to its interactive "Save changes?" dialog,
-                            // which blocks the Swing thread -- and every MCP request behind
-                            // it -- until a human clicks.
-                            pm.closeProgram(program, true);
-                            closedCount.incrementAndGet();
+            for (ProgramManager pm : programManagers()) {
+                for (Program program : pm.getAllOpenPrograms()) {
+                    boolean same = program == target || (targetFile != null
+                        && program.getDomainFile() != null
+                        && program.getDomainFile().getPathname().equals(targetFile.getPathname()));
+                    if (!same) {
+                        continue;
+                    }
+                    if (save && program.isChanged()) {
+                        ghidra.framework.model.DomainFile df = program.getDomainFile();
+                        if (df != null && df.isInWritableProject()) {
+                            ProgramSaves.withRetry(program, () -> df.save(new ConsoleTaskMonitor()));
                         }
                     }
-                } catch (Exception e) {
-                    error.set(e.getMessage() != null ? e.getMessage() : e.toString());
+                    // ignoreChanges=true unconditionally: the fate of unsaved edits
+                    // was decided above (saved, or deliberately discarded), so Ghidra
+                    // must never fall back to its interactive "Save changes?" dialog,
+                    // which blocks the Swing thread -- and every MCP request behind
+                    // it -- until a human clicks.
+                    pm.closeProgram(program, true);
+                    closedCount++;
                 }
-            });
+            }
         } catch (Exception e) {
-            return Response.err("Failed to close program: " +
-                    (e.getMessage() != null ? e.getMessage() : e.toString()));
+            error = e.getMessage() != null ? e.getMessage() : e.toString();
         }
-        if (error.get() != null) {
-            return Response.err("Failed to close program: " + error.get());
+        if (error != null) {
+            return Response.err("Failed to close program: " + error);
         }
 
         // The provider's own handle, with the same save choice. Releasing it used to
         // save unconditionally, so save=false in the GUI still saved the discarded edits.
         boolean releasedCache = programProvider.closeProgram(target, save);
-        if (closedCount.get() == 0 && releasedCache) {
-            closedCount.incrementAndGet();
+        if (closedCount == 0 && releasedCache) {
+            closedCount++;
         }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
-            "closed_count", closedCount.get(),
+            "closed_count", closedCount,
             "released_cache", releasedCache,
             "name", search
         ));
-    }
-
-    public Response getAddressSpaces() {
-        return getAddressSpaces(null);
     }
 
     /**
@@ -1177,14 +1045,10 @@ public class ProgramScriptService {
                          + "(e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
              category = "program", access = ToolAccess.READ_ONLY)
     public Response getAddressSpaces(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> spaces = buildAddressSpacesList(program);
         spaces.addAll(buildOverlaySpacesList(program));
-        return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
+        return ServiceUtils.listed("address_spaces", spaces);
     }
 
     private List<Map<String, Object>> buildAddressSpacesList(Program program) {
@@ -1511,49 +1375,22 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/switch_program", dryRun = false, description = "Switch MCP context to a different program", category = "program", access = ToolAccess.WRITE)
     public Response switchProgram(
-            @Param(value = "program", description = "Program name to switch to") String programName) {
-        if (programName == null || programName.trim().isEmpty()) {
-            return Response.err("Program name is required");
-        }
-
-        Program[] programs = programProvider.getAllOpenPrograms();
-        if (programs == null || programs.length == 0) {
-            return Response.err("No programs are currently open");
-        }
-
-        Program targetProgram;
-        try {
-            targetProgram = ProjectProgramProvider.match(java.util.Arrays.asList(programs), programName.trim());
-        } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
-        }
-
-        if (targetProgram == null) {
-            List<String> availablePrograms = new ArrayList<>();
-            for (Program prog : programs) {
-                availablePrograms.add(prog.getName());
-            }
-            return Response.ok(JsonHelper.mapOf(
-                "error", "Program not found: " + programName,
-                "available_programs", availablePrograms
-            ));
-        }
-
-        programProvider.setCurrentProgram(targetProgram);
+            @Param(value = "program", description = "Program name to switch to") Program program) {
+        programProvider.setCurrentProgram(program);
         // Headless keeps no current program by design (a sticky one made a 17-program
         // survey report one binary's numbers seventeen times), and a GUI program no
         // CodeBrowser shows cannot outrank the one that does. This used to answer
         // success anyway.
-        if (programProvider.getCurrentProgram() != targetProgram) {
-            return Response.err("This server did not switch to " + targetProgram.getName()
+        if (programProvider.getCurrentProgram() != program) {
+            return Response.err("This server did not switch to " + program.getName()
                 + ": it has no settable current program here. Pass program=\""
-                + ProjectProgramProvider.keyFor(targetProgram) + "\" on each call instead.");
+                + ProjectProgramProvider.keyFor(program) + "\" on each call instead.");
         }
 
         return Response.ok(JsonHelper.mapOf(
             "success", true,
-            "switched_to", targetProgram.getName(),
-            "path", ProjectProgramProvider.keyFor(targetProgram)
+            "switched_to", program.getName(),
+            "path", ProjectProgramProvider.keyFor(program)
         ));
     }
 
@@ -1568,36 +1405,29 @@ public class ProgramScriptService {
             return Response.err("No project is currently open");
         }
 
-        ghidra.framework.model.ProjectData projectData = project.getProjectData();
-        ghidra.framework.model.DomainFolder rootFolder = projectData.getRootFolder();
-
-        // If folder path specified, navigate to it
-        ghidra.framework.model.DomainFolder targetFolder = rootFolder;
-        if (folderPath != null && !folderPath.trim().isEmpty() && !folderPath.equals("/")) {
-            // Navigate through path segments (handles nested folders like "Project/1.0")
-            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
-            String[] pathParts = cleanPath.split("/");
-            for (String part : pathParts) {
-                if (part.isEmpty()) continue;
-                ghidra.framework.model.DomainFolder nextFolder = targetFolder.getFolder(part);
-                if (nextFolder == null) {
-                    return Response.err("Folder not found: " + folderPath);
-                }
-                targetFolder = nextFolder;
-            }
+        ghidra.framework.model.DomainFolder targetFolder;
+        try {
+            targetFolder = ProjectPaths.listable(project, folderPath);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
-        // List subfolders
+        // Under a folder scope only the branch toward it shows from an ancestor.
         ghidra.framework.model.DomainFolder[] subfolders = targetFolder.getFolders();
         List<String> folderNames = new ArrayList<>();
         for (ghidra.framework.model.DomainFolder subfolder : subfolders) {
-            folderNames.add(subfolder.getName());
+            if (ProjectPaths.visible(subfolder.getPathname())) {
+                folderNames.add(subfolder.getName());
+            }
         }
 
         // List files in folder
         ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
         List<Map<String, Object>> fileList = new ArrayList<>();
         for (ghidra.framework.model.DomainFile file : files) {
+            if (!SecurityConfig.getInstance().isPathInProjectScope(file.getPathname())) {
+                continue;
+            }
             // With version-control state, so a checkout that still holds uncommitted work
             // (modified_since_checkout) can be told from an idle one without reading icons
             // in the Ghidra GUI. This is what the GUI's /server/repository/files reported.
@@ -1614,8 +1444,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/create_folder", dryRun = false, method = "POST", description = "Create a folder in the project", category = "project", access = ToolAccess.WRITE)
     public Response createFolder(
-            @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath) {
         ghidra.framework.model.Project project = programProvider.getProject();
         if (project == null) {
             return Response.err("No project is currently open");
@@ -1623,26 +1452,15 @@ public class ProgramScriptService {
         if (folderPath == null || folderPath.trim().isEmpty() || folderPath.equals("/")) {
             return Response.err("path parameter is required");
         }
-        // Containment: honor GHIDRA_MCP_PROJECT_FOLDER for this mutating op.
-        // No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(folderPath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
-        }
 
         try {
-            ghidra.framework.model.DomainFolder current = project.getProjectData().getRootFolder();
-            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
-            for (String part : cleanPath.split("/")) {
-                if (part.isEmpty()) continue;
-                ghidra.framework.model.DomainFolder next = current.getFolder(part);
-                if (next == null) {
-                    next = current.createFolder(part);
-                }
-                current = next;
-            }
+            ghidra.framework.model.DomainFolder current =
+                ProjectPaths.folder(project, folderPath, true);
             return Response.ok(JsonHelper.mapOf("success", true, "folder", current.getPathname()));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Failed to create folder: " + e.getMessage());
+            return ServiceUtils.fail("create folder", e);
         }
     }
 
@@ -1656,26 +1474,28 @@ public class ProgramScriptService {
         if (filePath == null || filePath.trim().isEmpty()) {
             return Response.err("filePath parameter is required");
         }
-        // Containment: a destructive op must honor GHIDRA_MCP_PROJECT_FOLDER.
-        // The read side (FrontEndProgramProvider) already scopes which programs
-        // are returned; without this check a caller could delete files outside
-        // the configured scope. No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final String normalized;
+        try {
+            normalized = ProjectPaths.normalize(filePath);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.DomainFile domainFile = project.getProjectData().getFile(filePath);
+            ghidra.framework.model.DomainFile domainFile = ProjectPaths.findFile(project, normalized);
             if (domainFile == null) {
-                return Response.ok(JsonHelper.mapOf("success", true, "deleted", false, "filePath", filePath));
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true, "deleted", false, "filePath", normalized));
             }
-            if (!programProvider.closeProgramByPath(filePath) && programProvider.workbench() != null) {
-                programProvider.workbench().closeProgramForFile(filePath);
+            if (!programProvider.closeProgramByPath(normalized) && programProvider.workbench() != null) {
+                programProvider.workbench().closeProgramForFile(normalized);
             }
             domainFile.delete();
-            return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
+            return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", normalized));
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
-            return Response.err("Failed to delete file: " + e.getMessage());
+            return ServiceUtils.fail("delete file", e);
         }
     }
 
@@ -1711,25 +1531,20 @@ public class ProgramScriptService {
         if (destFolder == null || destFolder.trim().isEmpty()) {
             return Response.err("destFolder parameter is required");
         }
-        // Containment: a move is a delete from one scope plus a create in
-        // another, so BOTH ends must sit inside GHIDRA_MCP_PROJECT_FOLDER.
-        // Checking only the source would let a caller relocate a scoped file
-        // straight out of scope. No-op when no scope is set (default).
-        if (!SecurityConfig.getInstance().isPathInProjectScope(filePath)
-                || !SecurityConfig.getInstance().isPathInProjectScope(destFolder)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final String normalizedFile;
+        final ghidra.framework.model.DomainFile domainFile;
+        final ghidra.framework.model.DomainFolder dest;
+        try {
+            normalizedFile = ProjectPaths.normalize(filePath);
+            // Both ends must sit inside project.folder_scope — checking only the
+            // source would let a caller relocate a scoped file straight out of scope.
+            domainFile = ProjectPaths.file(project, normalizedFile);
+            dest = ProjectPaths.folder(project, destFolder, false);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.ProjectData projectData = project.getProjectData();
-            ghidra.framework.model.DomainFile domainFile = projectData.getFile(filePath);
-            if (domainFile == null) {
-                return Response.err("File not found: " + filePath);
-            }
-            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destFolder);
-            if (dest == null) {
-                return Response.err("Destination folder not found: " + destFolder);
-            }
             ghidra.framework.model.DomainFolder parent = domainFile.getParent();
             if (parent != null && parent.getPathname().equals(dest.getPathname())) {
                 return Response.ok(JsonHelper.mapOf(
@@ -1747,18 +1562,20 @@ public class ProgramScriptService {
             // side effect "move" should have. Refuse, and say what to do.
             if (domainFile.isChanged()) {
                 return Response.err("Program has unsaved changes: call save_program "
-                        + "(or close_program) before moving " + filePath);
+                        + "(or close_program) before moving " + normalizedFile);
             }
 
-            boolean wasOpen = isProgramOpenForPath(filePath);
+            ghidra.framework.model.DomainFile toMove = domainFile;
+            boolean wasOpen = isProgramOpenForPath(normalizedFile);
             if (wasOpen) {
                 // Ghidra refuses to move a file that is open in a tool. It is
                 // clean (checked above), so save=false discards nothing.
-                closeProgram(filePath, false);
+                closeProgram(normalizedFile, false);
                 // The close can swap the DomainFile instance out from under us.
-                domainFile = projectData.getFile(filePath);
-                if (domainFile == null) {
-                    return Response.err("File vanished while closing it: " + filePath);
+                try {
+                    toMove = ProjectPaths.file(project, normalizedFile);
+                } catch (Refusal r) {
+                    return Response.err("File vanished while closing it: " + normalizedFile);
                 }
             }
             // moveTo returns the RELOCATED DomainFile. The receiver keeps
@@ -1767,19 +1584,19 @@ public class ProgramScriptService {
             // successful move to /Project/1.1 still answered
             // "to": "/Project/1.0/example.dll". Anything chaining on that
             // path then operates on a file that no longer exists there.
-            ghidra.framework.model.DomainFile movedFile = domainFile.moveTo(dest);
+            ghidra.framework.model.DomainFile movedFile = toMove.moveTo(dest);
             String newPath = movedFile != null ? movedFile.getPathname()
-                    : dest.getPathname() + "/" + domainFile.getName();
+                    : dest.getPathname() + "/" + toMove.getName();
             boolean reopened = false;
             if (wasOpen) {
                 reopened = openProgramFromProject(newPath, false) instanceof Response.Ok;
             }
             return Response.ok(JsonHelper.mapOf(
                     "success", true, "moved", true,
-                    "from", filePath, "to", newPath,
+                    "from", normalizedFile, "to", newPath,
                     "was_open", wasOpen, "reopened", reopened));
         } catch (Exception e) {
-            return Response.err("Failed to move file: " + e.getMessage());
+            return ServiceUtils.fail("move file", e);
         }
     }
 
@@ -1803,23 +1620,18 @@ public class ProgramScriptService {
         if (destPath == null || destPath.trim().isEmpty()) {
             return Response.err("destPath parameter is required");
         }
-        if (!SecurityConfig.getInstance().isPathInProjectScope(sourcePath)
-                || !SecurityConfig.getInstance().isPathInProjectScope(destPath)) {
-            return Response.err("Access denied: path is outside the configured project scope.");
+        final ghidra.framework.model.DomainFolder source;
+        final ghidra.framework.model.DomainFolder dest;
+        try {
+            source = ProjectPaths.folder(project, sourcePath, false);
+            dest = ProjectPaths.folder(project, destPath, false);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         }
 
         try {
-            ghidra.framework.model.ProjectData projectData = project.getProjectData();
-            ghidra.framework.model.DomainFolder source = projectData.getFolder(sourcePath);
-            if (source == null) {
-                return Response.err("Source folder not found: " + sourcePath);
-            }
             if (source.getParent() == null) {
                 return Response.err("Cannot move the project root folder");
-            }
-            ghidra.framework.model.DomainFolder dest = projectData.getFolder(destPath);
-            if (dest == null) {
-                return Response.err("Destination folder not found: " + destPath);
             }
             // A folder cannot become its own ancestor. Ghidra's own error for
             // this is opaque, and the subtree is unreachable afterwards, so
@@ -1842,9 +1654,9 @@ public class ProgramScriptService {
                     : dest.getPathname() + "/" + source.getName();
             return Response.ok(JsonHelper.mapOf(
                     "success", true, "moved", true,
-                    "from", sourcePath, "to", newPath));
+                    "from", source.getPathname(), "to", newPath));
         } catch (Exception e) {
-            return Response.err("Failed to move folder: " + e.getMessage());
+            return ServiceUtils.fail("move folder", e);
         }
     }
 
@@ -1880,7 +1692,7 @@ public class ProgramScriptService {
             }
             program = provider.openDomainFile(domainFile);
         } catch (AmbiguousProgramException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         } catch (Exception e) {
             return openFailure(provider, path, "Failed to open program: " + describeOpenFailure(e, path), false);
         }
@@ -2066,6 +1878,8 @@ public class ProgramScriptService {
                 out.put("codebrowser", shown);
             }
             return Response.ok(out);
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null || msg.isEmpty()) {
@@ -2128,11 +1942,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/reanalyze", dryRun = false, method = "POST", description = "Trigger full auto-analysis on a program", category = "program", access = ToolAccess.WRITE)
     public Response reanalyze(
-            @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") Program program) {
         try {
             boolean analyzed = runAutoAnalysisAndPersistFlags(program, true);
             return Response.ok(JsonHelper.mapOf(
@@ -2143,12 +1953,13 @@ public class ProgramScriptService {
                     : "Auto-analysis failed for " + program.getName()
             ));
         } catch (Exception e) {
-            return Response.err("Failed to start analysis: " + e.getMessage());
+            return ServiceUtils.fail("start analysis", e);
         }
     }
 
     @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program", access = ToolAccess.READ_ONLY)
     public Response analysisStatus(
+            // Omit means every open program, not the single-target resolve rule.
             @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
 
         Program[] allPrograms = programProvider.getAllOpenPrograms();
@@ -2161,7 +1972,7 @@ public class ProgramScriptService {
             try {
                 only = ProjectProgramProvider.match(java.util.Arrays.asList(allPrograms), programName.trim());
             } catch (AmbiguousProgramException e) {
-                return Response.err(e.getMessage());
+                return ServiceUtils.fail(e);
             }
             if (only == null) {
                 return Response.err("Program not open: " + programName);
@@ -2212,19 +2023,15 @@ public class ProgramScriptService {
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
-    public Response runGhidraScript(String scriptPath, String scriptArgs) {
-        return runGhidraScript(scriptPath, scriptArgs, (String) null);
-    }
-
     // Removed from MCP schema — use run_ghidra_script instead (has output capture + timeout)
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        return runGhidraScript(scriptPath, scriptArgs, programName, 0);
+            @Param(value = "program", defaultValue = "") Program program) {
+        return runGhidraScript(scriptPath, scriptArgs, program, 0);
     }
 
-    public Response runGhidraScript(String scriptPath, String scriptArgs, String programName, int timeoutSeconds) {
+    public Response runGhidraScript(String scriptPath, String scriptArgs, Program program, int timeoutSeconds) {
         // Defense in depth: the script-execution gate belongs on the sink, not
         // only on the callers. runGhidraScriptWithCapture already checks this
         // before delegating here; enforcing it again means no current or future
@@ -2235,256 +2042,256 @@ public class ProgramScriptService {
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
                 + "runGhidraScript executes any script resolvable via the Ghidra script path.");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
-        final StringBuilder resultMsg = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        // Why the run failed, in one line, so a caller gets the reason and not only a flag.
-        final AtomicReference<String> failure = new AtomicReference<>();
-        final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
-        final PrintStream originalOut = System.out;
-        final PrintStream originalErr = System.err;
-
-        // Track whether we copied the script (for cleanup)
-        final File[] copiedScript = {null};
-
-        // Holders so the catch block can surface OSGi build/activate output
-        // captured into scriptWriter before a failure. The PrintWriter holder
-        // lets the failure path flush buffered output into the StringWriter
-        // before reading it, otherwise the captured text can be truncated.
-        final StringWriter[] scriptWriterHolder = {null};
-        final PrintWriter[] scriptPrintWriterHolder = {null};
-        final TimeoutTaskMonitor[] scriptMonitorHolder = {null};
-
-        // The analyst's windows, for script state (GUI mode only)
-        final Workbench workbench = programProvider.workbench();
-
-        try {
-            threadingStrategy.runOnUi(() -> {
-                StringWriter scriptWriter = new StringWriter();
-                try {
-                    // Capture console output
-                    PrintStream captureStream = new PrintStream(outputCapture);
-                    System.setOut(captureStream);
-                    System.setErr(captureStream);
-
-                    resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
-                    resultMsg.append("Script: ").append(scriptPath).append("\n");
-                    resultMsg.append("Program: ").append(program.getName()).append("\n");
-                    resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
-
-                    // Resolve script file - search standard locations
-                    File ghidraScriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
-                    String[] possiblePaths = {
-                        scriptPath,  // Absolute or relative path as-is
-                        new File(ghidraScriptsDir, scriptPath).getPath(),
-                        new File(ghidraScriptsDir, new File(scriptPath).getName()).getPath(),
-                        "./ghidra_scripts/" + scriptPath,
-                        "./ghidra_scripts/" + new File(scriptPath).getName()
-                    };
-
-                    File resolvedFile = null;
-                    for (String p : possiblePaths) {
-                        try {
-                            File candidate = new File(p);
-                            if (candidate.exists() && candidate.isFile()) {
-                                resolvedFile = candidate;
-                                break;
-                            }
-                        } catch (Exception e) {
-                            // Continue
-                        }
-                    }
-
-                    if (resolvedFile == null) {
-                        resultMsg.append("ERROR: Script file not found. Searched:\n");
-                        for (String p : possiblePaths) {
-                            resultMsg.append("  - ").append(p).append("\n");
-                        }
-                        return;
-                    }
-
-                    // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
-                    // copy it there so Ghidra's OSGi class loader can find the source bundle.
-                    File scriptFileForExecution = resolvedFile;
-                    try {
-                        ghidraScriptsDir.mkdirs();
-                        String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
-                        String canonicalResolved = resolvedFile.getCanonicalPath();
-                        if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
-                            // Copy to ~/ghidra_scripts/
-                            File dest = new File(ghidraScriptsDir, resolvedFile.getName());
-                            java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                            scriptFileForExecution = dest;
-                            copiedScript[0] = dest;
-                            resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
-                        }
-                    } catch (Exception e) {
-                        resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
-                    }
-
-                    try {
-                        ensureScriptBundleHostInitialized(scriptFileForExecution.getParentFile());
-                    } catch (Exception e) {
-                        resultMsg.append("ERROR: Could not initialize Ghidra script bundle host for: ")
-                                .append(scriptFileForExecution.getParentFile().getAbsolutePath())
-                                .append("\n")
-                                .append(e.getClass().getSimpleName())
-                                .append(": ")
-                                .append(e.getMessage())
-                                .append("\n");
-                        return;
-                    }
-
-                    generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
-
-                    resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
-                    resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
-
-                    // Get script provider
-                    ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
-                    if (provider == null) {
-                        resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
-                        if (scriptFile.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".py")) {
-                            resultMsg.append("Ghidra 12.1 ships Jython as an optional extension. ")
-                                    .append("Install the Jython extension from File > Install Extensions, ")
-                                    .append("restart Ghidra, then refresh Script Manager before running .py scripts.\n");
-                        }
-                        return;
-                    }
-
-                    resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
-
-                    // Create script instance
-                    PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
-                    scriptWriterHolder[0] = scriptWriter;
-                    scriptPrintWriterHolder[0] = scriptPrintWriter;
-
-                    ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
-                    if (script == null) {
-                        resultMsg.append("ERROR: Failed to create script instance\n");
-                        return;
-                    }
-
-                    // Set up script state
-                    ghidra.app.script.GhidraState scriptState = scriptState(workbench, program);
-
-                    ghidra.util.task.TaskMonitor scriptMonitor;
-                    if (timeoutSeconds > 0) {
-                        TimeoutTaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(
-                                timeoutSeconds,
-                                TimeUnit.SECONDS,
-                                new ConsoleTaskMonitor());
-                        scriptMonitorHolder[0] = timeoutMonitor;
-                        scriptMonitor = timeoutMonitor;
-                    }
-                    else {
-                        scriptMonitor = new ConsoleTaskMonitor();
-                    }
-
-                    script.set(scriptState, scriptMonitor, scriptPrintWriter);
-
-                    // Issue #1 + #5 fix: Parse and set script args BEFORE execution,
-                    // so getScriptArgs() returns them instead of falling through to askString()
-                    String[] args = new String[0];
-                    if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
-                        args = scriptArgs.trim().split("\\s+");
-                        script.setScriptArgs(args);
-                        resultMsg.append("Script args: ").append(Arrays.toString(args)).append("\n");
-                    }
-
-                    resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
-
-                    // Execute the script
-                    script.runScript(scriptFile.getName(), args);
-
-                    // Get script output
-                    String scriptOutput = scriptWriter.toString();
-                    if (!scriptOutput.isEmpty()) {
-                        resultMsg.append(scriptOutput).append("\n");
-                    }
-
-                    success.set(true);
-                    resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
-
-                } catch (Exception e) {
-                    String scriptOutput = scriptWriter.toString();
-                    if (!scriptOutput.isEmpty()) {
-                        resultMsg.append("\n--- SCRIPT BUILD OUTPUT ---\n");
-                        resultMsg.append(scriptOutput).append("\n");
-                    }
-                    resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
-                    resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
-                    failure.set(failureReason(e, new File(scriptPath).getName()));
-
-                    StringWriter sw = new StringWriter();
-                    PrintWriter pw = new PrintWriter(sw);
-                    e.printStackTrace(pw);
-                    resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
-
-                    // Surface any build/activate output that was captured into the
-                    // script writer before the failure (e.g. OSGi/Felix compile
-                    // errors from JavaScriptProvider.activateAll()). Flush the
-                    // PrintWriter first so buffered text reaches the StringWriter,
-                    // and bound the result so a verbose compiler failure can't
-                    // blow up the response payload.
-                    try {
-                        PrintWriter pw2 = scriptPrintWriterHolder[0];
-                        if (pw2 != null) {
-                            pw2.flush();
-                        }
-                        StringWriter sw2 = scriptWriterHolder[0];
-                        if (sw2 != null) {
-                            String capturedBuild = sw2.toString();
-                            if (!capturedBuild.isEmpty()) {
-                                resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
-                                        .append(boundTail(capturedBuild, MAX_BUILD_OUTPUT_CHARS))
-                                        .append("\n");
-                            }
-                        }
-                    } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }
-
-                    Msg.error(this, "Script execution failed: " + scriptPath, e);
-                } finally {
-                    if (scriptMonitorHolder[0] != null) {
-                        scriptMonitorHolder[0].cancel();
-                    }
-                    // Restore original output streams
-                    System.setOut(originalOut);
-                    System.setErr(originalErr);
-
-                    // Append any captured console output
-                    String capturedOutput = outputCapture.toString();
-                    if (!capturedOutput.isEmpty()) {
-                        resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
-                        resultMsg.append(capturedOutput).append("\n");
-                    }
-
-                    // Clean up copied script
-                    if (copiedScript[0] != null) {
-                        if (!copiedScript[0].delete()) {
-                            copiedScript[0].deleteOnExit();
-                        }
-                    }
-                }
-            });
-        } catch (Exception e) {
-            resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
-            failure.compareAndSet(null, "Failed to execute on the UI thread: " + e.getMessage());
-            Msg.error(this, "Failed to execute on Swing thread", e);
-        }
+        Workbench workbench = programProvider.workbench();
+        ScriptRunOutcome outcome = executeGhidraScriptBody(
+            scriptPath, scriptArgs, program, timeoutSeconds, workbench);
 
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("success", success.get());
-        if (!success.get()) {
-            out.put("error", failure.get() != null ? failure.get()
+        out.put("success", outcome.success);
+        if (!outcome.success) {
+            out.put("error", outcome.failure != null ? outcome.failure
                 : "The script did not complete; see console_output.");
         }
-        out.put("console_output", resultMsg.toString());
+        out.put("console_output", outcome.consoleOutput);
         return Response.ok(out);
+    }
+
+    private record ScriptRunOutcome(boolean success, String failure, String consoleOutput) {}
+
+    /**
+     * Runs on the HTTP request thread — must not take the server lock (scripts may run for
+     * a long time or call back into MCP).
+     */
+    private ScriptRunOutcome executeGhidraScriptBody(
+            String scriptPath,
+            String scriptArgs,
+            Program program,
+            int timeoutSeconds,
+            Workbench workbench) {
+        StringBuilder resultMsg = new StringBuilder();
+        boolean success = false;
+        String failure = null;
+        ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        PrintStream originalErr = System.err;
+        // Track whether we copied the script (for cleanup)
+        File copiedScript = null;
+        StringWriter capturedWriter = null;
+        PrintWriter capturedPrintWriter = null;
+        TimeoutTaskMonitor activeMonitor = null;
+
+        // Locals so the catch block can surface OSGi build/activate output
+        // captured into scriptWriter before a failure. The PrintWriter
+        // lets the failure path flush buffered output into the StringWriter
+        // before reading it, otherwise the captured text can be truncated.
+        StringWriter scriptWriter = new StringWriter();
+        try {
+            // Capture console output
+            PrintStream captureStream = new PrintStream(outputCapture);
+            System.setOut(captureStream);
+            System.setErr(captureStream);
+
+            resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
+            resultMsg.append("Script: ").append(scriptPath).append("\n");
+            resultMsg.append("Program: ").append(program.getName()).append("\n");
+            resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
+
+            // Resolve script file - search standard locations
+            File ghidraScriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
+            String[] possiblePaths = {
+                scriptPath,  // Absolute or relative path as-is
+                new File(ghidraScriptsDir, scriptPath).getPath(),
+                new File(ghidraScriptsDir, new File(scriptPath).getName()).getPath(),
+                "./ghidra_scripts/" + scriptPath,
+                "./ghidra_scripts/" + new File(scriptPath).getName()
+            };
+
+            File resolvedFile = null;
+            for (String p : possiblePaths) {
+                try {
+                    File candidate = new File(p);
+                    if (candidate.exists() && candidate.isFile()) {
+                        resolvedFile = candidate;
+                        break;
+                    }
+                } catch (Exception e) {
+                    // Continue
+                }
+            }
+
+            if (resolvedFile == null) {
+                resultMsg.append("ERROR: Script file not found. Searched:\n");
+                for (String p : possiblePaths) {
+                    resultMsg.append("  - ").append(p).append("\n");
+                }
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
+            // copy it there so Ghidra's OSGi class loader can find the source bundle.
+            File scriptFileForExecution = resolvedFile;
+            try {
+                ghidraScriptsDir.mkdirs();
+                String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
+                String canonicalResolved = resolvedFile.getCanonicalPath();
+                if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
+                    // Copy to ~/ghidra_scripts/
+                    File dest = new File(ghidraScriptsDir, resolvedFile.getName());
+                    java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    scriptFileForExecution = dest;
+                    copiedScript = dest;
+                    resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
+                }
+            } catch (Exception e) {
+                resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
+            }
+
+            try {
+                ensureScriptBundleHostInitialized(scriptFileForExecution.getParentFile());
+            } catch (Exception e) {
+                resultMsg.append("ERROR: Could not initialize Ghidra script bundle host for: ")
+                        .append(scriptFileForExecution.getParentFile().getAbsolutePath())
+                        .append("\n")
+                        .append(e.getClass().getSimpleName())
+                        .append(": ")
+                        .append(e.getMessage())
+                        .append("\n");
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
+
+            resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
+            resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
+
+            // Get script provider
+            ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
+            if (provider == null) {
+                resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
+                if (scriptFile.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".py")) {
+                    resultMsg.append("Ghidra 12.1 ships Jython as an optional extension. ")
+                            .append("Install the Jython extension from File > Install Extensions, ")
+                            .append("restart Ghidra, then refresh Script Manager before running .py scripts.\n");
+                }
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
+
+            // Create script instance
+            PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
+            capturedWriter = scriptWriter;
+            capturedPrintWriter = scriptPrintWriter;
+
+            ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
+            if (script == null) {
+                resultMsg.append("ERROR: Failed to create script instance\n");
+                return new ScriptRunOutcome(false, failure, resultMsg.toString());
+            }
+
+            // Set up script state
+            ghidra.app.script.GhidraState scriptState = scriptState(workbench, program);
+
+            ghidra.util.task.TaskMonitor scriptMonitor;
+            if (timeoutSeconds > 0) {
+                TimeoutTaskMonitor timeoutMonitor = TimeoutTaskMonitor.timeoutIn(
+                        timeoutSeconds,
+                        TimeUnit.SECONDS,
+                        new ConsoleTaskMonitor());
+                activeMonitor = timeoutMonitor;
+                scriptMonitor = timeoutMonitor;
+            }
+            else {
+                scriptMonitor = new ConsoleTaskMonitor();
+            }
+
+            script.set(scriptState, scriptMonitor, scriptPrintWriter);
+
+            // Issue #1 + #5 fix: Parse and set script args BEFORE execution,
+            // so getScriptArgs() returns them instead of falling through to askString()
+            String[] args = new String[0];
+            if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
+                args = scriptArgs.trim().split("\\s+");
+                script.setScriptArgs(args);
+                resultMsg.append("Script args: ").append(Arrays.toString(args)).append("\n");
+            }
+
+            resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
+
+            // Execute the script
+            script.runScript(scriptFile.getName(), args);
+
+            // Get script output
+            String scriptOutput = scriptWriter.toString();
+            if (!scriptOutput.isEmpty()) {
+                resultMsg.append(scriptOutput).append("\n");
+            }
+
+            success = true;
+            resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
+
+        } catch (Exception e) {
+            String scriptOutput = scriptWriter.toString();
+            if (!scriptOutput.isEmpty()) {
+                resultMsg.append("\n--- SCRIPT BUILD OUTPUT ---\n");
+                resultMsg.append(scriptOutput).append("\n");
+            }
+            resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
+            resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
+            failure = failureReason(e, new File(scriptPath).getName());
+
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            e.printStackTrace(pw);
+            resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
+
+            // Surface any build/activate output that was captured into the
+            // script writer before the failure (e.g. OSGi/Felix compile
+            // errors from JavaScriptProvider.activateAll()). Flush the
+            // PrintWriter first so buffered text reaches the StringWriter,
+            // and bound the result so a verbose compiler failure can't
+            // blow up the response payload.
+            try {
+                if (capturedPrintWriter != null) {
+                    capturedPrintWriter.flush();
+                }
+                StringWriter sw2 = capturedWriter;
+                if (sw2 != null) {
+                    String capturedBuild = sw2.toString();
+                    if (!capturedBuild.isEmpty()) {
+                        resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
+                                .append(boundTail(capturedBuild, MAX_BUILD_OUTPUT_CHARS))
+                                .append("\n");
+                    }
+                }
+            } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }
+
+            Msg.error(this, "Script execution failed: " + scriptPath, e);
+        } finally {
+            if (activeMonitor != null) {
+                activeMonitor.cancel();
+            }
+            // Restore original output streams
+            System.setOut(originalOut);
+            System.setErr(originalErr);
+
+            // Append any captured console output
+            String capturedOutput = outputCapture.toString();
+            if (!capturedOutput.isEmpty()) {
+                resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
+                resultMsg.append(capturedOutput).append("\n");
+            }
+
+            // Clean up copied script
+            if (copiedScript != null) {
+                if (!copiedScript.delete()) {
+            copiedScript.deleteOnExit();
+                }
+            }
+        }
+
+        return new ScriptRunOutcome(success, failure, resultMsg.toString());
     }
 
     /**
@@ -2539,7 +2346,7 @@ public class ProgramScriptService {
                    description = "Arguments handed to the script, split on WHITESPACE into a String[]. "
                                + "There is no quoting, so an argument containing a space arrives as two "
                                + "arguments.") String args,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
@@ -2604,10 +2411,10 @@ public class ProgramScriptService {
             }
 
             java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
-            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, programName);
+            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, program);
             return responseHolder[0];
         } catch (Exception e) {
-            return Response.err("Failed to create inline script: " + e.getMessage());
+            return ServiceUtils.fail("create inline script", e);
         } finally {
             if (!tempScript.exists()) {
                 // File was never written or was already cleaned up — nothing to do.
@@ -2711,39 +2518,25 @@ public class ProgramScriptService {
     @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program", access = ToolAccess.READ_ONLY)
     public Response listGhidraScripts(
             @Param(value = "filter", description = "Script name filter", defaultValue = "") String filter) {
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                try {
-                    resultData.set(JsonHelper.mapOf(
-                        "note", "Script listing requires Ghidra GUI access",
-                        "filter", filter != null ? filter : "none",
-                        "instructions", List.of(
-                            "To view available scripts:",
-                            "1. Open Ghidra's Script Manager (Window -> Script Manager)",
-                            "2. Browse scripts by category",
-                            "3. Use the search filter at the top"
-                        ),
-                        "common_script_locations", List.of(
-                            "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
-                            "<user_home>/ghidra_scripts/"
-                        )
-                    ));
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error in list scripts handler", e);
-                }
-            });
+            return Response.ok(JsonHelper.mapOf(
+                "note", "Script listing requires Ghidra GUI access",
+                "filter", filter != null ? filter : "none",
+                "instructions", List.of(
+                    "To view available scripts:",
+                    "1. Open Ghidra's Script Manager (Window -> Script Manager)",
+                    "2. Browse scripts by category",
+                    "3. Use the search filter at the top"
+                ),
+                "common_script_locations", List.of(
+                    "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
+                    "<user_home>/ghidra_scripts/"
+                )
+            ));
         } catch (Exception e) {
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            Msg.error(this, "Error in list scripts handler", e);
+            return ServiceUtils.fail("Listing scripts", e);
         }
-
-        if (errorMsg.get() != null) {
-            return Response.err(errorMsg.get());
-        }
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
@@ -2760,19 +2553,10 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
-            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-            if (pe.hasError()) return pe.error();
-            Program program = pe.program();
-
-            Address address = ServiceUtils.parseAddress(program, addressStr);
-            if (address == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             Memory memory = program.getMemory();
             int MAX_READ_BYTES = 16 * 1024 * 1024; // 16 MB safety limit
             if (length <= 0 || length > MAX_READ_BYTES) {
@@ -2780,7 +2564,7 @@ public class ProgramScriptService {
             }
             byte[] bytes = new byte[length];
 
-            int bytesRead = memory.getBytes(address, bytes);
+            int bytesRead = memory.getBytes(addr, bytes);
 
             List<Integer> dataList = new ArrayList<>();
             StringBuilder hexStr = new StringBuilder();
@@ -2790,14 +2574,14 @@ public class ProgramScriptService {
             }
 
             Map<String, Object> memResult = new LinkedHashMap<>();
-            memResult.putAll(ServiceUtils.addressToJson(address, program));
+            memResult.putAll(ServiceUtils.addressToJson(addr, program));
             memResult.put("length", bytesRead);
             memResult.put("data", dataList);
             memResult.put("hex", hexStr.toString());
             return Response.ok(memResult);
 
         } catch (Exception e) {
-            return Response.err("Failed to read memory: " + e.getMessage());
+            return ServiceUtils.fail("read memory", e);
         }
     }
 
@@ -2819,9 +2603,9 @@ public class ProgramScriptService {
     /**
      * Upper bound on the length of an <em>initialized</em> block.
      *
-     * <p>Initialized bytes are real database storage written on the Swing thread,
-     * so an unbounded {@code size} with {@code initialized=true} is an EDT freeze
-     * (and a project bloat) waiting to happen. Uninitialized blocks cost nothing
+     * <p>Initialized bytes are real database storage written under the server's write
+     * lock, so an unbounded {@code size} with {@code initialized=true} stalls every other
+     * request (and bloats the project). Uninitialized blocks cost nothing
      * per byte and are deliberately left uncapped here — that is the pre-existing
      * behavior, and mapping a multi-gigabyte MMIO aperture is a legitimate use.
      */
@@ -3041,21 +2825,15 @@ public class ProgramScriptService {
         return new SequenceInputStream(head, tail);
     }
 
-    /**
-     * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
-     */
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment) {
-        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
-    }
+    
 
     @McpTool(path = "/set_memory_block", method = "POST",
             description = "Change an existing memory block's permissions or volatility. The one that "
                 + "matters most: firmware loaders often mark the flash block writable, and the decompiler "
                 + "then treats every literal-pool load as a variable (iVar2 = DAT_08016e58) instead of "
                 + "folding it into the constant it holds; marking flash read-only lets peripheral and "
-                + "RAM addresses show as constants or their labels.",
+                + "RAM addresses show as constants or their labels. Every function may decompile "
+                + "differently afterwards, so decompilation trees are marked stale (resweep).",
             category = "program", access = ToolAccess.WRITE)
     public Response setMemoryBlock(
             @Param(value = "block", source = ParamSource.BODY, defaultValue = "",
@@ -3063,7 +2841,7 @@ public class ProgramScriptService {
                                + "address.") String blockName,
             @Param(value = "address", paramType = Param.ADDRESS, source = ParamSource.BODY, defaultValue = "",
                    description = "Any address inside the block, 0x<hex> or <space>:<hex>. Give this or "
-                               + "block.") String addressStr,
+                               + "block.") Address addr,
             @Param(value = "read", source = ParamSource.BODY, defaultValue = "",
                    description = "New read permission; omit to leave it as it is.") Boolean read,
             @Param(value = "write", source = ParamSource.BODY, defaultValue = "",
@@ -3074,18 +2852,15 @@ public class ProgramScriptService {
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "",
                    description = "New volatile flag (contents change outside program flow, e.g. MMIO); "
                                + "omit to leave it as it is.") Boolean isVolatile,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (read == null && write == null && execute == null && isVolatile == null) {
             return Response.err("nothing to change: give read, write, execute or volatile");
         }
         boolean byName = blockName != null && !blockName.isBlank();
-        boolean byAddress = addressStr != null && !addressStr.isBlank();
+        boolean byAddress = addr != null;
         if (byName == byAddress) {
             return Response.err("give exactly one of block or address");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         MemoryBlock block;
         if (byName) {
@@ -3094,13 +2869,9 @@ public class ProgramScriptService {
                 return Response.err("No memory block named '" + blockName + "'");
             }
         } else {
-            Address at = ServiceUtils.parseAddress(program, addressStr);
-            if (at == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-            block = program.getMemory().getBlock(at);
+            block = program.getMemory().getBlock(addr);
             if (block == null) {
-                return Response.err("No memory block contains " + addressStr);
+                return Response.err("No memory block contains " + addr.toString());
             }
         }
         String before = blockPermissions(block);
@@ -3132,17 +2903,6 @@ public class ProgramScriptService {
             + (block.isExecute() ? "x" : "-") + (block.isVolatile() ? "v" : "-");
     }
 
-    /**
-     * Backward-compatible entry point predating byte contents: creates an
-     * uninitialized, non-overlay block.
-     */
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment, String programName) {
-        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile,
-                comment, "", "", false, 0, false, programName);
-    }
-
     @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block, optionally initialized with byte contents supplied as hex or base64. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response createMemoryBlock(
             @Param(value = "name", source = ParamSource.BODY,
@@ -3153,7 +2913,7 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
                    description = "Block length in bytes. Omit (or 0) when byte content is supplied to "
                                + "size the block to the content exactly. If larger than the content, "
@@ -3205,15 +2965,12 @@ public class ProgramScriptService {
                                + "deliberately overlaps existing blocks (bank switching, ROM "
                                + "shadowing); the overlap check is skipped and the response "
                                + "reports the generated overlay space in address_space.") boolean overlay,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (name == null || name.isEmpty()) {
             return Response.err("name parameter required");
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address parameter required");
         }
 
@@ -3224,23 +2981,11 @@ public class ProgramScriptService {
             byte[] content = decodeBlockContent(bytesHex, bytesBase64);
             plan = planBlockContent(content, initialized, size, fillByte);
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        // Resolve address before entering EDT lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Create memory block");
-                boolean txSuccess = false;
-                try {
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Create memory block", () -> {
                     // Overlay blocks land in a freshly created overlay address space,
                     // so overlapping the existing physical blocks is the point rather
                     // than an error. Only guard the non-overlay case.
@@ -3249,9 +2994,8 @@ public class ProgramScriptService {
                         for (MemoryBlock existing : program.getMemory().getBlocks()) {
                             if (existing.contains(addr) || existing.contains(end) ||
                                 (addr.compareTo(existing.getStart()) <= 0 && end.compareTo(existing.getEnd()) >= 0)) {
-                                errorMsg.set("Address range overlaps with existing block '" + existing.getName() +
+                                throw new Refusal("Address range overlaps with existing block '" + existing.getName() +
                                              "' (" + existing.getStart() + " - " + existing.getEnd() + ")");
-                                return;
                             }
                         }
                     }
@@ -3278,10 +3022,8 @@ public class ProgramScriptService {
                         block.setComment(comment);
                     }
 
-                    txSuccess = true;
-
                     String permissions = (read ? "r" : "-") + (write ? "w" : "-") + (execute ? "x" : "-");
-                    Map<String, Object> out = JsonHelper.mapOf(
+                    return JsonHelper.mapOf(
                         "success", true,
                         "name", name,
                         "start", block.getStart().toString(),
@@ -3297,38 +3039,23 @@ public class ProgramScriptService {
                         "fill_byte", plan.fillByte(),
                         "message", "Memory block '" + name + "' created at " + block.getStart()
                     );
-                    resultData.set(out);
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error creating memory block", e);
-                } finally {
-                    tx.end(txSuccess);
-                }
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(resultData);
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return ServiceUtils.fail(e);
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
     // Bookmark Operations
     // ========================================================================
 
+    
+
     /**
      * Set a bookmark at an address with category and comment.
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
-    public Response setBookmark(String addressStr, String category, String comment) {
-        return setBookmark(addressStr, category, comment, null);
-    }
 
     @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.WRITE)
     public Response setBookmark(
@@ -3337,7 +3064,7 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
                    description = "Bookmark category, free text; empty or omitted becomes the literal "
                                + "`Note`. An existing bookmark at this address in the SAME category is "
@@ -3346,12 +3073,9 @@ public class ProgramScriptService {
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
                    description = "Bookmark text. Empty is allowed and stores an empty "
                                + "comment.") String comment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Address is required");
         }
         if (category == null || category.isEmpty()) {
@@ -3362,53 +3086,39 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             BookmarkManager bookmarkManager = program.getBookmarkManager();
             final String finalCategory = category;
             final String finalComment = comment;
 
-            WriteTx tx = WriteTx.begin(program, "Set bookmark at " + addressStr);
-            boolean txSuccess = false;
             try {
-                // Check if bookmark already exists at this address with this category
-                Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
-                if (existing != null) {
-                    // Remove existing to update
-                    bookmarkManager.removeBookmark(existing);
-                }
+                return threadingStrategy.executeWrite(program, "Set bookmark at " + addr.toString(), () -> {
+                    Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
+                    if (existing != null) {
+                        bookmarkManager.removeBookmark(existing);
+                    }
+                    bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
 
-                // Create new bookmark
-                bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
-                txSuccess = true;
-
-                Map<String, Object> bmResult = new LinkedHashMap<>();
-                bmResult.put("success", true);
-                bmResult.putAll(ServiceUtils.addressToJson(addr, program));
-                bmResult.put("category", finalCategory);
-                bmResult.put("comment", finalComment);
-                return Response.ok(bmResult);
-
+                    Map<String, Object> bmResult = new LinkedHashMap<>();
+                    bmResult.put("success", true);
+                    bmResult.putAll(ServiceUtils.addressToJson(addr, program));
+                    bmResult.put("category", finalCategory);
+                    bmResult.put("comment", finalComment);
+                    return Response.ok(bmResult);
+                });
             } catch (Exception e) {
-                throw e;
-            } finally {
-                tx.end(txSuccess);
+                return ServiceUtils.fail(e);
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
+
+    
 
     /**
      * List bookmarks, optionally filtered by category and/or address.
      */
-    public Response listBookmarks(String category, String addressStr) {
-        return listBookmarks(category, addressStr, null);
-    }
 
     @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.READ_ONLY)
     public Response listBookmarks(
@@ -3418,23 +3128,15 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+                               + "address is unambiguous.") Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
             List<Map<String, Object>> bookmarks = new ArrayList<>();
 
             // If specific address provided, get bookmarks at that address
-            if (addressStr != null && !addressStr.isEmpty()) {
-                Address addr = ServiceUtils.parseAddress(program, addressStr);
-                if (addr == null) {
-                    return Response.err(ServiceUtils.getLastParseError());
-                }
-
+            if (addr != null) {
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
                 for (Bookmark bm : bms) {
                     if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
@@ -3472,16 +3174,15 @@ public class ProgramScriptService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
+
+    
 
     /**
      * Delete a bookmark at an address with optional category filter.
      */
-    public Response deleteBookmark(String addressStr, String category) {
-        return deleteBookmark(addressStr, category, null);
-    }
 
     @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program", access = ToolAccess.DESTRUCTIVE)
     public Response deleteBookmark(
@@ -3490,56 +3191,44 @@ public class ProgramScriptService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "",
                    description = "Delete only bookmarks in this category. Empty (the default) deletes "
                                + "EVERY bookmark at the address whatever its category; `deleted` in the "
                                + "response counts how many went.") String category,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Address is required");
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             BookmarkManager bookmarkManager = program.getBookmarkManager();
 
-            WriteTx tx = WriteTx.begin(program, "Delete bookmark at " + addressStr);
-            boolean txSuccess = false;
             try {
-                int deleted = 0;
-                Bookmark[] bms = bookmarkManager.getBookmarks(addr);
+                return threadingStrategy.executeWrite(program, "Delete bookmark at " + addr.toString(), () -> {
+                    int deleted = 0;
+                    Bookmark[] bms = bookmarkManager.getBookmarks(addr);
 
-                for (Bookmark bm : bms) {
-                    if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                        bookmarkManager.removeBookmark(bm);
-                        deleted++;
+                    for (Bookmark bm : bms) {
+                        if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
+                            bookmarkManager.removeBookmark(bm);
+                            deleted++;
+                        }
                     }
-                }
 
-                txSuccess = true;
-                Map<String, Object> delResult = new LinkedHashMap<>();
-                delResult.put("success", true);
-                delResult.put("deleted", deleted);
-                delResult.putAll(ServiceUtils.addressToJson(addr, program));
-                return Response.ok(delResult);
-
+                    Map<String, Object> delResult = new LinkedHashMap<>();
+                    delResult.put("success", true);
+                    delResult.put("deleted", deleted);
+                    delResult.putAll(ServiceUtils.addressToJson(addr, program));
+                    return Response.ok(delResult);
+                });
             } catch (Exception e) {
-                throw e;
-            } finally {
-                tx.end(txSuccess);
+                return ServiceUtils.fail(e);
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3547,10 +3236,6 @@ public class ProgramScriptService {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
-        return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
-    }
-
     @McpTool(path = "/run_ghidra_script", dryRun = false, method = "POST", description = "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program", access = ToolAccess.WRITE)
     public Response runGhidraScriptWithCapture(
 @Param(value = "script_name", source = ParamSource.BODY,
@@ -3573,7 +3258,7 @@ public class ProgramScriptService {
                                + "'success' is still reported, but 'console_output' is omitted and 'output_captured' "
                                + "is false. Output of a FAILED script is always returned regardless, so a failure is "
                                + "never silent.") boolean captureOutput,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
@@ -3585,14 +3270,6 @@ public class ProgramScriptService {
         if (timeoutSeconds <= 0 || timeoutSeconds > MAX_SCRIPT_TIMEOUT_SECONDS) {
             return Response.err("timeout_seconds must be between 1 and " + MAX_SCRIPT_TIMEOUT_SECONDS + " seconds");
         }
-
-        // Fail fast with a clear "program not found" error before doing
-        // the script-file search. The Program object isn't used in this
-        // method directly — the 3-arg runGhidraScript call at the end
-        // re-resolves it from programName via the same helper, which is
-        // where currentProgram-via-GhidraState binding actually happens.
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
 
         try {
             // Locate the script file - search Ghidra's standard script directories
@@ -3637,21 +3314,11 @@ public class ProgramScriptService {
             }
 
             // Execute the script via the existing execution method.
-            //
-            // The 3-arg overload (line ~1133) threads programName through
-            // ServiceUtils.getProgramOrError -> GhidraState -> the script's
-            // currentProgram global. The 2-arg overload below drops the
-            // program info, so the script executes against whatever
-            // currentProgram happens to be in the session (typically the
-            // GUI's focused CodeBrowser). Prior to v5.11.5 this method
-            // called the 2-arg form even though it had just resolved the
-            // operator's requested program at line 1891 — a real bug
-            // surfaced by community report (Copilot review on #207):
-            // "It is fixed for run_script_inline but not fixed for
-            //  run_ghidra_script, which always runs for the current program."
+            // The Program-typed overload threads the resolved program into
+            // GhidraState -> the script's currentProgram global.
             long startTime = System.currentTimeMillis();
             Response scriptResponse = runGhidraScript(
-                    scriptFile.getAbsolutePath(), scriptArgs, programName, timeoutSeconds);
+                    scriptFile.getAbsolutePath(), scriptArgs, program, timeoutSeconds);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
             // Extract the structured result from runGhidraScript's own response
@@ -3690,7 +3357,7 @@ public class ProgramScriptService {
             return Response.ok(scriptResult);
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -3701,69 +3368,41 @@ public class ProgramScriptService {
     @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program", access = ToolAccess.WRITE)
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address parameter required");
         }
 
-        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Set image base");
-                boolean txSuccess = false;
-                try {
-                    Address oldBase = program.getImageBase();
-                    Address newBase = ServiceUtils.parseAddress(program, addressStr);
-                    if (newBase == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
-                    program.setImageBase(newBase, true);
-                    txSuccess = true;
-
-                    // Trigger re-analysis since all addresses shifted
-                    boolean reanalyzing = false;
-                    try {
-                        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-                        mgr.reAnalyzeAll(null);
-                        mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                        reanalyzing = true;
-                    } catch (Exception ae) {
-                        Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
-                    }
-
-                    resultData.set(JsonHelper.mapOf(
-                        "success", true,
-                        "old_base", oldBase.toString(),
-                        "new_base", newBase.toString(),
-                        "analyzing", reanalyzing,
-                        "message", "Image base changed from " + oldBase + " to " + newBase
-                    ));
-                } catch (Throwable e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    errorMsg.set(msg);
-                    Msg.error(this, "Error setting image base", e);
-                } finally {
-                    tx.end(txSuccess);
+            Map<String, Object> resultData = threadingStrategy.executeWrite(program, "Set image base", () -> {
+                Address oldBase = program.getImageBase();
+                Address newBase = ServiceUtils.parseAddress(program, addressStr);
+                if (newBase == null) {
+                    throw new Refusal("Invalid address: " + addressStr);
                 }
+                program.setImageBase(newBase, true);
+
+                boolean reanalyzing = false;
+                try {
+                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                    mgr.reAnalyzeAll(null);
+                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                    reanalyzing = true;
+                } catch (Exception ae) {
+                    Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
+                }
+
+                return JsonHelper.mapOf(
+                    "success", true,
+                    "old_base", oldBase.toString(),
+                    "new_base", newBase.toString(),
+                    "analyzing", reanalyzing,
+                    "message", "Image base changed from " + oldBase + " to " + newBase
+                );
             });
-
-            if (errorMsg.get() != null) {
-                return Response.err(errorMsg.get());
-            }
+            return Response.ok(resultData);
         } catch (Throwable e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to execute on Swing thread: " + msg);
+            return ServiceUtils.fail(e);
         }
-
-        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }

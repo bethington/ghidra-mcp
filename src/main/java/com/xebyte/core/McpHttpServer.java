@@ -39,9 +39,9 @@ public final class McpHttpServer {
      * @param uds       serve on {@code <socket dir>/ghidra-<pid>.sock}
      * @param tcp       serve on {@code bindAddress:port}
      * @param portRange ports to try from {@code port} upward when it is taken (1 = exact)
-     * @param workers   request threads, shared by both listeners. Small in the GUI:
-     *                  most handlers queue on the single Swing thread, and a deeper
-     *                  queue there trips Ghidra's own 20 s Swing.runNow deadlock timeouts.
+     * @param workers   request threads, shared by both listeners. Reads and writes
+     *                  serialize on the server-wide lock, so more workers mostly add
+     *                  queued requests.
      */
     public record Config(boolean uds, boolean tcp, String bindAddress, int port, int portRange,
             int workers) {}
@@ -60,6 +60,8 @@ public final class McpHttpServer {
     private UdsHttpServer uds;
     private com.sun.net.httpserver.HttpServer tcp;
     private volatile int tcpPort = -1;
+    /** Where the socket goes. A seam so a test can make the bind fail; see {@link #startUds}. */
+    private Supplier<Path> socketDir = McpHttpServer::defaultSocketDir;
 
     /**
      * @param serverKind     {@code "gui"} or {@code "headless"}, reported by every identity route
@@ -101,7 +103,8 @@ public final class McpHttpServer {
         startMillis = System.currentTimeMillis();
         ProgramProvider provider = scanner != null ? scanner.getProgramProvider() : null;
         // Generated at start, not in endpoints(): callers add manual descriptors in between.
-        String schemaJson = scanner != null ? scanner.generateSchema() : "{\"tools\": []}";
+        String schemaJson = scanner != null ? scanner.generateSchema()
+            : JsonHelper.toJson(JsonHelper.mapOf("tools", java.util.List.of()));
         int endpointCount = scanner != null ? scanner.getDescriptors().size() : 0;
         routes.put("/mcp/schema", exchange -> sendJson(exchange, schemaJson));
         routes.put("/mcp/instance_info", exchange ->
@@ -209,11 +212,30 @@ public final class McpHttpServer {
         info.put("version", VersionInfo.getVersion());
         info.put("endpoint_count", endpointCount);
         info.put("project", project != null ? project.getName() : "unknown");
-        info.put("project_path", project != null ? project.getProjectLocator().toString() : "");
+        info.put("project_path", projectPath(project));
         info.put("programs", programs);
         info.putAll(instanceExtras.get());
         info.put("tcp_port", tcpPort);
         return info;
+    }
+
+    /**
+     * {@code instance_info.project_path}: the project's {@code .gpr} marker file, the path
+     * both servers' {@code /open_project} and the headless {@code --project} option accept.
+     * Not {@code ProjectLocator.toString()}, which prints Ghidra's parent-plus-name locator
+     * ({@code <parent>/<name>}) -- a path that exists nowhere on disk (#656). A transient
+     * project (a {@code ghidra://} view with no local storage) has no marker file, so it
+     * keeps the locator's display string, which is then its URL.
+     */
+    public static String projectPath(ghidra.framework.model.Project project) {
+        if (project == null) {
+            return "";
+        }
+        ghidra.framework.model.ProjectLocator locator = project.getProjectLocator();
+        if (locator == null) {
+            return "";
+        }
+        return locator.isTransient() ? locator.toString() : locator.getMarkerFile().getAbsolutePath();
     }
 
     private static void collectPrograms(ghidra.framework.model.DomainFolder folder,
@@ -285,19 +307,50 @@ public final class McpHttpServer {
 
     // ------------------------------------------------------------------ listeners
 
-    private void startUds() throws IOException {
-        Path socketDir = resolveSocketDir(
+    private static Path defaultSocketDir() {
+        return resolveSocketDir(
                 System.getenv("XDG_RUNTIME_DIR"),
                 System.getenv("TMPDIR"),
                 System.getProperty("java.io.tmpdir"),
                 System.getProperty("user.name", "unknown"));
+    }
+
+    /** Test seam: put the socket under {@code dir} instead of the resolved socket dir. */
+    void setSocketDirForTest(Path dir) {
+        this.socketDir = () -> dir;
+    }
+
+    /**
+     * Bind the Unix socket. The field is assigned only once {@code start()} has bound:
+     * {@link #isRunning}, {@link #socketPath} and the "nothing came up" check in
+     * {@link #start} all read {@code uds != null} as "a listener exists". Assigning it
+     * before the bind made a failed bind look like a live socket -- the headless server
+     * printed "Serving on" a path nothing listened on and stayed up in socket-only mode,
+     * and the GUI advertised the dead path (#657).
+     */
+    private void startUds() throws IOException {
+        Path socketDir = this.socketDir.get();
         Files.createDirectories(socketDir);
         hardenSocketDir(socketDir);
         cleanStaleSockets(socketDir);
-        uds = new UdsHttpServer(socketDir.resolve("ghidra-" + ProcessHandle.current().pid() + ".sock"), executor);
+        Path socketPath = socketDir.resolve("ghidra-" + ProcessHandle.current().pid() + ".sock");
+        // A local, deliberately shadowing the field: the field is published only once
+        // this one has bound.
+        UdsHttpServer uds = new UdsHttpServer(socketPath, executor);
         // A browser cannot open a Unix socket, so no cross-origin guard here.
         routes.forEach((path, handler) -> uds.createContext(path, guard(handler, false)));
-        uds.start();
+        try {
+            uds.start();
+        } catch (IOException | RuntimeException e) {
+            // Release whatever the half-started server holds (an opened, unbound channel).
+            try {
+                uds.stop();
+            } catch (RuntimeException ignored) {
+                // Cleanup is best-effort; the bind failure is what gets reported.
+            }
+            throw new IOException("Could not bind Unix socket " + socketPath + ": " + e, e);
+        }
+        this.uds = uds;
     }
 
     private void startTcp(Config config) throws IOException {
@@ -326,12 +379,20 @@ public final class McpHttpServer {
             Msg.warn(this, "Port " + config.port() + " was in use; bound " + tcpPort
                     + " instead. The bridge discovers it via /mcp/instance_info.");
         }
-        routes.forEach((path, handler) -> {
-            UdsHttpServer.Handler guarded = guard(handler, true);
-            tcp.createContext(path, sun -> guarded.handle(new SunHttpExchangeAdapter(sun)));
-        });
-        tcp.setExecutor(executor);
-        tcp.start();
+        try {
+            routes.forEach((path, handler) -> {
+                UdsHttpServer.Handler guarded = guard(handler, true);
+                tcp.createContext(path, sun -> guarded.handle(new SunHttpExchangeAdapter(sun)));
+            });
+            tcp.setExecutor(executor);
+            tcp.start();
+        } catch (RuntimeException e) {
+            // Same rule as startUds: a listener that did not start is not reported as one.
+            tcp.stop(0);
+            tcp = null;
+            tcpPort = -1;
+            throw e;
+        }
         Msg.info(this, "GhidraMCP TCP server listening on " + config.bindAddress() + ":" + tcpPort);
     }
 

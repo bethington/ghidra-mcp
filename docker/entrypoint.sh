@@ -99,7 +99,8 @@ if [ -n "${PROGRAM_FILE}" ] && [ -f "${PROGRAM_FILE}" ]; then
 fi
 
 # Check if a project should be loaded
-if [ -n "${PROJECT_PATH}" ] && [ -d "${PROJECT_PATH}" ]; then
+# A directory, or a ghidra://host[:port]/repo URL for a shared repository.
+if [ -n "${PROJECT_PATH}" ] && { [ -d "${PROJECT_PATH}" ] || [[ "${PROJECT_PATH}" == ghidra://* ]]; }; then
     echo -e "${YELLOW}Loading project: ${PROJECT_PATH}${NC}"
     ARGS="${ARGS} --project ${PROJECT_PATH}"
 fi

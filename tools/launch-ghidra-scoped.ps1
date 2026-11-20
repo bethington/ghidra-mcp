@@ -8,7 +8,7 @@
 # of silently writing to the wrong binary.
 #
 # Usage:
-#   ./tools/launch-ghidra-scoped.ps1 -Scope /MyProduct/v1.0 -GhidraPath F:\ghidra_12.1.4_PUBLIC
+#   ./tools/launch-ghidra-scoped.ps1 -Scope /MyProduct/v1.0 -GhidraPath F:\ghidra_12.2_PUBLIC
 #
 # -Scope is required. -GhidraPath falls back to $env:GHIDRA_INSTALL_DIR,
 # then $env:GHIDRA_PATH; there is no hard-coded default, because a stale

@@ -42,7 +42,11 @@ from .fake_ghidra import (
 #: Adding a path back is a decision to ship an endpoint the offline tier cannot
 #: check. Re-record the snapshot instead; do NOT make the fake invent a
 #: contract.
-SCHEMA_RECORDING_PREDATES: frozenset[str] = frozenset()
+SCHEMA_RECORDING_PREDATES: frozenset[str] = frozenset({
+    # An HTTP route by design, never advertised as an MCP tool (the bridge reaches it
+    # through decompile_tree_run), so no /mcp/schema recording can cover it.
+    "/decompile_tree_refresh",
+})
 
 
 def _get(url: str, timeout: float = 10):

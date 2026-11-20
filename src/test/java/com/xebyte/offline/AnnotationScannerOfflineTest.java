@@ -138,6 +138,43 @@ public class AnnotationScannerOfflineTest extends TestCase {
     }
 
     /**
+     * Internal {@code @McpTool}s register as HTTP routes and stay in descriptors
+     * (for catalog regen) but must never appear in {@code /mcp/schema} — that is
+     * how the bridge learns tools, and listing refresh invites agent staleness work.
+     */
+    public void testInternalToolsAreRoutesButOmittedFromSchema() {
+        boolean foundRefreshEndpoint = false;
+        for (EndpointDef ep : scanner.getEndpoints()) {
+            if ("/decompile_tree_refresh".equals(ep.path())) {
+                foundRefreshEndpoint = true;
+                break;
+            }
+        }
+        assertTrue("refresh must remain an HTTP route", foundRefreshEndpoint);
+
+        boolean foundRefreshDescriptor = false;
+        for (AnnotationScanner.ToolDescriptor d : scanner.getDescriptors()) {
+            if ("/decompile_tree_refresh".equals(d.path())) {
+                foundRefreshDescriptor = true;
+                assertTrue("refresh must be marked internal", d.internal());
+                break;
+            }
+        }
+        assertTrue("refresh must still be in descriptors for catalog regen",
+                foundRefreshDescriptor);
+
+        String schema = scanner.generateSchema();
+        assertFalse("internal refresh must not appear in /mcp/schema",
+                schema.contains("/decompile_tree_refresh"));
+        JsonObject root = new Gson().fromJson(schema, JsonObject.class);
+        int schemaCount = root.get("count").getAsInt();
+        long visibleDescriptors = scanner.getDescriptors().stream()
+                .filter(d -> !d.internal()).count();
+        assertEquals("schema count must exclude internal descriptors",
+                visibleDescriptors, (long) schemaCount);
+    }
+
+    /**
      * Every tool descriptor in the schema must have the fields the Python bridge
      * depends on: path, method, params. Missing any of these breaks dynamic tool
      * registration in {@code bridge_mcp_ghidra.py}.

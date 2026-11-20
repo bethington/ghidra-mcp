@@ -64,7 +64,7 @@ public class Repair_StackArgumentsSearcher extends GhidraScript {
         try {
             FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(true);
             while (funcIter.hasNext()) {
-                monitor.checkCanceled();
+                monitor.checkCancelled();
                 Function func = funcIter.next();
 
 

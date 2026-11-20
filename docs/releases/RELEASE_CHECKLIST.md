@@ -68,8 +68,8 @@ rg -n "OLD_VERSION|NEW_VERSION|MCP Tools|GUI Endpoints|Headless Endpoints|total_
 Run the cheap gates before any live Ghidra work:
 
 ```text
-./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
-./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+./gradlew preflight      "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.2_PUBLIC"
+./gradlew buildExtension "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.2_PUBLIC"
 uv build                                  # build the ghidra-mcp-bridge wheel (-> dist/)
 uv run pytest tests/unit/ -v --no-cov
 git diff --check
@@ -102,14 +102,14 @@ removed tools; `uv run pytest tests/unit/` already includes all of them.
 For Java endpoint/catalog changes, run the offline Java scanner/parity tests:
 
 ```text
-./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.1.4_PUBLIC"
+./gradlew test --tests 'com.xebyte.offline.*' "-PGHIDRA_INSTALL_DIR=F:/ghidra_12.2_PUBLIC"
 ```
 
 Under Maven the Ghidra JARs must be in the local repository first, or dependency
 resolution fails before any test runs. Gradle needs no such step:
 
 ```text
-python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.1.4_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "F:\ghidra_12.2_PUBLIC"
 mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
@@ -148,7 +148,7 @@ python tests/fixtures/benchmark/make_fixture.py --check
 - [ ] Run the release-grade deploy regression:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1.4_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.2_PUBLIC" --test release
 ```
 
 - [ ] Record whether the release regression passed, **and read its last line**.

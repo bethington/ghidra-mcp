@@ -82,9 +82,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -131,25 +128,15 @@ def mcp_get(base: str, endpoint: str, timeout: float = 60.0, **params) -> object
     query parameter of that name, and ``mcp_get(base, "open_program", path=...)``
     then dies with "got multiple values for argument 'path'".
     """
-    url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        raw = response.read().decode("utf-8", "replace")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-    # Most endpoints double-encode: {"result": "{...}"}
-    if isinstance(payload, dict) and "result" in payload:
-        inner = payload["result"]
-        if isinstance(inner, str):
-            try:
-                return json.loads(inner)
-            except json.JSONDecodeError:
-                return inner
-        return inner
-    return payload
+    from tools import mcp_http
+
+    return mcp_http.request(
+        base,
+        endpoint,
+        params=params,
+        timeout=timeout,
+        unwrap_result=True,
+    )
 
 
 def mcp_post(base: str, endpoint: str, timeout: float = 180.0, **params) -> object:
@@ -159,26 +146,16 @@ def mcp_post(base: str, endpoint: str, timeout: float = 180.0, **params) -> obje
     they need a JSON body -- a query string reaches them as
     ``'path' parameter required``.
     """
-    url = f"{base.rstrip('/')}/{endpoint.lstrip('/')}"
-    body = json.dumps(params).encode("utf-8")
-    request = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    from tools import mcp_http
+
+    return mcp_http.request(
+        base,
+        endpoint,
+        method="POST",
+        data=params,
+        timeout=timeout,
+        unwrap_result=True,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        raw = response.read().decode("utf-8", "replace")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-    if isinstance(payload, dict) and "result" in payload:
-        inner = payload["result"]
-        if isinstance(inner, str):
-            try:
-                return json.loads(inner)
-            except json.JSONDecodeError:
-                return inner
-        return inner
-    return payload
 
 
 def walk_project(base: str, root: str = "/") -> list[dict]:

@@ -4,7 +4,6 @@ import ghidra.app.plugin.core.archive.ArchiveBridge;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
-import ghidra.framework.model.ProjectData;
 import ghidra.framework.model.ProjectLocator;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
@@ -36,39 +35,6 @@ public class ProjectLifecycle {
     // ========================================================================
     // GZF export / import (Ghidra packed-database format)
     // ========================================================================
-
-    /**
-     * Resolve a DomainFolder by path, optionally creating missing intermediate folders.
-     * Returns null when no project is open or when {@code createMissing} is false and the
-     * folder doesn't exist.
-     */
-    private DomainFolder resolveFolder(String folderPath, boolean createMissing) {
-        if (project() == null) return null;
-        String p = (folderPath == null || folderPath.isEmpty()) ? "/" : folderPath;
-        if (!p.startsWith("/")) p = "/" + p;
-        try {
-            ProjectData pd = project().getProjectData();
-            DomainFolder existing = pd.getFolder(p);
-            if (existing != null) return existing;
-            if (!createMissing) return null;
-            DomainFolder cur = pd.getRootFolder();
-            for (String part : p.split("/")) {
-                if (part.isEmpty()) continue;
-                if (part.equals(".") || part.equals("..")) {
-                    Msg.warn(this, "resolveFolder rejecting traversal segment '"
-                        + part + "' in '" + folderPath + "'");
-                    return null;
-                }
-                DomainFolder next = cur.getFolder(part);
-                if (next == null) next = cur.createFolder(part);
-                cur = next;
-            }
-            return cur;
-        } catch (Exception e) {
-            Msg.warn(this, "resolveFolder failed for '" + folderPath + "': " + e.getMessage());
-            return null;
-        }
-    }
 
     /**
      * Export a program to a GZF (packed-database) file on disk.
@@ -148,7 +114,7 @@ public class ProjectLifecycle {
     public ImportResult importProgramFromGzf(File gzf, String targetFolder, String targetName, boolean overwrite) {
         // Validate the caller-controlled destination name up front, before any
         // project/file work, so it's reachable in offline tests and a separator
-        // or traversal segment never reaches resolveFolder/createFile.
+        // or traversal segment never reaches ProjectPaths.folder/createFile.
         if (targetName != null && !targetName.isEmpty()) {
             String invalid = SafePaths.validateFilename(targetName);
             if (invalid != null) {
@@ -165,9 +131,11 @@ public class ProjectLifecycle {
         if (!gzf.getName().toLowerCase().endsWith(".gzf")) {
             return ImportResult.failure("not a .gzf file: " + gzf.getName());
         }
-        DomainFolder folder = resolveFolder(targetFolder, true);
-        if (folder == null) {
-            return ImportResult.failure("could not resolve target_folder: " + targetFolder);
+        DomainFolder folder;
+        try {
+            folder = ProjectPaths.folder(project(), targetFolder, true);
+        } catch (Refusal r) {
+            return ImportResult.failure(r.getMessage());
         }
         String chosenName = (targetName == null || targetName.isEmpty())
             ? gzf.getName().replaceFirst("(?i)\\.gzf$", "")

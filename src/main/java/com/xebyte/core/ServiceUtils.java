@@ -27,88 +27,6 @@ public final class ServiceUtils {
     private ServiceUtils() {} // Prevent instantiation
 
     // ========================================================================
-    // JSON Encoding/Decoding
-    // ========================================================================
-
-    /**
-     * Escape a string for safe inclusion in JSON values.
-     * Handles quotes, backslashes, and control characters.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead — Gson handles escaping automatically.
-     */
-    @Deprecated
-    public static String escapeJson(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
-    }
-
-    /**
-     * Serialize a List of objects to a JSON array string.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
-     */
-    @Deprecated
-    public static String serializeListToJson(List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            Object item = list.get(i);
-            if (item instanceof String) {
-                sb.append("\"").append(escapeJson((String) item)).append("\"");
-            } else if (item instanceof Number) {
-                sb.append(item);
-            } else if (item instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) item));
-            } else if (item instanceof List) {
-                sb.append(serializeListToJson((List<?>) item));
-            } else {
-                sb.append("\"").append(escapeJson(item.toString())).append("\"");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Serialize a Map to a JSON object string.
-     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
-     */
-    @Deprecated
-    public static String serializeMapToJson(Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("\"").append(escapeJson(entry.getKey().toString())).append("\":");
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"").append(escapeJson((String) value)).append("\"");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else if (value instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) value));
-            } else if (value instanceof List) {
-                sb.append(serializeListToJson((List<?>) value));
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value == null) {
-                sb.append("null");
-            } else {
-                sb.append("\"").append(escapeJson(value.toString())).append("\"");
-            }
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    // ========================================================================
-    // Numeric/Boolean Parsing
-    // ========================================================================
-
-    // ========================================================================
     // Collection Utilities
     // ========================================================================
 
@@ -126,14 +44,38 @@ public final class ServiceUtils {
      *
      * @param key   plural name for the collection ("segments", "functions")
      * @param all   the full result set, before paging
-     * @param offset first item to return
+     * @param offset first item to return; negative values clamp to 0
      * @param limit  maximum items to return; {@code <= 0} means "no limit"
+     *               (the key is omitted from the response when unbounded)
      */
     public static Response paged(String key, List<?> all, int offset, int limit) {
+        return paged(key, all, offset, limit, null);
+    }
+
+    /**
+     * As {@link #paged(String, List, int, int)}, with extra fields merged after
+     * the standard keys (map name, class_name, note, …).
+     */
+    public static Response paged(String key, List<?> all, int offset, int limit,
+            Map<String, ?> extras) {
         int start = Math.max(0, offset);
         int end = (limit > 0) ? Math.min(all.size(), start + limit) : all.size();
         List<?> page = (start >= all.size()) ? List.of() : all.subList(start, end);
+        return pagedEnvelope(key, page, start, limit, all.size(), extras);
+    }
 
+    /**
+     * Paged envelope when the page was already sliced from a streaming source
+     * (property-map iterators) and {@code total} is known without materializing
+     * every item. Same keys and limit policy as {@link #paged}.
+     */
+    public static Response pagedWindow(String key, List<?> page, int offset, int limit,
+            int total, Map<String, ?> extras) {
+        return pagedEnvelope(key, page, Math.max(0, offset), limit, total, extras);
+    }
+
+    private static Response pagedEnvelope(String key, List<?> page, int start, int limit,
+            int total, Map<String, ?> extras) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put(key, page);
         out.put("count", page.size());
@@ -141,7 +83,12 @@ public final class ServiceUtils {
         if (limit > 0) {
             out.put("limit", limit);
         }
-        out.put("total", all.size());
+        out.put("total", total);
+        if (extras != null) {
+            for (Map.Entry<String, ?> e : extras.entrySet()) {
+                out.put(e.getKey(), e.getValue());
+            }
+        }
         return Response.ok(out);
     }
 
@@ -231,6 +178,24 @@ public final class ServiceUtils {
     // ========================================================================
     // String Utilities
     // ========================================================================
+
+    /**
+     * Split a comma-separated string into trimmed tokens, skipping blanks.
+     * Null or blank input yields an empty list.
+     */
+    public static List<String> csvTokens(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
 
     /**
      * Check if a string meets quality criteria: 4+ chars, 80%+ printable ASCII.
@@ -591,6 +556,10 @@ public final class ServiceUtils {
      * Ghidra's decompiler contract. The returned interface is already opened on
      * {@code program}; the caller owns its lifecycle and must call
      * {@link DecompInterface#dispose()} when finished.
+     *
+     * @throws DecompilerInitException when the native decompiler cannot start;
+     *         the interface is already disposed and the message carries Ghidra's
+     *         own reason ({@code getLastMessage()})
      */
     public static DecompInterface createConfiguredDecompiler(Program program) {
         return createConfiguredDecompiler(program, null);
@@ -606,13 +575,62 @@ public final class ServiceUtils {
     public static DecompInterface createConfiguredDecompiler(Program program,
             java.util.function.Consumer<DecompileOptions> tune) {
         DecompInterface decomp = new DecompInterface();
-        DecompileOptions opts = new DecompileOptions();
-        opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
-        if (tune != null) tune.accept(opts);
-        decomp.setOptions(opts);
-        decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
-        decomp.openProgram(program);                // openProgram AFTER setOptions
+        try {
+            DecompileOptions opts = new DecompileOptions();
+            opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+            if (tune != null) tune.accept(opts);
+            decomp.setOptions(opts);
+            decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
+        } catch (RuntimeException | Error e) {
+            disposeQuietly(decomp);
+            throw e;
+        }
+        return openOrThrow(decomp, program);           // openProgram AFTER setOptions
+    }
+
+    /**
+     * Open {@code decomp} on {@code program}, or dispose it and throw
+     * {@link DecompilerInitException} carrying Ghidra's {@code getLastMessage()}.
+     *
+     * <p>{@code openProgram} signals a native decompiler that cannot start by
+     * returning {@code false}, not by throwing. Ignoring that left a half-open
+     * interface whose first decompile came back cancelled, so every caller
+     * reported "cancelled" instead of the reason (#654). Package-private so a test
+     * can drive it with a mocked interface; there is no other way in.
+     */
+    static DecompInterface openOrThrow(DecompInterface decomp, Program program) {
+        boolean opened;
+        try {
+            opened = decomp.openProgram(program);
+        } catch (RuntimeException | Error e) {
+            disposeQuietly(decomp);
+            throw e;
+        }
+        if (!opened) {
+            String reason = null;
+            try {
+                reason = decomp.getLastMessage();
+            } catch (RuntimeException ignored) {
+                // The reason is best-effort; the failure itself is not.
+            }
+            disposeQuietly(decomp);
+            String name = null;
+            try {
+                name = program != null ? program.getName() : null;
+            } catch (RuntimeException ignored) {
+                // A closed program can refuse even its name; the message survives without it.
+            }
+            throw new DecompilerInitException(name, reason);
+        }
         return decomp;
+    }
+
+    private static void disposeQuietly(DecompInterface decomp) {
+        try {
+            decomp.dispose();
+        } catch (RuntimeException ignored) {
+            // Disposing an interface whose process never started can throw; it is gone either way.
+        }
     }
 
     // ========================================================================
@@ -752,11 +770,42 @@ public final class ServiceUtils {
      * silently drop it.
      */
     private static String decoderOf(ghidra.program.model.lang.LanguageDescription d) {
-        if (d instanceof ghidra.program.model.lang.SleighLanguageDescription sld) {
-            generic.jar.ResourceFile sla = sld.getSlaFile();
-            if (sla != null) return sla.getAbsolutePath();
-        }
+        generic.jar.ResourceFile sla = slaFileOf(d);
+        if (sla != null) return sla.getAbsolutePath();
         return d.getLanguageID().getIdAsString();
+    }
+
+    /**
+     * The {@code .sla} behind a Sleigh language description, on either side of the Ghidra 12.2
+     * API move: 12.1.x has {@code ghidra.program.model.lang.SleighLanguageDescription#getSlaFile()};
+     * 12.2 moved the class to {@code ghidra.app.plugin.processors.sleigh} and reaches the file via
+     * {@code getLanguageFile().getSlaFile()}. Resolved reflectively so one build runs on both.
+     * Returns null for non-Sleigh descriptions or an unknown API shape.
+     */
+    private static generic.jar.ResourceFile slaFileOf(Object description) {
+        try {
+            if (invokeNoArg(description, "getSlaFile") instanceof generic.jar.ResourceFile direct) {
+                return direct;
+            }
+            Object languageFile = invokeNoArg(description, "getLanguageFile");
+            if (languageFile != null
+                    && invokeNoArg(languageFile, "getSlaFile") instanceof generic.jar.ResourceFile viaFile) {
+                return viaFile;
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // fall through: caller uses the language id instead
+        }
+        return null;
+    }
+
+    private static Object invokeNoArg(Object target, String methodName) throws ReflectiveOperationException {
+        java.lang.reflect.Method m;
+        try {
+            m = target.getClass().getMethod(methodName);
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
+        return m.invoke(target);
     }
 
     /** The variant a program is loaded under, or "" when it cannot be determined. */
@@ -951,6 +1000,19 @@ public final class ServiceUtils {
     }
 
     /**
+     * The program a name resolves to ({@link #getProgramOrError}), or a {@link Refusal} with the
+     * same message. Tools take a {@code Program} parameter instead; this is for code that only
+     * has a name.
+     */
+    public static Program requireProgram(ProgramProvider provider, String programName) {
+        ProgramOrError pe = getProgramOrError(provider, programName);
+        if (pe.hasError()) {
+            throw new Refusal(pe.error() instanceof Response.Err err ? err.message() : pe.error().toJson());
+        }
+        return pe.program();
+    }
+
+    /**
      * Which program this HTTP request actually resolved, if any.
      *
      * <p>HTTP threads are pooled. An uncleared value lets request N+1 inherit
@@ -1026,7 +1088,7 @@ public final class ServiceUtils {
             try {
                 program = provider.getProgram(programName);
             } catch (AmbiguousProgramException e) {
-                return new ProgramOrError(null, Response.err(e.getMessage()));
+                return new ProgramOrError(null, ServiceUtils.fail(e));
             }
             if (program == null) {
                 return new ProgramOrError(null, Response.err(
@@ -1105,6 +1167,22 @@ public final class ServiceUtils {
         return lastParseError.get();
     }
 
+    /** A failure's message for a Response: the cause an ExecutionException wraps, else its class name when it has none. */
+    public static String failureMessage(Throwable e) {
+        Throwable t = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
+        return t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+    }
+
+    /** {@link Response#err} whose text is {@link #failureMessage(Throwable)}. */
+    public static Response fail(Throwable e) {
+        return Response.err(failureMessage(e));
+    }
+
+    /** {@link Response#err} shaped {@code what + " failed: " + failureMessage(e)}. */
+    public static Response fail(String what, Throwable e) {
+        return Response.err(what + " failed: " + failureMessage(e));
+    }
+
     /**
      * Parse an address string using the program's AddressFactory.
      * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00",
@@ -1113,8 +1191,8 @@ public final class ServiceUtils {
      * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
      *
      * THREADING: Must be called on the HTTP worker thread, BEFORE entering any
-     * threadingStrategy.executeRead/executeWrite lambda. SwingThreadingStrategy transfers
-     * execution to the EDT inside execute*; a ThreadLocal set there is invisible to the caller.
+     * threadingStrategy.executeRead/executeWrite lambda. A ThreadLocal set inside the
+     * lambda is invisible to the caller after execute* returns — set it beforehand.
      */
     public static Address parseAddress(Program program, String addressStr) {
         lastParseError.remove();
@@ -1420,6 +1498,7 @@ public final class ServiceUtils {
             case "unsigned int": return UnsignedIntegerDataType.dataType;
             case "unsigned short": return UnsignedShortDataType.dataType;
             case "unsigned long": return UnsignedLongDataType.dataType;
+            case "unsigned long long": return UnsignedLongLongDataType.dataType;
             case "unsigned char": return UnsignedCharDataType.dataType;
             case "signed char": return SignedByteDataType.dataType;
             default:           return null;
@@ -1602,6 +1681,38 @@ public final class ServiceUtils {
             return result;
         }
         return searchByNameInAllCategories(dtm, typeName.toLowerCase());
+    }
+
+    /**
+     * Resolve {@code name} to a {@link Structure}, or refuse with a fixed message.
+     * Not-found: {@code Structure not found: X}. Wrong kind:
+     * {@code Data type 'X' is not a structure}.
+     */
+    public static Structure requireStructure(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Structure not found: " + name);
+        }
+        if (!(dt instanceof Structure)) {
+            throw new Refusal("Data type '" + name + "' is not a structure");
+        }
+        return (Structure) dt;
+    }
+
+    /**
+     * Resolve {@code name} to an enum, or refuse with a fixed message.
+     * Not-found: {@code Enumeration not found: X}. Wrong kind:
+     * {@code Data type 'X' is not an enumeration}.
+     */
+    public static ghidra.program.model.data.Enum requireEnum(DataTypeManager dtm, String name) {
+        DataType dt = findDataTypeByNameInAllCategories(dtm, name);
+        if (dt == null) {
+            throw new Refusal("Enumeration not found: " + name);
+        }
+        if (!(dt instanceof ghidra.program.model.data.Enum)) {
+            throw new Refusal("Data type '" + name + "' is not an enumeration");
+        }
+        return (ghidra.program.model.data.Enum) dt;
     }
 
     /**

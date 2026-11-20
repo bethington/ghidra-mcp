@@ -997,3 +997,110 @@ class TestShadowedGlobalsConsistency:
         assert not missing, (
             f"shadowed globals not selected by type_filter=undefined: {missing[:5]}")
 
+
+class TestPartitionProgram:
+    """`/partition_program` (#584) — structural function compartments.
+
+    Auto-skips when the endpoint isn't registered (deployed JAR older than
+    the source). Assertions are response-shape / invariants, not binary-specific.
+    """
+
+    def test_response_shape_and_totals(self, http_client):
+        r = http_client.get("/partition_program", params={"band_size": 20, "min_size": 1})
+        if r.status_code == 404:
+            pytest.skip("/partition_program not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        if "error" in body:
+            # No eligible functions (e.g. unanalyzed import) — still a valid reply.
+            assert isinstance(body["error"], str) and body["error"]
+            return
+
+        for key in (
+            "partitions",
+            "partition_count",
+            "partitions_reported",
+            "eligible_functions",
+            "assigned_functions",
+            "strategies",
+            "signal_coverage",
+            "elapsed_ms",
+        ):
+            assert key in body, f"missing top-level field: {key}"
+
+        assert isinstance(body["partitions"], list)
+        assert isinstance(body["strategies"], dict)
+        assert body["partitions_reported"] == len(body["partitions"])
+        assert body["partition_count"] >= body["partitions_reported"]
+        assert body["eligible_functions"] >= body["assigned_functions"]
+        assert body["assigned_functions"] >= 0
+
+        for row in body["partitions"]:
+            for key in ("slug", "method", "functions", "confidence"):
+                assert key in row, f"partition missing field: {key}"
+            assert isinstance(row["slug"], str) and row["slug"]
+            assert isinstance(row["method"], str) and row["method"]
+            assert isinstance(row["functions"], int) and row["functions"] >= 1
+            assert isinstance(row["confidence"], (int, float))
+
+
+class TestFindTypeUsers:
+    """`/find_type_users` (#584) — functions referencing a data type / field.
+
+    Auto-skips when the endpoint isn't registered.
+    """
+
+    def test_unknown_type_returns_error(self, http_client):
+        r = http_client.get(
+            "/find_type_users",
+            params={"type_name": "DefinitelyNotARealType_ZzZz_9f3a"},
+        )
+        if r.status_code == 404:
+            pytest.skip("/find_type_users not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        assert "error" in body
+        assert "not found" in body["error"].lower() or "DefinitelyNotARealType" in body["error"]
+
+    def test_known_type_returns_functions_and_timed_out(self, http_client):
+        r = http_client.get(
+            "/find_type_users",
+            params={"type_name": "int", "timeout_seconds": 10},
+        )
+        if r.status_code == 404:
+            pytest.skip("/find_type_users not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+        body = r.json()
+        if "error" in body:
+            # Builtin may be unresolved under some DTMs; try a type the program lists.
+            listed = http_client.get("/find_data_types", params={"limit": 5})
+            assert listed.status_code == 200
+            types = listed.json()
+            names = []
+            if isinstance(types, dict):
+                for key in ("data_types", "types", "results", "items"):
+                    if isinstance(types.get(key), list):
+                        for item in types[key]:
+                            if isinstance(item, dict) and item.get("name"):
+                                names.append(item["name"])
+                            elif isinstance(item, str):
+                                names.append(item)
+                        break
+            if not names:
+                pytest.skip(f"no resolvable type for find_type_users: {body}")
+            r = http_client.get(
+                "/find_type_users",
+                params={"type_name": names[0], "timeout_seconds": 10},
+            )
+            assert r.status_code == 200
+            body = r.json()
+            if "error" in body:
+                pytest.skip(f"find_type_users unavailable: {body}")
+
+        assert "functions" in body
+        assert isinstance(body["functions"], list)
+        assert "timed_out" in body
+        assert isinstance(body["timed_out"], bool)
+        assert "count" in body
+        assert body["count"] == len(body["functions"])
+

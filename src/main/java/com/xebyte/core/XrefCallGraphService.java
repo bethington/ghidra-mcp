@@ -43,9 +43,7 @@ public class XrefCallGraphService {
         ReferenceManager refMgr = program.getReferenceManager();
         boolean qualify = ServiceUtils.getPhysicalSpaceCount(program) > 1;
         Map<String, Object> byAddress = new LinkedHashMap<>();
-        for (String raw : addressesCsv.split(",")) {
-            String addrStr = raw.trim();
-            if (addrStr.isEmpty()) continue;
+        for (String addrStr : ServiceUtils.csvTokens(addressesCsv)) {
             List<Map<String, Object>> refs = new ArrayList<>();
             Address addr = ServiceUtils.parseAddress(program, addrStr);
             if (addr != null) {
@@ -86,7 +84,7 @@ public class XrefCallGraphService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "addresses", defaultValue = "",
                    description = "Comma-separated addresses for the many-at-once form. The result is a "
                                + "map of address to its reference list, and an address that does not "
@@ -99,20 +97,15 @@ public class XrefCallGraphService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
         if (addressesCsv != null && !addressesCsv.isEmpty()) {
             return xrefsToMany(program, addressesCsv);
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address (one) or addresses (comma-separated) is required");
         }
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
@@ -138,7 +131,7 @@ public class XrefCallGraphService {
             // count==0 rather than parsing an English sentence.
             return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
-            return Response.err("Error getting references to address: " + e.getMessage());
+            return Response.err("Error getting references to address: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -152,7 +145,7 @@ public class XrefCallGraphService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                               + "address is unambiguous.") Address addr,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -161,17 +154,10 @@ public class XrefCallGraphService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (addr == null) return Response.err("Address is required");
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             Reference[] references = refManager.getReferencesFrom(addr);
@@ -202,7 +188,7 @@ public class XrefCallGraphService {
 
             return ServiceUtils.paged("references", refs, offset, limit);
         } catch (Exception e) {
-            return Response.err("Error getting references from address: " + e.getMessage());
+            return Response.err("Error getting references from address: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -220,9 +206,9 @@ public class XrefCallGraphService {
     public Response addMemoryReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
                    description = "Source address the reference originates from (the table slot / instruction). "
-                               + "Accepts 0x<hex> or <space>:<hex> (e.g. mem:1000).") String fromAddressStr,
+                               + "Accepts 0x<hex> or <space>:<hex> (e.g. mem:1000).") Address fromAddr,
             @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") Address toAddr,
             @Param(value = "ref_type", source = ParamSource.BODY, defaultValue = "DATA",
                    description = "Reference type (case-insensitive RefType name): DATA, READ, WRITE, READ_WRITE, "
                                + "COMPUTED_CALL, UNCONDITIONAL_CALL, COMPUTED_JUMP, UNCONDITIONAL_JUMP, "
@@ -232,21 +218,10 @@ public class XrefCallGraphService {
                                + "re-analysis), ANALYSIS, IMPORTED, DEFAULT.") String sourceTypeStr,
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
-        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
-
-        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
-        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
-        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
-        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
-
+        if (fromAddr == null) return Response.err("from_address is required");
+        if (toAddr == null) return Response.err("to_address is required");
         RefType refType = resolveMemoryRefType(refTypeStr);
         if (refType == null) {
             return Response.err("Unknown ref_type '" + refTypeStr + "'. Valid names include: "
@@ -278,7 +253,7 @@ public class XrefCallGraphService {
                         "is_primary", ref.isPrimary()));
             });
         } catch (Exception e) {
-            return Response.err("Error adding memory reference: " + e.getMessage());
+            return Response.err("Error adding memory reference: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -297,27 +272,16 @@ public class XrefCallGraphService {
             category = "xref", access = ToolAccess.DESTRUCTIVE)
     public Response removeReference(
             @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
+                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") Address fromAddr,
             @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
-                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") Address toAddr,
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index to match. -1 (default) = remove references on any operand; "
                                + ">= 0 = remove only the reference on that operand.") int operandIndex,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
-        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
-
-        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
-        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
-        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
-        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
-
+        if (fromAddr == null) return Response.err("from_address is required");
+        if (toAddr == null) return Response.err("to_address is required");
         // Collect the matching references up front, then delete inside the transaction.
         List<Reference> matches = new ArrayList<>();
         for (Reference ref : program.getReferenceManager().getReferencesFrom(fromAddr)) {
@@ -336,10 +300,9 @@ public class XrefCallGraphService {
         }
 
         if (matches.isEmpty()) {
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "removed", 0,
-                    "message", "No reference found from " + fromAddr + " to " + toAddr));
+            return Response.success(
+                    "No reference found from " + fromAddr + " to " + toAddr,
+                    JsonHelper.mapOf("removed", 0));
         }
 
         try {
@@ -356,7 +319,7 @@ public class XrefCallGraphService {
                         "references", details));
             });
         } catch (Exception e) {
-            return Response.err("Error removing reference: " + e.getMessage());
+            return Response.err("Error removing reference: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -395,7 +358,7 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -404,23 +367,11 @@ public class XrefCallGraphService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
-
-        // Find the function by name or address
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        Function function = resolved.function();
-
         Set<Function> callees = new HashSet<>();
-        AddressSetView functionBody = function.getBody();
+        AddressSetView functionBody = func.getBody();
         Listing listing = program.getListing();
         ReferenceManager refManager = program.getReferenceManager();
 
@@ -469,7 +420,7 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -478,21 +429,11 @@ public class XrefCallGraphService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name or address
-        Function targetFunction = null;
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        targetFunction = resolved.function();
+        Function targetFunction = func;
 
         Set<Function> callers = new HashSet<>();
         ReferenceManager refManager = program.getReferenceManager();
@@ -533,24 +474,15 @@ public class XrefCallGraphService {
                    aliases = {"name", "address", "function_name", "function_address"},
                    description = "Function name or entry-point address (0x<hex> or <space>:<hex>). "
                                + "One parameter for both: the resolver tries the address form first, "
-                               + "then an exact function name.") String functionRef,
+                               + "then an exact function name.") Function func,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name or address
-        Function rootFunction = null;
-        ServiceUtils.FunctionOrError resolved = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (resolved.hasError()) return resolved.error();
-        rootFunction = resolved.function();
+        Function rootFunction = func;
 
         Set<String> visited = new HashSet<>();
         Map<String, Set<String>> callGraph = new HashMap<>();
@@ -699,13 +631,7 @@ public class XrefCallGraphService {
     public Response getFullCallGraph(
             @Param(value = "format", defaultValue = "edges", description = "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)") String format,
             @Param(value = "limit", defaultValue = "1000", description = "Max edges to return. 0 = unlimited.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         // limit=0 means unlimited
         int effectiveLimit = (limit <= 0) ? Integer.MAX_VALUE : limit;
 
@@ -862,13 +788,7 @@ public class XrefCallGraphService {
             @Param(value = "start_function", description = "Start function name") String startFunction,
             @Param(value = "end_function", description = "End function name") String endFunction,
             @Param(value = "analysis_type", defaultValue = "summary", description = "Analysis type (summary/paths/cycles)") String analysisType,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             FunctionManager functionManager = program.getFunctionManager();
             ReferenceManager refManager = program.getReferenceManager();
@@ -1090,7 +1010,7 @@ public class XrefCallGraphService {
             }
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -1257,10 +1177,6 @@ public class XrefCallGraphService {
     /**
      * Assembly pattern analysis - get assembly context around xref source addresses
      */
-    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions) {
-        return getAssemblyContext(xrefSourcesObj, contextInstructions, null);
-    }
-
     @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref", access = ToolAccess.READ_ONLY)
     public Response getAssemblyContext(
 @Param(value = "xref_sources", source = ParamSource.BODY,
@@ -1275,13 +1191,7 @@ public class XrefCallGraphService {
                                + "(default 5), so the window is up to 2n+1 instructions. The walk stops "
                                + "early at the start or end of the listing.") int contextInstructions,
             
-@Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always specify "
-                               + "when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+@Param(value = "program", defaultValue = "") Program program) {
         try {
             List<String> xrefSources = new ArrayList<>();
 
@@ -1292,12 +1202,7 @@ public class XrefCallGraphService {
                     }
                 }
             } else if (xrefSourcesObj instanceof String s) {
-                for (String part : s.split(",")) {
-                    String trimmed = part.trim();
-                    if (!trimmed.isEmpty()) {
-                        xrefSources.add(trimmed);
-                    }
-                }
+                xrefSources.addAll(ServiceUtils.csvTokens(s));
             }
 
             Listing listing = program.getListing();
@@ -1374,7 +1279,7 @@ public class XrefCallGraphService {
 
             return Response.ok(resultMap);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 }

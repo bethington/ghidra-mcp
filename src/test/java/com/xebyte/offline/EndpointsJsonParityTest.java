@@ -288,17 +288,41 @@ public class EndpointsJsonParityTest extends TestCase {
     // Catalog loader
     // ------------------------------------------------------------------
 
+    /**
+     * Internal scanned tools must be flagged in the catalog so marketing counts
+     * and the README generator can exclude them without hand-editing numbers.
+     */
+    public void testInternalScannedToolsCarryInternalFlagInCatalog() {
+        List<String> missing = new ArrayList<>();
+        for (AnnotationScanner.ToolDescriptor tool : scanner.getDescriptors()) {
+            if (!tool.internal()) {
+                continue;
+            }
+            CatalogEntry entry = catalog.get(tool.path());
+            if (entry == null) {
+                missing.add(tool.path() + " (absent from catalog)");
+            } else if (!entry.internal) {
+                missing.add(tool.path() + " (catalog missing internal:true)");
+            }
+        }
+        assertTrue("Internal @McpTool(s) missing catalog internal flag:\n  "
+                + String.join("\n  ", missing), missing.isEmpty());
+    }
+
     private static final class CatalogEntry {
         final String path;
         final String method;
         final String category;
         final List<String> params;
+        final boolean internal;
 
-        CatalogEntry(String path, String method, String category, List<String> params) {
+        CatalogEntry(String path, String method, String category, List<String> params,
+                boolean internal) {
             this.path = path;
             this.method = method;
             this.category = category;
             this.params = params;
+            this.internal = internal;
         }
     }
 
@@ -327,7 +351,8 @@ public class EndpointsJsonParityTest extends TestCase {
                     params.add(pe.getAsString());
                 }
             }
-            map.put(path, new CatalogEntry(path, method, category, params));
+            map.put(path, new CatalogEntry(path, method, category, params,
+                    obj.has("internal") && obj.get("internal").getAsBoolean()));
         }
         return map;
     }

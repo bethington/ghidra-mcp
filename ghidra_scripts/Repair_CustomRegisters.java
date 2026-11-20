@@ -36,7 +36,7 @@ public class Repair_CustomRegisters extends GhidraScript {
         try {
             FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(true);
             while (funcIter.hasNext()) {
-                monitor.checkCanceled();
+                monitor.checkCancelled();
                 Function func = funcIter.next();
                 monitor.incrementProgress(1);
                 monitor.setShowProgressValue(true);

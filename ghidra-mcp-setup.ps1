@@ -18,10 +18,10 @@ Version safety checks enforce consistency between:
 - version inferred from -GhidraPath (if present)
 
 .EXAMPLE
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "F:\ghidra_12.1.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "F:\ghidra_12.2_PUBLIC"
 
 .EXAMPLE
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "F:\ghidra_12.1.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "F:\ghidra_12.2_PUBLIC"
 
 .EXAMPLE
 .\ghidra-mcp-setup.ps1 -BuildOnly
@@ -73,7 +73,7 @@ function Show-Usage {
     Write-Host "  -Preflight       Validate environment and prerequisites without making changes"
     Write-Host ""
     Write-Host "Common options:"
-    Write-Host "  -GhidraPath      Path to Ghidra install (e.g., F:\ghidra_12.1.2_PUBLIC)"
+    Write-Host "  -GhidraPath      Path to Ghidra install (e.g., F:\ghidra_12.2_PUBLIC)"
     Write-Host "  -GhidraVersion   Explicit Ghidra version (must match pom.xml/path version)"
     Write-Host "  -StrictPreflight Fail preflight on network checks (Maven Central/PyPI reachability)"
     Write-Host "  -NoAutoPrereqs   Disable automatic prerequisite setup during deploy"
@@ -89,9 +89,9 @@ function Show-Usage {
     Write-Host "  -Help            Show this help text"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath 'F:\ghidra_12.1.2_PUBLIC'"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath 'F:\ghidra_12.1.2_PUBLIC'"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath 'F:\ghidra_12.1.2_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath 'F:\ghidra_12.2_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath 'F:\ghidra_12.2_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath 'F:\ghidra_12.2_PUBLIC'"
     Write-Host "  .\ghidra-mcp-setup.ps1 -BuildOnly"
     Write-Host "  .\ghidra-mcp-setup.ps1 -Clean"
     Write-Host ""
@@ -667,7 +667,7 @@ function Invoke-PreflightChecks {
     # Java
     $javaCmd = Get-Command java -ErrorAction SilentlyContinue
     if (-not $javaCmd) {
-        $issues.Add("Java not found on PATH (JDK 21 recommended).")
+        $issues.Add("Java not found on PATH (JDK 25 required).")
     } else {
         Write-LogSuccess "Java found: $($javaCmd.Source)"
     }
@@ -955,7 +955,7 @@ $ghidraVersionDir = $null
 $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
 if (Test-Path $ghidraUserBase) {
-    # Extract version from GhidraPath (e.g., "F:\ghidra_12.1.2_PUBLIC" -> "12.1")
+    # Extract version from GhidraPath (e.g., "F:\ghidra_12.2_PUBLIC" -> "12.1")
     $targetVersion = $null
     if ($GhidraPath -match "ghidra_([0-9.]+)") {
         $targetVersion = $Matches[1]

@@ -145,7 +145,8 @@ tool_cases:
       json_keys: ["references", "count", "total"]
 
   # get_comment now emits all five kinds on every response: null for a kind
-  # that was never set, "" for one explicitly cleared. calc_crc16's plate/pre
+  # with no comment record (never set, or cleared: set_comment removes the
+  # record instead of storing ""). calc_crc16's plate/pre
   # are Ghidra's own auto-generated demangling comments; eol/post/repeatable
   # have never been touched on this fixture, so they must come back as
   # literal null rather than being omitted.

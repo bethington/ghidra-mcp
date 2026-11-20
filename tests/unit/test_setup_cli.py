@@ -996,7 +996,7 @@ def test_cmd_preflight_maven_on_supported_java_prints_no_warning(
 
     _stub_preflight_environment(cli, monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "locate_maven_command", lambda: Path("/usr/bin/mvn"))
-    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: 21)
+    monkeypatch.setattr(cli, "detect_maven_java_major", lambda command: cli.REQUIRED_JAVA_MAJOR)
 
     assert cli.cmd_preflight(_args(ghidra_path=None)) == 0
 

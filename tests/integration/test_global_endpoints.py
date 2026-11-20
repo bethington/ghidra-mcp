@@ -68,7 +68,6 @@ def sample_global_address(http_session, server_url):
     `list_program_items` kind=data_items returns JSON items with address fields.
     We scan for the first parseable hex address.
     """
-    import re
     response = http_session.get(
         f"{server_url}/list_program_items",
         params={"kind": "data_items", "limit": 10},

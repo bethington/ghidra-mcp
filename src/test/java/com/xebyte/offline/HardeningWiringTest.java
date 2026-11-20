@@ -56,10 +56,13 @@ public class HardeningWiringTest extends TestCase {
         String src = read("core", "ProgramScriptService.java");
         String delete = body(src, "/delete_file");
         String create = body(src, "/create_folder");
-        assertTrue("deleteFile must call isPathInProjectScope",
-                delete.contains("isPathInProjectScope("));
-        assertTrue("createFolder must call isPathInProjectScope",
-                create.contains("isPathInProjectScope("));
+        // Scope lives in ProjectPaths.file/folder — one check for every site.
+        assertTrue("deleteFile must resolve through ProjectPaths.file or findFile",
+                delete.contains("ProjectPaths.file(") || delete.contains("ProjectPaths.findFile("));
+        assertTrue("createFolder must resolve through ProjectPaths.folder",
+                create.contains("ProjectPaths.folder("));
+        assertTrue("ProjectPaths.file/folder must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
     }
 
     /**
@@ -85,7 +88,7 @@ public class HardeningWiringTest extends TestCase {
         ProgramScriptService scripts = new ProgramScriptService(
                 ServiceFactory.stubProvider(), new NoopThreadingStrategy());
         Response r = scripts.runGhidraScript(
-                "AnyScript.java", "", "no-such-program-should-never-resolve", 0);
+                "AnyScript.java", "", null, 0);
         assertTrue("Sink must return an error when scripts are disabled",
                 r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
@@ -106,32 +109,14 @@ public class HardeningWiringTest extends TestCase {
         int sig = indexOfScriptPathOverload(src);
         assertTrue("Could not locate the runGhidraScript overload declaring the "
                 + "script_path @Param", sig >= 0);
-        // The areScriptsAllowed() gate must appear early in the method body,
-        // before the program is resolved.
         int gate = src.indexOf("areScriptsAllowed()", sig);
-        int resolve = src.indexOf("getProgramOrError", sig);
+        int usesProgram = src.indexOf("scriptState(", sig);
         assertTrue("runGhidraScript sink must check areScriptsAllowed()", gate >= 0);
-        assertTrue("Gate must precede program resolution", gate < resolve);
+        assertTrue("Sink must take a resolved Program", src.indexOf("Program program", sig) >= 0);
+        assertTrue("Gate must precede using the program in scriptState",
+                usesProgram >= 0 && gate < usesProgram);
     }
 
-    /**
-     * Locate the {@code runGhidraScript} overload whose first parameter is the
-     * {@code script_path} {@code @Param}. Whitespace-tolerant on purpose: the
-     * previous form was a literal containing {@code "\n"} plus exactly twelve
-     * spaces, so it broke both on a CRLF checkout and on any reformat of the
-     * declaration.
-     *
-     * @return offset of the declaration, or -1
-     */
-    static int indexOfScriptPathOverload(String src) {
-        Matcher m = SCRIPT_PATH_OVERLOAD.matcher(src);
-        return m.find() ? m.start() : -1;
-    }
-
-    static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
-            "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
-                    + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
-            Pattern.MULTILINE | Pattern.DOTALL);
 
     /** The dead, ungated /run_script route must stay unregistered.
      *  (The old dead EndpointRegistry router was removed in 7.0.0.) */
@@ -183,8 +168,8 @@ public class HardeningWiringTest extends TestCase {
         assertTrue("a ghidra:// URL is a repository, not a filesystem path",
                 headless.contains("ghidra://"));
         String gui = read("GhidraMCPPlugin.java");
-        int at = gui.indexOf("private String openProject(String projectPath, boolean headless");
-        assertTrue("GUI openProject not found", at >= 0);
+        int at = gui.indexOf("openProject(String projectPath, boolean headless");
+        assertTrue("GUI openProject not found", at >= 0 && gui.lastIndexOf("private ", at) >= 0);
         assertTrue("GUI /open_project must resolve the path within the file root",
                 gui.substring(at, at + 2500).contains("resolveWithinFileRoot("));
     }
@@ -194,12 +179,33 @@ public class HardeningWiringTest extends TestCase {
         String src = read("core", "ProjectVersionControl.java");
         int lookup = src.indexOf("private FileOrError file(String path)");
         assertTrue("the file lookup must exist", lookup >= 0);
-        int scope = src.indexOf("isPathInProjectScope(", lookup);
-        assertTrue("every operation that names a file goes through file(), which must apply the scope",
-                scope > lookup && scope < src.indexOf("getFile(normalized)", lookup));
+        assertTrue("every operation that names a file goes through file() → ProjectPaths.file",
+                src.indexOf("ProjectPaths.file(", lookup) > lookup);
+        assertTrue("ProjectPaths.file must apply isPathInProjectScope",
+                read("core", "ProjectPaths.java").contains("isPathInProjectScope("));
         assertTrue("the folder walks must skip files outside the scope too",
-                src.split("isPathInProjectScope\\(", -1).length >= 4);
+                src.split("isPathInProjectScope\\(", -1).length >= 3);
     }
+
+
+    /**
+     * Locate the {@code runGhidraScript} overload whose first parameter is the
+     * {@code script_path} {@code @Param}. Whitespace-tolerant on purpose: the
+     * previous form was a literal containing {@code "\n"} plus exactly twelve
+     * spaces, so it broke both on a CRLF checkout and on any reformat of the
+     * declaration.
+     *
+     * @return offset of the declaration, or -1
+     */
+    static int indexOfScriptPathOverload(String src) {
+        Matcher m = SCRIPT_PATH_OVERLOAD.matcher(src);
+        return m.find() ? m.start() : -1;
+    }
+
+    static final Pattern SCRIPT_PATH_OVERLOAD = Pattern.compile(
+            "public\\s+Response\\s+runGhidraScript\\s*\\(\\s*"
+                    + "@Param\\s*\\(\\s*value\\s*=\\s*\"script_path\"",
+            java.util.regex.Pattern.MULTILINE | java.util.regex.Pattern.DOTALL);
 
     private static int countOccurrences(String s, String sub) {
         int n = 0, i = 0;

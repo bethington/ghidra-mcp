@@ -5,15 +5,9 @@ import com.google.gson.GsonBuilder;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.*;
-import ghidra.util.Msg;
-
-import javax.swing.SwingUtilities;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Service for comment operations: set/get/clear decompiler, disassembly, and plate comments.
@@ -21,8 +15,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @McpToolGroup(value = "comment", description = "Set/get plate, decompiler, disassembly, repeatable comments")
 public class CommentService {
 
-    // get_comment needs `null` to survive serialization (it is the only way to
-    // tell "never set" from "cleared to empty"), which the shared JsonHelper
+    // get_comment needs `null` to survive serialization (all five kinds are
+    // always present in each result), which the shared JsonHelper
     // Gson instance deliberately does not do -- every other endpoint relies on
     // absent-means-null. Kept local to this one response rather than changed
     // globally.
@@ -46,68 +40,41 @@ public class CommentService {
     /**
      * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT).
      */
-    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName, String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+    public Response setCommentAtAddress(Address addr, String comment, int commentType, String transactionName, Program program) {
 
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("Address is required");
         }
         if (comment == null) {
             return Response.err("Comment text is required");
         }
 
-        // Resolve address before entering SwingUtilities lambda
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, transactionName);
-                try {
-                    // Empty means REMOVE, which is what a caller passing "" is asking for and
-                    // what batch_set_comments already does. Storing "" instead leaves a comment
-                    // record that reads as "no comment" through get_comment (has_comment:false)
-                    // but is very much present: the decompiler renders it as a bare `//` line,
-                    // so every "clear" left a blank comment in the pseudocode.
-                    program.getListing().setComment(addr, commentType,
-                        comment == null || comment.isEmpty() ? null : comment);
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
-                } finally {
-                    tx.end(success.get());
-                }
+            threadingStrategy.executeWrite(program, transactionName, () -> {
+                // Empty means REMOVE, which is what a caller passing "" is asking for and
+                // what batch_set_comments already does. Storing "" instead leaves a comment
+                // record that reads as "no comment" through get_comment (has_comment:false)
+                // but is very much present: the decompiler renders it as a bare `//` line,
+                // so every "clear" left a blank comment in the pseudocode.
+                program.getListing().setComment(addr, commentType,
+                    comment == null || comment.isEmpty() ? null : comment);
+                return null;
             });
         } catch (Exception e) {
-            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
-        if (success.get()) {
-            // Parity with the former set_plate_comment: plate writes propagate to the
-            // decompiler cache and surface structural warnings (Algorithm/Parameters/Returns).
-            if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
-                program.flushEvents();
-                List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
-                if (!plateWarnings.isEmpty()) {
-                    return Response.ok(JsonHelper.mapOf("status", "success",
-                            "message", "Set plate comment at " + addressStr, "warnings", plateWarnings));
-                }
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set plate comment at " + addressStr));
-            }
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", "Set comment at " + addressStr));
+        // Parity with the former set_plate_comment: plate writes propagate to the
+        // decompiler cache and surface structural warnings (Algorithm/Parameters/Returns).
+        if (commentType == CodeUnit.PLATE_COMMENT && comment != null && !comment.isEmpty()) {
+            program.flushEvents();
+            List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
+            return Response.successWithWarnings("Set plate comment at " + addr.toString(), plateWarnings);
         }
-        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+        return Response.success("Set comment at " + addr.toString());
     }
 
-    public Response setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
-        return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
-    }
+
 
     private static String firstNonEmpty(String... ss) {
         for (String s : ss) {
@@ -124,34 +91,28 @@ public class CommentService {
      * quality sweeps (auditing every function's plate for stale cross-version content) cost one
      * HTTP round trip per function otherwise -- thousands of calls for a mid-size DLL.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind was never set, \"\" means it was explicitly cleared. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.", category = "comment", access = ToolAccess.READ_ONLY)
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike), for ONE address (address=) or MANY in one call (addresses=a,b,c). All five kinds are always present in each result: null means the kind has no comment record (never set, or cleared -- set_comment removes the record instead of storing \"\") while \"\" can still appear for a legacy record whose stored text is empty. Each result also has a convenience `comment` (first non-empty) and `has_comment` flag. Bulk mode wraps the results with requested / returned / with_comments counts.", category = "comment", access = ToolAccess.READ_ONLY)
     public Response getComment(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Address in the program (single mode). Accepts 0x<hex> (default space) or "
                                + "<space>:<hex>. Works for data addresses, not just functions. Omit when "
-                               + "using addresses.") String addressStr,
+                               + "using addresses.") Address addr,
             @Param(value = "addresses", defaultValue = "",
                    description = "Bulk mode: comma-separated addresses, each 0x<hex> (default space) or "
                                + "<space>:<hex>. When non-empty, address is ignored.") String addressesStr,
             @Param(value = "only_with_comments", defaultValue = "false",
                    description = "Bulk mode: omit addresses where has_comment is false, so a sweep "
                                + "response holds only the interesting subset.") boolean onlyWithComments,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         if (addressesStr != null && !addressesStr.trim().isEmpty()) {
             return getCommentsBulk(program, addressesStr, onlyWithComments);
         }
-        if (addressStr == null || addressStr.isEmpty()) {
+        if (addr == null) {
             return Response.err("address parameter is required (or pass addresses for bulk)");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
-        if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
-        }
-        // Explicit nulls for kinds never set, distinct from "" for kinds explicitly cleared.
+// Explicit nulls for kinds with no comment record: never set, or cleared
+        // (a clear removes the record rather than storing "").
         // The shared Gson instance drops null map values (see JsonHelper), so the response is
         // serialized with a local Gson configured to keep them, via Response.text -- the
         // sanctioned pre-serialized-JSON escape hatch, not a prose report.
@@ -164,9 +125,7 @@ public class CommentService {
         int requested = 0;
         int withComments = 0;
 
-        for (String rawToken : addressesStr.split(",")) {
-            String token = rawToken.trim();
-            if (token.isEmpty()) continue;
+        for (String token : ServiceUtils.csvTokens(addressesStr)) {
             requested++;
 
             Address addr = ServiceUtils.parseAddress(program, token);
@@ -218,12 +177,12 @@ public class CommentService {
     @McpTool(path = "/set_comment", method = "POST", description = "Set a listing comment of a given kind at ANY address (data or code). type = plate|pre|eol|post|repeatable (aliases: decompiler=pre, disassembly=eol). Plate writes surface structural warnings and flush the decompiler cache. Symmetric writer for get_comment; replaces the former set_plate_comment / set_decompiler_comment / set_disassembly_comment.", category = "comment", access = ToolAccess.WRITE)
     public Response setComment(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
-                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") String addressStr,
+                   description = "Address in the program (data or code). 0x<hex> or <space>:<hex>.") Address addr,
             @Param(value = "comment", source = ParamSource.BODY, allowEmpty = true,
                    description = "Comment text. An empty string clears this comment kind at the address.") String comment,
             @Param(value = "type", source = ParamSource.BODY, defaultValue = "plate",
                    description = "Comment kind: plate | pre | eol | post | repeatable (default plate)") String type,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         String t = (type == null || type.trim().isEmpty()) ? "plate" : type.trim().toLowerCase();
         int ct;
         switch (t) {
@@ -235,7 +194,7 @@ public class CommentService {
             default:
                 return Response.err("Unknown comment type: " + type + " (use plate|pre|eol|post|repeatable)");
         }
-        return setCommentAtAddress(addressStr, comment, ct, "Set " + t + " comment", programName);
+        return setCommentAtAddress(addr, comment, ct, "Set " + t + " comment", program);
     }
 
     /**
@@ -248,7 +207,7 @@ public class CommentService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Address functionAddress,
             @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]",
                    description = "JSON array of {address, comment} objects setting PRE comments — the "
                                + "lines the decompiler shows above a statement. Every entry carries its "
@@ -264,19 +223,8 @@ public class CommentService {
                                + "that address's EOL comment.") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "null",
                    description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        // Resolve function address before entering SwingUtilities lambda
-        final Address funcAddr;
-        if (functionAddress != null && !functionAddress.isEmpty()) {
-            funcAddr = ServiceUtils.parseAddress(program, functionAddress);
-            if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
-        } else {
-            funcAddr = null;
-        }
 
         // Pre-flight plate-quality gate (option B enforcement). When the
         // target address is a data global (defined data, no function),
@@ -287,13 +235,13 @@ public class CommentService {
         // comments retain the existing (warning-only) flow because
         // function plates have their own structural rules in
         // validatePlateCommentStructure called below.
-        if (funcAddr != null
+        if (functionAddress != null
                 && plateComment != null
                 && !plateComment.equals("null")
                 && !plateComment.isEmpty()) {
-            Function preFunc = program.getFunctionManager().getFunctionAt(funcAddr);
+            Function preFunc = program.getFunctionManager().getFunctionAt(functionAddress);
             if (preFunc == null) {
-                Data preData = program.getListing().getDefinedDataAt(funcAddr);
+                Data preData = program.getListing().getDefinedDataAt(functionAddress);
                 if (preData != null) {
                     String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
                     if (plateIssue != null) {
@@ -310,17 +258,14 @@ public class CommentService {
             }
         }
 
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicInteger decompilerCount = new AtomicInteger(0);
-        final AtomicInteger disassemblyCount = new AtomicInteger(0);
-        final AtomicBoolean plateSet = new AtomicBoolean(false);
-        final AtomicInteger overwrittenCount = new AtomicInteger(0);
-
+        record BatchCommentCounts(int decompilerCount, int disassemblyCount, boolean plateSet, int overwrittenCount) {}
+        BatchCommentCounts counts;
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Batch Set Comments");
-                try {
+            counts = threadingStrategy.executeWrite(program, "Batch Set Comments", () -> {
+                int decompilerCount = 0;
+                int disassemblyCount = 0;
+                boolean plateSet = false;
+                int overwrittenCount = 0;
                     // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
                     // - Function target → use Function.setComment (existing behavior).
                     // - Data-global target → use Listing.setComment(addr, PLATE_COMMENT, …).
@@ -328,18 +273,18 @@ public class CommentService {
                     //   (returning success with `plate_comment_set: false`), which is
                     //   exactly what made the globals worker think it had set a plate
                     //   when nothing actually landed.
-                    if (plateComment != null && !plateComment.equals("null") && funcAddr != null) {
-                        Function func = program.getFunctionManager().getFunctionAt(funcAddr);
+                    if (plateComment != null && !plateComment.equals("null") && functionAddress != null) {
+                        Function func = program.getFunctionManager().getFunctionAt(functionAddress);
                         if (func != null) {
                             String existingPlate = func.getComment();
                             if (existingPlate != null && !existingPlate.isEmpty()) {
-                                overwrittenCount.incrementAndGet();
+                                overwrittenCount++;
                             }
                             func.setComment(plateComment.isEmpty() ? null : plateComment);
-                            plateSet.set(true);
+                            plateSet = true;
                         } else {
                             // Data-global path. Previously gated on
-                            // `getDefinedDataAt(funcAddr) != null` which
+                            // `getDefinedDataAt(functionAddress) != null` which
                             // silently skipped the plate write when the
                             // address had no defined data yet (the most
                             // common pre-documentation state — symbol
@@ -351,15 +296,15 @@ public class CommentService {
                             // so the gate was never necessary.
                             Listing dataListing = program.getListing();
                             String existingPlate = dataListing.getComment(
-                                    CodeUnit.PLATE_COMMENT, funcAddr);
+                                    CodeUnit.PLATE_COMMENT, functionAddress);
                             if (existingPlate != null && !existingPlate.isEmpty()) {
-                                overwrittenCount.incrementAndGet();
+                                overwrittenCount++;
                             }
                             dataListing.setComment(
-                                    funcAddr,
+                                    functionAddress,
                                     CodeUnit.PLATE_COMMENT,
                                     plateComment.isEmpty() ? null : plateComment);
-                            plateSet.set(true);
+                            plateSet = true;
                         }
                     }
 
@@ -374,10 +319,10 @@ public class CommentService {
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.PRE_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
-                                        overwrittenCount.incrementAndGet();
+                                        overwrittenCount++;
                                     }
                                     listing.setComment(address, CodeUnit.PRE_COMMENT, cmt.isEmpty() ? null : cmt);
-                                    decompilerCount.incrementAndGet();
+                                    decompilerCount++;
                                 }
                             }
                         }
@@ -393,59 +338,44 @@ public class CommentService {
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.EOL_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
-                                        overwrittenCount.incrementAndGet();
+                                        overwrittenCount++;
                                     }
                                     listing.setComment(address, CodeUnit.EOL_COMMENT, cmt.isEmpty() ? null : cmt);
-                                    disassemblyCount.incrementAndGet();
+                                    disassemblyCount++;
                                 }
                             }
                         }
                     }
 
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error in batch set comments", e);
-                } finally {
-                    tx.end(success.get());
-                }
+                return new BatchCommentCounts(decompilerCount, disassemblyCount, plateSet, overwrittenCount);
             });
 
             // Force event processing to ensure changes propagate to decompiler cache
-            if (success.get()) {
-                program.flushEvents();
-                try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            }
+            program.flushEvents();
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         } catch (Exception e) {
-            return Response.err(e.getMessage());
-        }
-
-        if (!success.get()) {
-            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+            return ServiceUtils.fail(e);
         }
 
         // Validate plate comment structure (apply + warn)
-        List<String> plateWarnings = (plateSet.get() && plateComment != null && !plateComment.isEmpty())
+        List<String> plateWarnings = (counts.plateSet() && plateComment != null && !plateComment.isEmpty())
                 ? NamingConventions.validatePlateCommentStructure(plateComment)
                 : List.of();
 
         Map<String, Object> resultMap = new LinkedHashMap<>();
         resultMap.put("success", true);
-        resultMap.put("decompiler_comments_set", decompilerCount.get());
-        resultMap.put("disassembly_comments_set", disassemblyCount.get());
-        resultMap.put("plate_comment_set", plateSet.get());
-        resultMap.put("plate_comment_cleared", plateSet.get() && plateComment != null && plateComment.isEmpty());
-        resultMap.put("comments_overwritten", overwrittenCount.get());
+        resultMap.put("decompiler_comments_set", counts.decompilerCount());
+        resultMap.put("disassembly_comments_set", counts.disassemblyCount());
+        resultMap.put("plate_comment_set", counts.plateSet());
+        resultMap.put("plate_comment_cleared", counts.plateSet() && plateComment != null && plateComment.isEmpty());
+        resultMap.put("comments_overwritten", counts.overwrittenCount());
         if (!plateWarnings.isEmpty()) {
             resultMap.put("warnings", plateWarnings);
         }
         return Response.ok(resultMap);
     }
 
-    public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
-                                     List<Map<String, String>> disassemblyComments, String plateComment) {
-        return batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment, null);
-    }
+
 
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
@@ -453,11 +383,11 @@ public class CommentService {
     @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment", access = ToolAccess.DESTRUCTIVE)
     public Response clearFunctionComments(
             @Param(value = "function", paramType = Param.FUNCTION_REF, source = ParamSource.BODY,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
+                               + "address is unambiguous.") Function func,
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) removes the function's plate comment — the block "
                                + "above its entry. False leaves it alone.") boolean clearPlate,
@@ -467,90 +397,62 @@ public class CommentService {
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true",
                    description = "True (the default) removes every EOL (disassembly) comment inside the "
                                + "function body. False leaves them alone.") boolean clearEol,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (functionAddress == null || functionAddress.isEmpty()) {
-            return Response.err("function_address parameter is required");
+        if (func == null) {
+            return Response.err("function is required");
         }
 
-        // Resolve address before entering SwingUtilities lambda
-        Address resolvedAddr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
-        final AtomicInteger preCleared = new AtomicInteger(0);
-        final AtomicInteger eolCleared = new AtomicInteger(0);
-        final AtomicBoolean plateCleared = new AtomicBoolean(false);
-
+        record ClearCommentCounts(boolean plateCleared, int preCleared, int eolCleared) {}
         try {
-            threadingStrategy.runOnUi(() -> {
-                WriteTx tx = WriteTx.begin(program, "Clear Function Comments");
-                try {
-                    Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
-                    if (func == null) {
-                        errorMsg.set("No function at address: " + functionAddress);
-                        return;
-                    }
+            ClearCommentCounts cleared = threadingStrategy.executeWrite(program, "Clear Function Comments", () -> {
 
-                    if (clearPlate && func.getComment() != null) {
-                        func.setComment(null);
-                        plateCleared.set(true);
-                    }
+                boolean plateCleared = false;
+                int preCleared = 0;
+                int eolCleared = 0;
 
-                    Listing listing = program.getListing();
-                    AddressSetView body = func.getBody();
-                    InstructionIterator instrIter = listing.getInstructions(body, true);
-
-                    while (instrIter.hasNext()) {
-                        Instruction instr = instrIter.next();
-                        Address instrAddr = instr.getAddress();
-
-                        if (clearPre) {
-                            String existing = listing.getComment(CodeUnit.PRE_COMMENT, instrAddr);
-                            if (existing != null) {
-                                listing.setComment(instrAddr, CodeUnit.PRE_COMMENT, null);
-                                preCleared.incrementAndGet();
-                            }
-                        }
-
-                        if (clearEol) {
-                            String existing = listing.getComment(CodeUnit.EOL_COMMENT, instrAddr);
-                            if (existing != null) {
-                                listing.setComment(instrAddr, CodeUnit.EOL_COMMENT, null);
-                                eolCleared.incrementAndGet();
-                            }
-                        }
-                    }
-
-                    success.set(true);
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                    Msg.error(this, "Error clearing function comments", e);
-                } finally {
-                    tx.end(success.get());
+                if (clearPlate && func.getComment() != null) {
+                    func.setComment(null);
+                    plateCleared = true;
                 }
+
+                Listing listing = program.getListing();
+                AddressSetView body = func.getBody();
+                InstructionIterator instrIter = listing.getInstructions(body, true);
+
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    Address instrAddr = instr.getAddress();
+
+                    if (clearPre) {
+                        String existing = listing.getComment(CodeUnit.PRE_COMMENT, instrAddr);
+                        if (existing != null) {
+                            listing.setComment(instrAddr, CodeUnit.PRE_COMMENT, null);
+                            preCleared++;
+                        }
+                    }
+
+                    if (clearEol) {
+                        String existing = listing.getComment(CodeUnit.EOL_COMMENT, instrAddr);
+                        if (existing != null) {
+                            listing.setComment(instrAddr, CodeUnit.EOL_COMMENT, null);
+                            eolCleared++;
+                        }
+                    }
+                }
+
+                return new ClearCommentCounts(plateCleared, preCleared, eolCleared);
             });
+            return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "plate_comment_cleared", cleared.plateCleared(),
+                    "pre_comments_cleared", cleared.preCleared(),
+                    "eol_comments_cleared", cleared.eolCleared()
+            ));
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
-
-        if (!success.get()) {
-            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
-        }
-
-        return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "plate_comment_cleared", plateCleared.get(),
-                "pre_comments_cleared", preCleared.get(),
-                "eol_comments_cleared", eolCleared.get()
-        ));
     }
 
-    public Response clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
-        return clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, null);
-    }
+
 }

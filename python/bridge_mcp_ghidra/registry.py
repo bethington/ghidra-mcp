@@ -20,6 +20,7 @@ from .config import (
     WRITE_TOOL,
     _ALL_STATIC_TOOL_NAMES,
     logger,
+    parse_bool,
 )
 from .schema import _TYPE_MAP, _normalize_tool_def_names, _parse_schema
 from .server import Context, mcp
@@ -98,7 +99,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
 
     def is_truthy(value) -> bool:
         if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
+            return parse_bool(value, default=False, on_unknown="default")
         return bool(value)
 
     def handler(**kwargs):
@@ -357,7 +358,15 @@ def _register_tool_def(tool_def: dict) -> bool:
                 heartbeat.cancel()
         # Failures arrive as an ordinary 200 body; raising is what makes the
         # tool result carry isError instead of looking like a success.
-        return dispatch.raise_on_failure(result)
+        ok = dispatch.raise_on_failure(result)
+        # Write-triggered resource invalidation: a call, not logic, so this
+        # module stays under the per-file line cap. Read-only tools no-op inside.
+        # Awaited before the response is sent — a notification that arrives after
+        # it has no request stream left to ride on (see after_successful_write).
+        from . import invalidation
+
+        await invalidation.after_successful_write(tool_def, kwargs, ctx, ok)
+        return ok
 
     handler.__signature__ = _signature_with_context(sync_handler.__signature__)
     handler.__annotations__ = dict(sync_handler.__annotations__, ctx=Context | None)
@@ -426,6 +435,10 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
         groups: If provided, only register tools in these groups. None = register all.
 
     Returns: count of registered tools.
+
+    In facade expose mode the schema is cached but nothing is registered:
+    dispatch goes through ghidra_call by name, so dynamic registration (and
+    the tools/list_changed round-trip Copilot ignores) is skipped entirely.
     """
     with state._tool_registry_lock:
         # Remove previously registered dynamic tools
@@ -446,6 +459,15 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
 
         # Store full schema for lazy loading
         state._full_schema = _normalize_tool_def_names(schema)
+
+        if state._expose_mode == "facade":
+            # Facade dispatches by name through ghidra_call; registering 250+
+            # dynamic tools would defeat the 5-tool surface AND reintroduce
+            # the tools/list_changed round-trip Copilot ignores. Cache only.
+            # _loaded_groups marks every category "available" so any legacy
+            # caller inspecting it sees the full catalog, not an empty set.
+            state._loaded_groups.update(td.get("category", "unknown") for td in state._full_schema)
+            return 0
 
         count = 0
         failures: list[str] = []

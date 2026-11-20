@@ -8,6 +8,7 @@ import ghidra.framework.ApplicationConfiguration;
 import ghidra.program.database.ProgramBuilder;
 import ghidra.program.database.ProgramDB;
 import ghidra.program.model.address.AddressSet;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.util.task.TaskMonitor;
 import org.junit.After;
@@ -145,9 +146,22 @@ public class DecompileVariantLabellingGhidraTest {
         return (Map<String, Object>) d;
     }
 
+    /**
+     * The function the scanner would resolve for {@code function=}. Tools take a resolved
+     * Function and Program on dev, so the test resolves them the way the scanner does
+     * rather than passing the strings an HTTP caller sends.
+     */
+    private static Function fn(Services s, String address) {
+        Function f = s.program().getFunctionManager()
+            .getFunctionAt(s.program().getAddressFactory().getAddress(address));
+        assertNotNull("no function at " + address, f);
+        return f;
+    }
+
     private static Response getFunctions(Services s, String function, String functions,
                                          String fields, String variant) {
-        return s.bundles().getFunctions(function, functions, fields, true, 6, 3, false, "",
+        Function single = function.isEmpty() ? null : fn(s, function);
+        return s.bundles().getFunctions(single, functions, fields, true, 6, 3, false, s.program(),
             variant);
     }
 
@@ -273,30 +287,16 @@ public class DecompileVariantLabellingGhidraTest {
     @Test
     public void forceDecompileIsStampedAndChecked() throws Exception {
         Services s = x86();
-        Map<String, Object> out = data(s.functions().forceDecompile(X86_CALLEE, "", ""));
+        Map<String, Object> out = data(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(), ""));
         assertNotNull(out.toString(), out.get("decompiled"));
         assertStamped(s.program(), out);
 
-        out = data(s.functions().forceDecompile(X86_CALLEE, "",
+        out = data(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(),
             ServiceUtils.loadedVariant(s.program())));
         assertNotNull(out.toString(), out.get("decompiled"));
 
-        assertRefused(s.functions().forceDecompile(X86_CALLEE, "", otherVariant(s.program())),
+        assertRefused(s.functions().forceDecompile(fn(s, X86_CALLEE), s.program(), otherVariant(s.program())),
             "variant_mismatch");
-    }
-
-    /** The internal overloads skip the check -- they never state a belief -- but not the label. */
-    @Test
-    public void internalCallersAreStampedButNeverChecked() throws Exception {
-        Services s = x86();
-        assertStamped(s.program(), data(s.functions().forceDecompile(X86_CALLEE)));
-        assertStamped(s.program(), data(s.functions().decompileFunctionByAddress(X86_CALLEE)));
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> bulk = data(s.functions().batchDecompileFunctions(X86_CALLEE));
-        assertStamped(s.program(), bulk);
-        assertTrue(bulk.toString(), bulk.get("functions") instanceof Map<?, ?> m
-            && m.containsKey(X86_CALLEE) && !m.containsKey("language_id"));
     }
 
     // ------------------------------------------------------------------
@@ -306,12 +306,12 @@ public class DecompileVariantLabellingGhidraTest {
     @Test
     public void compositesStampTheirPseudocode() throws Exception {
         Services s = x86();
-        Map<String, Object> doc = data(s.analysis().analyzeForDocumentation(X86_CALLEE, "", ""));
+        Map<String, Object> doc = data(s.analysis().analyzeForDocumentation(fn(s, X86_CALLEE), s.program(), ""));
         assertNotNull(doc.toString(), doc.get("decompiled_code"));
         assertStamped(s.program(), doc);
 
-        Map<String, Object> complete = data(s.analysis().analyzeFunctionComplete(X86_CALLEE,
-            false, false, false, false, false, false, "", ""));
+        Map<String, Object> complete = data(s.analysis().analyzeFunctionComplete(fn(s, X86_CALLEE),
+            false, false, false, false, false, false, s.program(), ""));
         assertNotNull(complete.toString(), complete.get("decompiled_code"));
         assertStamped(s.program(), complete);
     }
@@ -325,9 +325,9 @@ public class DecompileVariantLabellingGhidraTest {
         Services s = x86();
         String other = otherVariant(s.program());
         for (Map<String, Object> out : List.of(
-                data(s.analysis().analyzeForDocumentation(X86_CALLEE, "", other)),
-                data(s.analysis().analyzeFunctionComplete(X86_CALLEE,
-                    false, false, false, false, false, false, "", other)))) {
+                data(s.analysis().analyzeForDocumentation(fn(s, X86_CALLEE), s.program(), other)),
+                data(s.analysis().analyzeFunctionComplete(fn(s, X86_CALLEE),
+                    false, false, false, false, false, false, s.program(), other)))) {
             assertFalse("pseudocode escaped the check: " + out, out.containsKey("decompiled_code"));
             assertFalse(out.toString(), out.containsKey("language_id"));
             assertTrue(out.toString(), out.get("decompiled_code_withheld") instanceof Map<?, ?> w
@@ -345,7 +345,7 @@ public class DecompileVariantLabellingGhidraTest {
     @SuppressWarnings("unchecked")
     public void languageMetadataEnumeratesTheChoiceItAdvisesOn() throws Exception {
         Services s = x86();
-        Map<String, Object> out = data(s.analysis().getLanguageMetadata(false, false, ""));
+        Map<String, Object> out = data(s.analysis().getLanguageMetadata(false, false, s.program()));
         assertEquals(out.toString(), Boolean.FALSE, out.get("variant_ambiguous"));
         assertEquals(out.toString(), Boolean.FALSE, out.get("variant_enumeration_failed"));
         List<Map<String, Object>> variants = (List<Map<String, Object>>) out.get("available_variants");
@@ -388,6 +388,6 @@ public class DecompileVariantLabellingGhidraTest {
         String vle = ServiceUtils.languageVariantNames(s.program()).stream()
             .filter(v -> v.contains("VLE")).findFirst().orElseThrow();
         assertRefused(getFunctions(s, PPC_FUNC, "", "decompiled_code", vle), "variant_mismatch");
-        assertRefused(s.functions().forceDecompile(PPC_FUNC, "", vle), "variant_mismatch");
+        assertRefused(s.functions().forceDecompile(fn(s, PPC_FUNC), s.program(), vle), "variant_mismatch");
     }
 }

@@ -1,6 +1,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.*;
+import ghidra.framework.model.ProjectLocator;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
@@ -54,19 +55,50 @@ public class HeadlessManagementService {
     private static final String FILE_ROOT_DENY =
         "Access denied: path is outside the configured file root";
 
+    /**
+     * Resolve a local project path (any form {@link HeadlessProgramProvider#resolveLocalProject}
+     * accepts) and check the PROJECT is inside the file root, not just the string the caller
+     * typed. The locator form names its parent's contents: {@code <root>} itself resolves
+     * to {@code <root>/../<root-name>.gpr}, outside the root.
+     *
+     * @return the project's {@code .gpr} path, or an error response in {@code err[0]}
+     */
+    private String resolveProjectWithinRoot(File contained, String endpoint, Response[] err) {
+        HeadlessProgramProvider.LocalProjectRef ref =
+            HeadlessProgramProvider.resolveLocalProject(contained.getPath());
+        if (!ref.ok()) {
+            err[0] = Response.err(ref.error);
+            return null;
+        }
+        File marker = ref.markerFile();
+        File dataDir = new File(ref.parentDir, ref.name + ProjectLocator.PROJECT_DIR_SUFFIX);
+        if (resolveWithinRootOrLog(marker.getPath(), endpoint) == null
+                || resolveWithinRootOrLog(dataDir.getPath(), endpoint) == null) {
+            err[0] = Response.err(FILE_ROOT_DENY);
+            return null;
+        }
+        return marker.getAbsolutePath();
+    }
+
     // ========================================================================
     // Project management
     // ========================================================================
 
-    @McpTool(path = "/create_project", dryRun = false, method = "POST", description = "Create a new Ghidra project", category = "headless", access = ToolAccess.WRITE)
+    @McpTool(path = "/create_project", dryRun = false, method = "POST",
+            description = "Create a new Ghidra project and make it the open project. Ghidra stores a "
+                + "project as two siblings in parentDir: the marker file <name>.gpr and the data "
+                + "directory <name>.rep. The response's path is the .gpr file, which /open_project "
+                + "and the headless server's --project option both accept.",
+            category = "headless", access = ToolAccess.WRITE)
     public Response createProject(
             @Param(value = "parentDir", source = ParamSource.BODY,
                    description = "Existing filesystem directory that will CONTAIN the new project, e.g. "
                                + "C:/ghidra_projects. It must resolve inside the server's configured file "
                                + "root or the call is denied.") String parentDir,
             @Param(value = "name", source = ParamSource.BODY,
-                   description = "Project name. The project is created at parentDir/name and the response "
-                               + "echoes that path.") String name) {
+                   description = "Project name. Creates parentDir/<name>.gpr and parentDir/<name>.rep; "
+                               + "the response returns the .gpr path as path, plus parent_dir and "
+                               + "name.") String name) {
         if (parentDir == null || parentDir.isEmpty()) return Response.err("parentDir required");
         if (name == null || name.isEmpty()) return Response.err("name required");
         File parent = resolveWithinRootOrLog(parentDir, "/create_project");
@@ -75,14 +107,21 @@ public class HeadlessManagementService {
         try {
             boolean ok = programProvider.createProject(parentDir, name);
             if (ok) {
+                // The marker file, not parentDir/name: that is Ghidra's locator form and
+                // names nothing on disk, so handing it back made create -> open fail (#656).
+                File marker = programProvider.getProjectMarkerFile();
+                if (marker == null) {
+                    marker = new File(parentDir, name + ProjectLocator.PROJECT_FILE_SUFFIX);
+                }
                 return Response.ok(JsonHelper.mapOf(
                     "success", true,
                     "name", name,
-                    "path", parentDir + "/" + name));
+                    "path", marker.getAbsolutePath(),
+                    "parent_dir", parentDir));
             }
             return Response.err("Failed to create project");
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -104,27 +143,31 @@ public class HeadlessManagementService {
             for (HeadlessProgramProvider.ProjectInfo p : programProvider.listProjects(resolved.getPath())) {
                 projects.add(JsonHelper.mapOf("name", p.name, "path", p.path, "active", p.active));
             }
-            return Response.ok(JsonHelper.mapOf("projects", projects, "count", projects.size()));
+            return ServiceUtils.listed("projects", projects);
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
     @McpTool(path = "/delete_project", dryRun = false, method = "POST", description = "Delete a Ghidra project from disk", category = "project", access = ToolAccess.DESTRUCTIVE)
     public Response deleteProject(
             @Param(value = "projectPath", source = ParamSource.BODY,
-                   description = "The project's .gpr file or its directory. Must resolve inside the "
-                               + "configured file root.") String projectPath) {
+                   description = "The project's .gpr file, its parentDir/name locator, or a directory "
+                               + "holding exactly one .gpr (a directory holding several is refused). "
+                               + "Must resolve inside the configured file root.") String projectPath) {
         if (projectPath == null || projectPath.isEmpty()) return Response.err("projectPath required");
         File resolved = resolveWithinRootOrLog(projectPath, "/delete_project");
         if (resolved == null) return Response.err(FILE_ROOT_DENY);
+        Response[] err = {null};
+        String marker = resolveProjectWithinRoot(resolved, "/delete_project", err);
+        if (marker == null) return err[0];
         try {
-            if (programProvider.deleteProject(resolved.getPath())) {
-                return Response.ok(JsonHelper.mapOf("success", true, "deleted", resolved.getPath()));
+            if (programProvider.deleteProject(marker)) {
+                return Response.ok(JsonHelper.mapOf("success", true, "deleted", marker));
             }
             return Response.err("Failed to delete project");
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -140,9 +183,12 @@ public class HeadlessManagementService {
             category = "headless", access = ToolAccess.WRITE)
     public Response openProject(
             @Param(value = "path", source = ParamSource.BODY,
-                   description = "Path to an existing project: either its .gpr file, the "
-                               + "project directory holding it, or a ghidra://host[:port]/repo "
-                               + "URL for a shared Ghidra Server repository.") String projectPath) {
+                   description = "Path to an existing project: its .gpr file (what "
+                               + "/create_project and /list_projects return), its parentDir/name "
+                               + "locator, a directory holding exactly one .gpr (a directory "
+                               + "holding several is refused with the candidates listed), or a "
+                               + "ghidra://host[:port]/repo URL for a shared Ghidra Server "
+                               + "repository.") String projectPath) {
         if (projectPath == null || projectPath.isEmpty()) {
             return Response.err("Project path required");
         }
@@ -153,7 +199,11 @@ public class HeadlessManagementService {
             if (local == null) {
                 return Response.err(FILE_ROOT_DENY);
             }
-            projectPath = local.getPath();
+            Response[] err = {null};
+            projectPath = resolveProjectWithinRoot(local, "/open_project", err);
+            if (projectPath == null) {
+                return err[0];
+            }
         }
         HeadlessProgramProvider.OpenProjectResult result =
             programProvider.openProject(projectPath, serverManager);

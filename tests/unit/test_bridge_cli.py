@@ -9,6 +9,7 @@ the settings that would have governed the real server.
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -35,7 +36,7 @@ class _CliHarness(unittest.TestCase):
         mcp.settings.host = self._saved_host
         mcp.settings.port = self._saved_port
 
-    def run_main(self, *argv, env=None):
+    def run_main(self, *argv, env=None, connected=True):
         """Invoke cli.main() with the given argv; returns the mocks.
 
         Returns a dict with the ``mcp.run`` mock (stdio path), the
@@ -43,7 +44,8 @@ class _CliHarness(unittest.TestCase):
         """
         patches = [
             patch.object(sys, "argv", ["bridge-mcp-ghidra", *argv]),
-            patch.object(cli, "_auto_connect"),
+            patch.object(cli, "_auto_connect", return_value=connected),
+            patch.object(cli, "_start_auto_connect_retry"),
             patch.object(mcp, "run"),
             patch.object(cli.uvicorn, "run"),
             patch.object(cli, "_build_http_app"),
@@ -62,12 +64,16 @@ class _CliHarness(unittest.TestCase):
             started.append(p.start())
         if "GHIDRA_MCP_LAZY" not in effective_env:
             os.environ.pop("GHIDRA_MCP_LAZY", None)
+        if "GHIDRA_MCP_PROJECT" not in effective_env:
+            os.environ.pop("GHIDRA_MCP_PROJECT", None)
         try:
             cli.main()
             return {
-                "mcp_run": started[2],
-                "uvicorn_run": started[3],
-                "build_app": started[4],
+                "auto_connect": started[1],
+                "retry": started[2],
+                "mcp_run": started[3],
+                "uvicorn_run": started[4],
+                "build_app": started[5],
             }
         finally:
             for p in patches:
@@ -83,6 +89,26 @@ class TestCliArguments(_CliHarness):
         mocks["mcp_run"].assert_called_once_with(transport="stdio")
         mocks["uvicorn_run"].assert_not_called()
         self.assertTrue(state._lazy_mode)
+
+    def test_project_flag_overrides_environment(self):
+        mocks = self.run_main("--project", "Chosen", env={"GHIDRA_MCP_PROJECT": "Other"})
+        mocks["auto_connect"].assert_called_once_with(project="Chosen")
+
+    def test_project_environment_fallback(self):
+        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " Chosen "})
+        mocks["auto_connect"].assert_called_once_with(project="Chosen")
+
+    def test_empty_project_environment_is_unset(self):
+        mocks = self.run_main(env={"GHIDRA_MCP_PROJECT": " "})
+        mocks["auto_connect"].assert_called_once_with(project=None)
+
+    def test_blank_project_flag_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            self.run_main("--project", " ", env={"GHIDRA_MCP_PROJECT": "Other"})
+
+    def test_project_is_passed_to_background_retry(self):
+        mocks = self.run_main("--project", "Chosen", connected=False)
+        mocks["retry"].assert_called_once_with(project="Chosen")
 
     def test_lazy_flag_sets_lazy_mode(self):
         self.run_main("--lazy")
@@ -514,6 +540,107 @@ class TestSessionlessRequestsAreRefusedEarly(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 406)
         self.assertEqual(self._instances(), before)
+
+    def test_resources_updated_rides_the_write_call_own_stream(self):
+        """The one delivery check that needs a real session.
+
+        Everything else about invalidation can be asserted against a stub
+        session, but not this: streamable-HTTP routes a notification by
+        `related_request_id` and drops it if that request's stream is already
+        gone. So the write's `resources/updated` has to appear in the body of
+        the `tools/call` response itself, ahead of the result.
+        """
+        from bridge_mcp_ghidra import invalidation, registry
+
+        init = self.client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                },
+            },
+            headers=self.HEADERS,
+        )
+        session_id = init.headers["mcp-session-id"]
+        headers = dict(self.HEADERS, **{"mcp-session-id": session_id})
+        self.client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            headers=headers,
+        )
+
+        uri = "ghidra://function/ls/00401000"
+        subscribed = self.client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0", "id": 2, "method": "resources/subscribe",
+                "params": {"uri": uri},
+            },
+            headers=headers,
+        )
+        self.assertEqual(subscribed.status_code, 200)
+
+        tool = {
+            "name": "probe_write_tool",
+            "description": "",
+            "endpoint": "/set_comment",   # LOCAL tier
+            "http_method": "POST",
+            "category": "comment",
+            "read_only": False,
+            "input_schema": {"type": "object", "properties": {"program": {"type": "string"}}},
+        }
+        old_names = list(state._dynamic_tool_names)
+        try:
+            registry.register_tools_from_schema([tool])
+            # Stub the write itself and its fan-out: this test is about
+            # delivery, not about resolving which function moved.
+            async def only_the_subscribed_uri(endpoint, tier, kwargs):
+                return invalidation.BlastRadius(
+                    endpoint=endpoint,
+                    tier=tier,
+                    program="ls",
+                    uris=frozenset({uri}),
+                    list_changed=False,
+                    degraded=False,
+                )
+
+            with mock.patch.object(
+                invalidation, "resolve_blast_radius", only_the_subscribed_uri
+            ), mock.patch(
+                "bridge_mcp_ghidra.dispatch.dispatch_post",
+                return_value='{"status": "success"}',
+            ), mock.patch(
+                "bridge_mcp_ghidra.dispatch.dispatch_get",
+                return_value='{"error": "no checkout"}',
+            ):
+                called = self.client.post(
+                    "/mcp",
+                    json={
+                        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                        "params": {
+                            "name": "probe_write_tool",
+                            "arguments": {"program": "ls"},
+                        },
+                    },
+                    headers=headers,
+                )
+        finally:
+            for name in list(state._dynamic_tool_names):
+                if name not in old_names:
+                    mcp._tool_manager._tools.pop(name, None)
+            state._dynamic_tool_names[:] = old_names
+
+        self.assertEqual(called.status_code, 200)
+        body = called.text
+        self.assertIn("notifications/resources/updated", body)
+        self.assertIn(uri, body)
+        # Ordering matters: after the result the stream is torn down.
+        self.assertLess(
+            body.index("notifications/resources/updated"), body.index('"id":3')
+        )
 
     def test_unknown_session_id_still_reaches_the_transport(self):
         # The SDK already answers this correctly (404, nothing created); the

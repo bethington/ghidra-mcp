@@ -1,10 +1,12 @@
 package com.xebyte.core;
 
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -16,9 +18,13 @@ import java.util.Set;
  * {@code get_function_callers} + {@code get_comment} + {@code get_function_xrefs} — and
  * every write forced the agent to re-read to see its effect. This endpoint collapses that
  * into one call backed by **one** decompilation, which matters because the plugin has no
- * decompiler cache: each decompile builds and disposes a fresh {@code DecompInterface}, so
- * two bundled reads composed from existing endpoints would decompile the same function
- * twice.
+ * decompiler cache across requests: two bundled reads composed from existing endpoints would
+ * decompile the same function twice.
+ *
+ * <p>Within one call -- single or bulk -- every decompile, targets and call_context callers
+ * alike, goes through one {@link RequestScopedDecompiler}: one {@code DecompInterface} for
+ * the request (~238 ms to open, 5-10 ms per decompile after, #575) and one result per entry
+ * point, so a caller shared by several targets is decompiled once.
  *
  * <p>It also carries {@code call_context} — a window of the caller's actual decompiled
  * source centred on the call, three lines by default, because the line that decides whether
@@ -32,10 +38,10 @@ import java.util.Set;
  * that tool directly when a score is wanted.
  *
  * <p>Threading: the whole bundle is built on the calling HTTP worker thread with no
- * {@code threadingStrategy} wrapper, following {@link CommentService}. In GUI mode
- * {@code SwingThreadingStrategy} hops onto the EDT, and decompiling several callers there
- * would stall the UI for hundreds of milliseconds; Ghidra's program database is safe for
- * concurrent reads, so the hop buys nothing here.
+ * {@code threadingStrategy} wrapper, following {@link CommentService}. Both servers run
+ * tool bodies on the request thread already; wrapping this in {@code executeRead} would
+ * only hold the server-wide lock across several decompiles. Ghidra's program database is
+ * safe for concurrent reads.
  *
  * @since 7.1.0
  */
@@ -49,12 +55,22 @@ public class FunctionBundleService {
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private final FunctionService functionService;
+    /** Opens the request's decompiler. A seam so a test can count how many one call opens. */
+    private final java.util.function.Function<Program, DecompInterface> decompilerOpener;
 
     public FunctionBundleService(ProgramProvider programProvider,
             ThreadingStrategy threadingStrategy, FunctionService functionService) {
+        this(programProvider, threadingStrategy, functionService,
+            p -> ServiceUtils.createConfiguredDecompiler(p, FunctionFacts::configureDecompiler));
+    }
+
+    FunctionBundleService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
+            FunctionService functionService,
+            java.util.function.Function<Program, DecompInterface> decompilerOpener) {
         this.programProvider = programProvider;
         this.threadingStrategy = threadingStrategy;
         this.functionService = functionService;
+        this.decompilerOpener = decompilerOpener;
     }
 
     @McpTool(path = "/get_functions",
@@ -64,8 +80,8 @@ public class FunctionBundleService {
             + "as a comma-separated subset to skip work you do not need — omitted or empty "
             + "returns everything. When the requested fields need no decompiled text (e.g. "
             + "fields=callers,callees,signature,labels,entry_point), the target function is "
-            + "NOT decompiled (238 ms cold / 5–10 ms warm per function); only decompiled_code "
-            + "(and call_context when enabled) pays that cost. Decompiled text renders EOL "
+            + "NOT decompiled (238 ms cold / 5–10 ms warm per function); decompiled_code, refs, and decompiler_symbols "
+            + "(and call_context when enabled) pay that cost. Decompiled text renders EOL "
             + "comments (// style), so comments written with set_comment are visible in the "
             + "code. Replaces get_function_by_address, get_function_variables, "
             + "get_function_xrefs, decompile_function, and the former "
@@ -82,14 +98,14 @@ public class FunctionBundleService {
     public Response getFunctions(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
                    description = "Single mode: function name or address (0x<hex> or "
-                               + "<space>:<hex>). Ignored when functions= is set.") String functionRef,
+                               + "<space>:<hex>). Ignored when functions= is set.") Function func,
             @Param(value = "functions", defaultValue = "",
                    description = "Bulk mode: comma-separated function references (names or "
                                + "addresses). When set, function= is ignored. Returns a map "
                                + "keyed by the reference asked for.") String functionsParam,
             @Param(value = "fields", defaultValue = "",
                    description = "Comma-separated subset: signature, classification, return_type, "
-                               + "entry_point, body_start, body_end, decompiled_code, "
+                               + "entry_point, body_start, body_end, decompiled_code, decompiler_symbols, "
                                + "plate_comment, comments, labels, tags, parameters, locals, callers, "
                                + "call_context, callees, xrefs, disassembly, jump_targets, refs (the absolute "
                                + "addresses the function uses: data references, the values of "
@@ -116,9 +132,7 @@ public class FunctionBundleService {
             @Param(value = "include_disasm", defaultValue = "false",
                    description = "Include the raw instruction listing. Off by default: it roughly "
                                + "doubles the payload and agents rarely read it.") boolean includeDisasm,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always "
-                               + "specify when multiple programs are open)") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "variant", defaultValue = "",
                    description = "OPTIONAL assertion of the SLEIGH language variant you believe "
                                + "this program is loaded under (e.g. default, "
@@ -131,10 +145,6 @@ public class FunctionBundleService {
                                + "program's own language and cannot reinterpret the bytes under "
                                + "another one. get_language_metadata reports variant, "
                                + "available_variants and variant_ambiguous.") String variant) {
-
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         // Ahead of the bulk dispatch and of any field selection. The caller volunteered a
         // belief about which dialect it is reading; if the program contradicts it, every
@@ -151,51 +161,49 @@ public class FunctionBundleService {
                 fields = null;
             }
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
 
         final int ctxLimit = Math.max(0, callContextLimit);
         final int ctxLines = Math.clamp(callContextLines, 1, MAX_CALL_CONTEXT_LINES);
         final Set<String> resolvedFields = fields;
 
-        if (functionsParam != null && !functionsParam.isBlank()) {
-            return getFunctionsBulk(program, functionsParam, resolvedFields, includeCallContext,
-                ctxLimit, ctxLines, includeDisasm);
-        }
+        // One decompiler for this whole call, opened on first use and disposed here, on the
+        // request thread that used it.
+        try (RequestScopedDecompiler decompiler = new RequestScopedDecompiler(
+                () -> decompilerOpener.apply(program),
+                FunctionService.NO_RETRY_DECOMPILE_TIMEOUT_SECONDS)) {
+            if (functionsParam != null && !functionsParam.isBlank()) {
+                return getFunctionsBulk(program, functionsParam, resolvedFields, includeCallContext,
+                    ctxLimit, ctxLines, includeDisasm, decompiler);
+            }
 
-        if (functionRef == null || functionRef.isEmpty()) {
-            return Response.err("function name or address required (or pass functions= for bulk)");
-        }
+            if (func == null) {
+                return Response.err("function name or address required (or pass functions= for bulk)");
+            }
 
-        ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, functionRef);
-        if (lookup.hasError()) return lookup.error();
-        Function func = lookup.function();
-
-        try {
-            return Response.ok(buildBundle(program, func, resolvedFields, includeCallContext,
-                ctxLimit, ctxLines, includeDisasm));
-        } catch (Exception e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return Response.err("Failed to build bundle for " + func.getName() + ": " + msg);
+            try {
+                return Response.ok(buildBundle(program, func, resolvedFields, includeCallContext,
+                    ctxLimit, ctxLines, includeDisasm, decompiler));
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                return Response.err("Failed to build bundle for " + func.getName() + ": " + msg);
+            }
         }
     }
 
     private Response getFunctionsBulk(Program program, String functionsParam, Set<String> fields,
             boolean includeCallContext, int callContextLimit, int callContextLines,
-            boolean includeDisasm) {
-        String[] refs = functionsParam.split(",");
+            boolean includeDisasm, FunctionFacts.Decompiler decompiler) {
+        List<String> refs = ServiceUtils.csvTokens(functionsParam);
         Map<String, Object> out = new LinkedHashMap<>();
         Map<String, Object> functions = new LinkedHashMap<>();
         int requested = 0;
         int resolved = 0;
 
-        for (String raw : refs) {
+        for (String funcRef : refs) {
             if (requested >= MAX_FUNCTIONS) {
                 break;
-            }
-            String funcRef = raw.trim();
-            if (funcRef.isEmpty()) {
-                continue;
             }
             requested++;
             ServiceUtils.FunctionOrError lookup = ServiceUtils.getFunctionOrError(program, funcRef);
@@ -206,7 +214,7 @@ public class FunctionBundleService {
             Function func = lookup.function();
             try {
                 functions.put(funcRef, buildBundle(program, func, fields, includeCallContext,
-                    callContextLimit, callContextLines, includeDisasm));
+                    callContextLimit, callContextLines, includeDisasm, decompiler));
                 resolved++;
             } catch (Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -223,7 +231,7 @@ public class FunctionBundleService {
         out.put("functions", functions);
         out.put("count", resolved);
         out.put("requested", requested);
-        if (refs.length > MAX_FUNCTIONS || requested > MAX_FUNCTIONS) {
+        if (refs.size() > MAX_FUNCTIONS || requested > MAX_FUNCTIONS) {
             out.put("truncated", true);
             out.put("max_functions", MAX_FUNCTIONS);
         }
@@ -235,27 +243,24 @@ public class FunctionBundleService {
             return null;
         }
         Set<String> fields = new LinkedHashSet<>();
-        for (String part : fieldsParam.split(",")) {
-            String token = part.trim().toLowerCase();
-            if (token.isEmpty()) {
-                continue;
-            }
-            if (!FunctionFacts.FIELDS.contains(token)) {
-                throw new IllegalArgumentException("Unknown field: " + part.trim()
+        for (String token : ServiceUtils.csvTokens(fieldsParam)) {
+            String lower = token.toLowerCase();
+            if (!FunctionFacts.FIELDS.contains(lower)) {
+                throw new IllegalArgumentException("Unknown field: " + token
                     + ". Valid fields: " + String.join(", ", FunctionFacts.FIELDS));
             }
-            fields.add(token);
+            fields.add(lower);
         }
         return fields.isEmpty() ? null : fields;
     }
 
     private Map<String, Object> buildBundle(Program program, Function func,
             Set<String> fields, boolean includeCallContext, int callContextLimit,
-            int callContextLines, boolean includeDisasm) {
+            int callContextLines, boolean includeDisasm, FunctionFacts.Decompiler decompiler) {
         return FunctionFacts.build(program, func,
             new FunctionFacts.Options(fields, includeCallContext, callContextLimit, callContextLines,
                 includeDisasm),
-            f -> functionService.decompileFunctionNoRetry(f, program, FunctionFacts::configureDecompiler));
+            decompiler);
     }
 
     /** Whether a {@code fields=} subset pays for target decompilation. */

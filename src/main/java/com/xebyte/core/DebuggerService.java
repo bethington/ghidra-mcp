@@ -27,6 +27,7 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.lang.Language;
 import ghidra.program.model.lang.Register;
 import ghidra.program.model.lang.RegisterValue;
+import ghidra.program.model.listing.Program;
 import ghidra.trace.model.Lifespan;
 import ghidra.trace.model.Trace;
 import ghidra.trace.model.TraceExecutionState;
@@ -104,16 +105,13 @@ public class DebuggerService {
     private static final long BREAKPOINT_INDEX_SETTLE_TIMEOUT_MS = 5_000;
     private static final long BREAKPOINT_INDEX_SETTLE_POLL_MS = 200;
 
-    private final ProgramProvider programProvider;
     private final PluginTool frontEndTool;
 
     /** Cached reference to the tool that has debugger services. */
     private volatile PluginTool cachedDebuggerTool;
 
-    public DebuggerService(ProgramProvider programProvider,
-                           ThreadingStrategy threadingStrategy,
+    public DebuggerService(ThreadingStrategy threadingStrategy,
                            PluginTool frontEndTool) {
-        this.programProvider = programProvider;
         this.frontEndTool = frontEndTool;
     }
 
@@ -155,6 +153,7 @@ public class DebuggerService {
                 if (template == null) {
                     continue;
                 }
+                // runTool opens a Debugger window — must hop to the Swing thread.
                 AtomicReference<PluginTool> launched = new AtomicReference<>();
                 AtomicReference<Exception> launchError = new AtomicReference<>();
                 Runnable launcher = () -> {
@@ -431,7 +430,7 @@ public class DebuggerService {
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "60",
                     description = "Maximum seconds to wait for the debugger trace") int timeoutSeconds,
             @Param(value = "program", source = ParamSource.BODY, defaultValue = "",
-                    description = "Program path/name to use for static mapping") String programName,
+                    description = "Program path/name to use for static mapping") Program program,
             @Param(value = "offer", source = ParamSource.BODY, defaultValue = "",
                     description = "Optional launcher title or config name, e.g. dbgeng") String preferredOffer,
             @Param(value = "python_executable", source = ParamSource.BODY, defaultValue = "",
@@ -461,10 +460,6 @@ public class DebuggerService {
         }
 
         try {
-            ServiceUtils.ProgramOrError pe =
-                    ServiceUtils.getProgramOrError(programProvider, programName);
-            if (pe.hasError()) return pe.error();
-            ghidra.program.model.listing.Program program = pe.program();
             Collection<TraceRmiLaunchOffer> offers = launcherSvc.getOffers(program);
             if (offers.isEmpty()) {
                 return Response.err("No debugger launch offers are available for " +
@@ -667,7 +662,7 @@ public class DebuggerService {
             response.put("program", program != null ? program.getName() : null);
             return Response.ok(response);
         } catch (Exception e) {
-            return Response.err("Debugger launch failed: " + e.getMessage());
+            return ServiceUtils.fail("Debugger launch", e);
         }
     }
 
@@ -786,7 +781,7 @@ public class DebuggerService {
             invokeTargetAction(action);
             return Response.ok(Map.of("status", "resumed"));
         } catch (Exception e) {
-            return Response.err("Resume failed: " + e.getMessage());
+            return ServiceUtils.fail("Resume", e);
         }
     }
 
@@ -808,7 +803,7 @@ public class DebuggerService {
             invokeTargetAction(action);
             return Response.ok(Map.of("status", "interrupted"));
         } catch (Exception e) {
-            return Response.err("Interrupt failed: " + e.getMessage());
+            return ServiceUtils.fail("Interrupt", e);
         }
     }
 
@@ -842,7 +837,7 @@ public class DebuggerService {
             invokeStepAction(ctx, target, action);
             return Response.ok(Map.of("status", how.equals("out") ? "stepped_out" : "stepped"));
         } catch (Exception e) {
-            return Response.err("Step " + how + " failed: " + e.getMessage());
+            return ServiceUtils.fail("Step " + how, e);
         }
     }
 
@@ -875,7 +870,7 @@ public class DebuggerService {
                     "type", "SW_EXECUTE",
                     "status", "set"));
         } catch (Exception e) {
-            return Response.err("Failed to set breakpoint: " + e.getMessage());
+            return ServiceUtils.fail("set breakpoint", e);
         }
     }
 
@@ -918,7 +913,7 @@ public class DebuggerService {
             future.get(ACTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             return Response.ok(Map.of("address", addr.toString(), "status", "removed"));
         } catch (Exception e) {
-            return Response.err("Failed to remove breakpoint: " + e.getMessage());
+            return ServiceUtils.fail("remove breakpoint", e);
         }
     }
 
@@ -952,7 +947,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list breakpoints: " + e.getMessage());
+            return ServiceUtils.fail("list breakpoints", e);
         }
     }
 
@@ -1016,7 +1011,7 @@ public class DebuggerService {
             }
             return Response.ok(regs);
         } catch (Exception e) {
-            return Response.err("Failed to read registers: " + e.getMessage());
+            return ServiceUtils.fail("read registers", e);
         }
     }
 
@@ -1077,7 +1072,7 @@ public class DebuggerService {
             result.put("dwords", dwords);
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to read memory: " + e.getMessage());
+            return ServiceUtils.fail("read memory", e);
         }
     }
 
@@ -1132,7 +1127,7 @@ public class DebuggerService {
             }
             return Response.ok(frames);
         } catch (Exception e) {
-            return Response.err("Failed to get stack trace: " + e.getMessage());
+            return ServiceUtils.fail("get stack trace", e);
         }
     }
 
@@ -1167,7 +1162,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list modules: " + e.getMessage());
+            return ServiceUtils.fail("list modules", e);
         }
     }
 
@@ -1182,7 +1177,7 @@ public class DebuggerService {
             @Param(value = "address", paramType = "address",
                     description = "Static address from a Ghidra program") String addressStr,
             @Param(value = "program", defaultValue = "",
-                    description = "Program name for context") String programName) {
+                    description = "Program name for context") Program program) {
         TraceContext ctx = getContext();
         if (ctx == null) return noTrace();
 
@@ -1193,11 +1188,6 @@ public class DebuggerService {
         }
 
         try {
-            ServiceUtils.ProgramOrError pe =
-                    ServiceUtils.getProgramOrError(programProvider, programName);
-            if (pe.hasError()) return pe.error();
-            ghidra.program.model.listing.Program program = pe.program();
-
             Address staticAddr = program.getAddressFactory().getAddress(
                     addressStr.startsWith("0x") ? addressStr.substring(2) : addressStr);
             if (staticAddr == null) {
@@ -1228,7 +1218,7 @@ public class DebuggerService {
                     "dynamic_address", dynLoc.getAddress().toString(),
                     "program", program.getName()));
         } catch (Exception e) {
-            return Response.err("Address translation failed: " + e.getMessage());
+            return ServiceUtils.fail("Address translation", e);
         }
     }
 
@@ -1278,7 +1268,7 @@ public class DebuggerService {
                     "note", "Use the module name and offset to find the " +
                             "corresponding address in the Ghidra program"));
         } catch (Exception e) {
-            return Response.err("Address translation failed: " + e.getMessage());
+            return ServiceUtils.fail("Address translation", e);
         }
     }
 
@@ -1290,7 +1280,7 @@ public class DebuggerService {
             description = "List available debugger launch/attach options for the current program", access = ToolAccess.READ_ONLY)
     public Response listLaunchOffers(
             @Param(value = "program", defaultValue = "",
-                    description = "Program to get offers for") String programName) {
+                    description = "Program to get offers for") Program program) {
         PluginTool tool = getDebuggerTool();
         if (tool == null) return noDebugger();
 
@@ -1301,11 +1291,6 @@ public class DebuggerService {
         }
 
         try {
-            ServiceUtils.ProgramOrError pe =
-                    ServiceUtils.getProgramOrError(programProvider, programName);
-            if (pe.hasError()) return pe.error();
-            ghidra.program.model.listing.Program program = pe.program();
-
             var offers = launcherSvc.getOffers(program);
             List<Map<String, Object>> result = new ArrayList<>();
             for (var offer : offers) {
@@ -1322,7 +1307,7 @@ public class DebuggerService {
             }
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("Failed to list launch offers: " + e.getMessage());
+            return ServiceUtils.fail("list launch offers", e);
         }
     }
 }

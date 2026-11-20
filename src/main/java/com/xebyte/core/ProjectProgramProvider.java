@@ -1,5 +1,7 @@
 package com.xebyte.core;
 
+import com.xebyte.core.tree.DecompTree;
+import com.xebyte.core.tree.TreeRegistry;
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
@@ -79,6 +81,8 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     protected ProjectProgramProvider(Object consumer, boolean okToUpgrade) {
         this.consumer = consumer != null ? consumer : this;
         this.okToUpgrade = okToUpgrade;
+        // DirtyQueue re-resolves Programs through us; an observer must never hold one.
+        TreeRegistry.getInstance().setProgramLookup(this::lookupForDecompTree);
     }
 
     private static int resolveMaxCachedPrograms() {
@@ -285,7 +289,12 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
             return null;
         }
         if (s.startsWith("/")) {
-            return data.getFile(s);
+            try {
+                return ProjectPaths.file(project, s);
+            } catch (Refusal r) {
+                // Soft miss: open-by-path treats invalid/out-of-scope/missing the same.
+                return null;
+            }
         }
         List<DomainFile> exactCase = new ArrayList<>();
         List<DomainFile> anyCase = new ArrayList<>();
@@ -352,6 +361,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
         }
         cachePut(key, program);
         onOpened(program);
+        maybeAttachTreeObserver(program);
         Msg.info(this, "Opened program from project: " + key);
         return program;
     }
@@ -452,6 +462,7 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
             if (save) {
                 ProgramSaves.saveIfChanged(program, monitor);
             }
+            detachTreeObservers(program);
             program.release(consumer);
             onReleased(program);
             Msg.info(this, "Released program: " + key);
@@ -483,16 +494,20 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
     public Imported importFile(java.io.File file, String folder, String languageId,
             String compilerSpecId) throws Exception {
         Project project = project();
-        String dest = folder == null || folder.isBlank() ? "/" : folder.trim();
+        String dest = folder == null || folder.isBlank() ? "/" : folder;
         String language = languageId == null ? "" : languageId.trim();
         String compiler = compilerSpecId == null ? "" : compilerSpecId.trim();
 
         if (project != null) {
-            ghidra.framework.model.DomainFolder target = project.getProjectData().getFolder(dest);
-            DomainFile existing = target != null ? target.getFile(file.getName()) : null;
+            // Normalize + scope (+ create missing) before the importer sees the path.
+            ghidra.framework.model.DomainFolder target = ProjectPaths.folder(project, dest, true);
+            dest = target.getPathname();
+            DomainFile existing = target.getFile(file.getName());
             if (existing != null) {
                 return new Imported(openDomainFile(existing), true);
             }
+        } else {
+            dest = ProjectPaths.normalize(dest);
         }
 
         ghidra.app.util.importer.MessageLog log = new ghidra.app.util.importer.MessageLog();
@@ -685,6 +700,32 @@ public abstract class ProjectProgramProvider implements ProgramProvider {
                 return null;
             }
         }
+        maybeAttachTreeObserver(resolved);
         return resolved;
+    }
+
+    // ------------------------------------------------------ checkout observers
+
+    /** Domain path first (version-safe), then name -- the order DecompTreeService polls in. */
+    private Program lookupForDecompTree(DecompTree decompTree) {
+        if (decompTree == null) {
+            return null;
+        }
+        try {
+            Program byPath = resolve(decompTree.domainPath());
+            return byPath != null ? byPath : resolve(decompTree.programName());
+        } catch (AmbiguousProgramException e) {
+            return null;
+        }
+    }
+
+    private static void maybeAttachTreeObserver(Program program) {
+        TreeRegistry.getInstance().programOpened(program);
+    }
+
+    private static void detachTreeObservers(Program program) {
+        if (program != null) {
+            TreeRegistry.getInstance().detachObservers(program);
+        }
     }
 }

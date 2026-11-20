@@ -7,8 +7,14 @@ import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.TaskMonitorAdapter;
 
 import java.io.IOException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Saving a program without losing to Ghidra's own background analysis.
@@ -77,26 +83,103 @@ public final class ProgramSaves {
         void run() throws IOException, CancelledException;
     }
 
-    /** Wait for pending auto-analysis, unless this thread is already waiting. Best-effort. */
-    public static void awaitAnalysis(Program program) {
-        if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
-            return;
-        }
-        IN_ANALYSIS_WAIT.set(Boolean.TRUE);
-        try {
-            AutoAnalysisManager.getAnalysisManager(program).waitForAnalysis(null, TaskMonitor.DUMMY);
-        } catch (Exception | LinkageError e) {
-            // Let the save itself surface any real failure rather than mask it here.
-            Msg.warn(ProgramSaves.class, "Waiting for analysis failed, saving anyway: " + e.getMessage());
-        } finally {
-            IN_ANALYSIS_WAIT.set(Boolean.FALSE);
-        }
+    /**
+     * How long a save waits for analysis before saving anyway.
+     *
+     * <p>{@code waitForAnalysis} in a tool queues a "Wait for Analysis" command on the
+     * analysis tool and then calls {@code cmd.wait()} with no timeout. If that tool never
+     * runs the command, the caller waits forever. Measured from a thread dump on 2026-10-27:
+     * three {@code save_program} calls, each parked there at ~0 CPU with no analysis thread
+     * alive -- the whole 3-thread HTTP pool, so even {@code /mcp/health} hung until Ghidra
+     * restarted. (Not the 2026-08-11 recursion; {@link #IN_ANALYSIS_WAIT} holds.) The wait
+     * only narrows a race {@link #withRetry} already retries, so it must never outlive this.
+     */
+    static final long SAVE_ANALYSIS_WAIT_MS = 20_000L;
+
+    private static final ScheduledExecutorService WAIT_TIMER =
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "GhidraMCP-AnalysisWaitTimer");
+            t.setDaemon(true);
+            return t;
+        });
+
+    /** One wait for analysis, given a monitor that cancelling must release. */
+    @FunctionalInterface
+    interface AnalysisWait {
+        void await(TaskMonitor monitor) throws Exception;
     }
 
-    /** Run {@code save}, waiting for analysis first and retrying the lock race. */
+    /**
+     * Wait for pending auto-analysis, unless this thread is already waiting. Best-effort.
+     *
+     * <p>Unbounded: for callers that started analysis themselves and need it finished
+     * (the import/auto-analyze path). A save must use {@link #withRetry}, which bounds it.
+     */
+    public static void awaitAnalysis(Program program) {
+        awaitAnalysis(program, 0L);
+    }
+
+    /**
+     * Wait at most {@code timeoutMs} (0 = no bound) for pending auto-analysis.
+     *
+     * @return false only when the bound expired and the wait was abandoned
+     */
+    static boolean awaitAnalysis(Program program, long timeoutMs) {
+        return boundedWait(
+            monitor -> AutoAnalysisManager.getAnalysisManager(program).waitForAnalysis(null, monitor),
+            timeoutMs);
+    }
+
+    /**
+     * Run {@code wait} under {@link #IN_ANALYSIS_WAIT}, cancelling its monitor after
+     * {@code timeoutMs}. Cancelling is what releases {@code scheduleWorker}: the queued
+     * command listens to the monitor and wakes the waiter, so the monitor must be
+     * cancel-enabled -- {@code TaskMonitor.DUMMY} is not, which is why the old call could
+     * not be released by anything.
+     */
+    static boolean boundedWait(AnalysisWait wait, long timeoutMs) {
+        if (Boolean.TRUE.equals(IN_ANALYSIS_WAIT.get())) {
+            return true;
+        }
+        IN_ANALYSIS_WAIT.set(Boolean.TRUE);
+        TaskMonitor monitor = new TaskMonitorAdapter(true);
+        AtomicBoolean timedOut = new AtomicBoolean();
+        ScheduledFuture<?> timer = timeoutMs > 0
+            ? WAIT_TIMER.schedule(() -> {
+                timedOut.set(true);
+                monitor.cancel();
+            }, timeoutMs, TimeUnit.MILLISECONDS)
+            : null;
+        try {
+            wait.await(monitor);
+        } catch (Exception | LinkageError e) {
+            if (!timedOut.get()) {
+                // Let the save itself surface any real failure rather than mask it here.
+                Msg.warn(ProgramSaves.class, "Waiting for analysis failed, saving anyway: " + e.getMessage());
+            }
+        } finally {
+            if (timer != null) {
+                timer.cancel(false);
+            }
+            IN_ANALYSIS_WAIT.set(Boolean.FALSE);
+        }
+        if (timedOut.get()) {
+            Msg.warn(ProgramSaves.class, "Auto-analysis did not finish within " + timeoutMs
+                + " ms (Ghidra's analysis tool never ran the wait); saving anyway");
+            return false;
+        }
+        return true;
+    }
+
+    /** Run {@code save}, waiting (bounded) for analysis first and retrying the lock race. */
     public static void withRetry(Program program, Save save) throws IOException, CancelledException {
+        boolean waitable = true;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            awaitAnalysis(program);
+            // One abandoned wait means the analysis tool is not running waits at all;
+            // another would only cost the same bound again for nothing.
+            if (waitable) {
+                waitable = awaitAnalysis(program, SAVE_ANALYSIS_WAIT_MS);
+            }
             try {
                 save.run();
                 return;

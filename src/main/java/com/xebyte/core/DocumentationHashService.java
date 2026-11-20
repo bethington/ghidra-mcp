@@ -15,8 +15,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -61,12 +59,12 @@ public class DocumentationHashService {
     @McpTool(path = "/get_function_hash", description = "Compute the normalized opcode hash of ONE function (function=), or of MANY in one call by omitting it: every function, paged, optionally only the documented or undocumented ones (filter=). On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionHash(
             @Param(value = "function", paramType = Param.FUNCTION_REF, defaultValue = "",
-                   description = "Function to hash: a name, or an address as 0x<hex> (default space) or "
+                   description = "Function name or any address within the function to hash: a name, or an address as 0x<hex> (default space) or "
                                + "<space>:<hex> (e.g., mem:1000, code:ff00). Some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous. Omit to hash many functions (offset, limit, "
-                               + "filter).") String functionAddress,
+                               + "filter).") Function func,
             @Param(value = "offset", defaultValue = "0",
                    description = "Bulk mode: number of matching functions to skip before this page "
                                + "starts; 0 begins at the first. The filter is applied before the skip, "
@@ -80,25 +78,13 @@ public class DocumentationHashService {
                    description = "Bulk mode: `documented` keeps functions with a real name, "
                                + "`undocumented` keeps auto-named ones (FUN_*, and names starting "
                                + "with `switch`). Omit for all.") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
-        if (functionAddress == null || functionAddress.trim().isEmpty()) {
+        if (func == null) {
             return getFunctionHashes(program, offset, limit, filter);
         }
 
         try {
-            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
-            }
 
             String hash = computeNormalizedFunctionHash(program, func);
             int instructionCount = countFunctionInstructions(program, func);
@@ -106,7 +92,7 @@ public class DocumentationHashService {
 
             Map<String, Object> hashResult = new LinkedHashMap<>();
             hashResult.put("function_name", func.getName());
-            hashResult.putAll(ServiceUtils.addressToJson(addr, program));
+            hashResult.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
             hashResult.put("hash", hash);
             hashResult.put("instruction_count", instructionCount);
             hashResult.put("size_bytes", functionSize);
@@ -114,7 +100,7 @@ public class DocumentationHashService {
             hashResult.put("program", program.getName());
             return Response.ok(hashResult);
         } catch (Exception e) {
-            return Response.err("Failed to compute hash: " + e.getMessage());
+            return ServiceUtils.fail("compute hash", e);
         }
     }
 
@@ -291,7 +277,7 @@ public class DocumentationHashService {
                 "total_matching", total
             ));
         } catch (Exception e) {
-            return Response.err("Failed to get bulk hashes: " + e.getMessage());
+            return ServiceUtils.fail("get bulk hashes", e);
         }
     }
 
@@ -302,32 +288,20 @@ public class DocumentationHashService {
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
      */
-    public Response getFunctionDocumentation(String functionAddress) {
-        return getFunctionDocumentation(functionAddress, null);
-    }
 
     @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. Prefer /get_functions when you want decompile + docs + callers in one read. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response getFunctionDocumentation(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                   description = "Function name or any address within the function. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+                               + "address is unambiguous.") Function func,
+            @Param(value = "program", defaultValue = "") Program program) {
 
         try {
-            Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("function is required");
             }
 
             // Compute hash for matching
@@ -420,7 +394,7 @@ public class DocumentationHashService {
             return Response.ok(JsonHelper.mapOf(
                 "hash", hash,
                 "source_program", program.getName(),
-                "source_address", addr.toString(),
+                "source_address", func.getEntryPoint().toString(),
                 "function_name", func.getName(),
                 "return_type", func.getReturnType().getName(),
                 "calling_convention", func.getCallingConventionName() != null ? func.getCallingConventionName() : "",
@@ -433,7 +407,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err("Failed to export documentation: " + e.getMessage());
+            return ServiceUtils.fail("export documentation", e);
         }
     }
 
@@ -468,17 +442,13 @@ public class DocumentationHashService {
      * Compare documentation status across all open programs.
      * Returns documented/undocumented function counts for each program.
      */
-    public Response compareProgramsDocumentation() {
-        return compareProgramsDocumentation(null);
-    }
 
     @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response compareProgramsDocumentation(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
-            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-            Program currentProgram = pe.program(); // may be null if no program loaded, that's ok here
+            Program currentProgram = program;
 
             if (allPrograms == null || allPrograms.length == 0) {
                 return Response.err("No programs are open");
@@ -519,7 +489,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -534,22 +504,14 @@ public class DocumentationHashService {
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String stringAddress,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        if (stringAddress == null || stringAddress.isEmpty()) {
+                               + "address is unambiguous.") Address addr,
+            @Param(value = "program", defaultValue = "") Program program) {
+        if (addr == null) {
             return Response.err("String address is required");
         }
 
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, stringAddress);
-            if (addr == null) {
-                return Response.err(ServiceUtils.getLastParseError());
-            }
-
             ReferenceManager refMgr = program.getReferenceManager();
             FunctionManager funcMgr = program.getFunctionManager();
 
@@ -590,7 +552,7 @@ public class DocumentationHashService {
             }
 
             return Response.ok(JsonHelper.mapOf(
-                "string_address", stringAddress,
+                "string_address", addr.toString(),
                 "undocumented_functions", undocumentedList,
                 "undocumented_count", undocCount,
                 "documented_count", docCount,
@@ -598,7 +560,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -609,11 +571,7 @@ public class DocumentationHashService {
     @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response batchStringAnchorReport(
             @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             Listing listing = program.getListing();
             ReferenceManager refMgr = program.getReferenceManager();
@@ -695,7 +653,7 @@ public class DocumentationHashService {
             ));
 
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -714,26 +672,13 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
-            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "source_program", defaultValue = "", description = "Source program name") Program srcProgram,
+            @Param(value = "target_program", description = "Target program name") Program tgtProgram,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
             @Param(value = "limit", defaultValue = "20",
                    description = "Maximum matches returned, highest similarity first (default 20). It "
                                + "truncates the result only: every candidate in the target program is still "
                                + "scored, so a small limit does not make the call cheaper.") int limit) {
-        // Source program: use sourceProgramName if given, otherwise current program
-        ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
-        if (srcPe.hasError()) return srcPe.error();
-        Program srcProgram = srcPe.program();
-
-        // Target program is required
-        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return Response.err("target_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError tgtPe = ServiceUtils.getProgramOrError(programProvider, targetProgramName);
-        if (tgtPe.hasError()) return tgtPe.error();
-        Program tgtProgram = tgtPe.program();
-
         try {
             Address addr = ServiceUtils.resolveFunctionAddress(srcProgram, addressStr);
             if (addr == null) return Response.err(ServiceUtils.getLastParseError());
@@ -744,7 +689,7 @@ public class DocumentationHashService {
             return BinaryComparisonService.findSimilarFunctionsJson(
                 srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -753,8 +698,8 @@ public class DocumentationHashService {
      */
     @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation", access = ToolAccess.READ_ONLY)
     public Response handleBulkFuzzyMatch(
-            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
-            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "source_program", description = "Source program name") Program srcProgram,
+            @Param(value = "target_program", description = "Target program name") Program tgtProgram,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of SOURCE functions to skip before this page starts; 0 begins at "
@@ -766,25 +711,11 @@ public class DocumentationHashService {
                                + "total_source_functions reports the full count to page "
                                + "against.") int limit,
             @Param(value = "filter", description = "Name filter") String filter) {
-        if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
-            return Response.err("source_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
-        if (srcPe.hasError()) return srcPe.error();
-        Program srcProgram = srcPe.program();
-
-        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return Response.err("target_program parameter is required");
-        }
-        ServiceUtils.ProgramOrError tgtPe = ServiceUtils.getProgramOrError(programProvider, targetProgramName);
-        if (tgtPe.hasError()) return tgtPe.error();
-        Program tgtProgram = tgtPe.program();
-
         try {
             return BinaryComparisonService.bulkFuzzyMatchJson(
                 srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -805,23 +736,8 @@ public class DocumentationHashService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressB,
-            @Param(value = "program_a", description = "First program name") String programAName,
-            @Param(value = "program_b", description = "Second program name") String programBName) {
-        // Program A
-        ServiceUtils.ProgramOrError peA = ServiceUtils.getProgramOrError(programProvider, programAName);
-        if (peA.hasError()) return peA.error();
-        Program progA = peA.program();
-
-        // Program B defaults to Program A if not specified
-        Program progB;
-        if (programBName == null || programBName.trim().isEmpty()) {
-            progB = progA;
-        } else {
-            ServiceUtils.ProgramOrError peB = ServiceUtils.getProgramOrError(programProvider, programBName);
-            if (peB.hasError()) return peB.error();
-            progB = peB.program();
-        }
-
+            @Param(value = "program_a", defaultValue = "", description = "First program name") Program progA,
+            @Param(value = "program_b", defaultValue = "", description = "Second program name") Program progB) {
         try {
             Address addrA = ServiceUtils.parseAddress(progA, addressA);
             if (addrA == null) return Response.err(ServiceUtils.getLastParseError());
@@ -837,7 +753,7 @@ public class DocumentationHashService {
 
             return BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor());
         } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 
@@ -866,19 +782,11 @@ public class DocumentationHashService {
         category = "documentation", access = ToolAccess.WRITE)
     public Response mergeProgramDocumentation(
             @Param(value = "source", source = ParamSource.BODY,
-                description = "Source program path or name (read-only — the rescued copy)") String sourceName,
+                description = "Source program path or name (read-only — the rescued copy)") Program source,
             @Param(value = "target", source = ParamSource.BODY,
-                description = "Target program path or name (writes go here — the original .dll)") String targetName,
+                description = "Target program path or name (writes go here — the original .dll)") Program target,
             @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
                 description = "If true, count what would be merged without writing") boolean dryRun) {
-        if (sourceName == null || sourceName.isEmpty()) return Response.err("source is required");
-        if (targetName == null || targetName.isEmpty()) return Response.err("target is required");
-        if (sourceName.equals(targetName)) return Response.err("source and target must differ");
-
-        Program source = programProvider.getProgram(sourceName);
-        if (source == null) return Response.err("Source program not found: " + sourceName);
-        Program target = programProvider.getProgram(targetName);
-        if (target == null) return Response.err("Target program not found: " + targetName);
         if (source == target) return Response.err("source and target resolved to same Program object");
 
         // Counters: each pair tracks (planned_or_seen, actually_applied)
@@ -892,13 +800,13 @@ public class DocumentationHashService {
             "labels", "globals", "external_locations", "bookmarks", "equates"
         };
         for (String k : keys) c.put(k, new int[2]);
-        final AtomicInteger errors = new AtomicInteger();
-        final AtomicReference<String> errorMsg = new AtomicReference<>();
 
-        Runnable mergeTask = () -> {
-            // Dry run writes nothing, so it needs no transaction at all.
-            WriteTx tx = dryRun ? null : WriteTx.begin(target, "Merge from " + source.getName());
-            boolean commit = false;
+        record MergeOutcome(int errors, String errorMsg) {}
+
+        java.util.concurrent.Callable<MergeOutcome> mergeTask = () -> {
+            // Soft per-item merge failures accumulate here and are returned in MergeOutcome.
+            int errors = 0;
+            String errorMsg = null;
             try {
                 // ----- 1. Standalone data types (must precede signature/data def merges) -----
                 ghidra.program.model.data.DataTypeManager srcDtm = source.getDataTypeManager();
@@ -914,7 +822,7 @@ public class DocumentationHashService {
                         try {
                             tgtDtm.resolve(srcDt, ghidra.program.model.data.DataTypeConflictHandler.REPLACE_HANDLER);
                             cc[1]++;
-                        } catch (Throwable t) { errors.incrementAndGet(); }
+                        } catch (Throwable t) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -932,7 +840,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_names"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setName(srcFnName, SourceType.USER_DEFINED); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -946,7 +854,7 @@ public class DocumentationHashService {
                                 try {
                                     ghidra.program.util.FunctionUtility.updateFunction(tgtFn, srcFn);
                                     cc[1]++;
-                                } catch (Throwable t) { errors.incrementAndGet(); }
+                                } catch (Throwable t) { errors++; }
                             } else { cc[1]++; }
                         }
                     } catch (Exception ignored) {}
@@ -958,7 +866,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_plate_comments"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setComment(srcPlate); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -969,7 +877,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_calling_conventions"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setCallingConvention(srcCc); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -978,7 +886,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_no_return_flags"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.setNoReturn(srcFn.hasNoReturn()); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -992,7 +900,7 @@ public class DocumentationHashService {
                         int[] cc = c.get("function_tags"); cc[0]++;
                         if (!dryRun) {
                             try { tgtFn.addTag(t.getName()); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
 
@@ -1022,7 +930,7 @@ public class DocumentationHashService {
                                 if (nameDiffers) tgtVar.setName(srcVar.getName(), SourceType.USER_DEFINED);
                                 if (typeDiffers) tgtVar.setDataType(srcVar.getDataType(), SourceType.USER_DEFINED);
                                 cc[1]++;
-                            } catch (Exception e) { errors.incrementAndGet(); }
+                            } catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                 }
@@ -1050,7 +958,7 @@ public class DocumentationHashService {
                         int[] cc = c.get(key); cc[0]++;
                         if (!dryRun) {
                             try { tgtListing.setComment(addr, ct, srcCmt); cc[1]++; }
-                            catch (Exception e) { errors.incrementAndGet(); }
+                            catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                     // Plate comments at non-function addresses (handled separately above for functions)
@@ -1062,7 +970,7 @@ public class DocumentationHashService {
                                 int[] cc = c.get("data_plate_comments"); cc[0]++;
                                 if (!dryRun) {
                                     try { tgtListing.setComment(addr, CodeUnit.PLATE_COMMENT, srcPlate); cc[1]++; }
-                                    catch (Exception e) { errors.incrementAndGet(); }
+                                    catch (Exception e) { errors++; }
                                 } else { cc[1]++; }
                             }
                         }
@@ -1087,7 +995,7 @@ public class DocumentationHashService {
                     ghidra.program.model.symbol.Namespace tgtNs;
                     try {
                         tgtNs = resolveNamespace(target, srcSym.getParentNamespace(), dryRun);
-                    } catch (Exception e) { errors.incrementAndGet(); continue; }
+                    } catch (Exception e) { errors++; continue; }
 
                     // Check existence by (name, namespace) at this address
                     boolean exists = false;
@@ -1104,7 +1012,7 @@ public class DocumentationHashService {
                         try {
                             tgtSt.createLabel(addr, name, tgtNs, SourceType.USER_DEFINED);
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1136,7 +1044,7 @@ public class DocumentationHashService {
                             }
                             tgtListing.createData(addr, resolved);
                             cc[1]++;
-                        } catch (Throwable t) { errors.incrementAndGet(); }
+                        } catch (Throwable t) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1171,7 +1079,7 @@ public class DocumentationHashService {
                             try {
                                 tgtExt.setName(tgtExt.getParentNameSpace(), srcExtName, SourceType.USER_DEFINED);
                                 cc[1]++;
-                            } catch (Exception e) { errors.incrementAndGet(); }
+                            } catch (Exception e) { errors++; }
                         } else { cc[1]++; }
                     }
                 }
@@ -1203,7 +1111,7 @@ public class DocumentationHashService {
                         try {
                             tgtBm.setBookmark(addr, type, category != null ? category : "", comment != null ? comment : "");
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
@@ -1230,7 +1138,7 @@ public class DocumentationHashService {
                             int[] cc = c.get("equates"); cc[0]++;
                             if (!dryRun) {
                                 try { tgtEq.addReference(refAddr, opIndex); cc[1]++; }
-                                catch (Exception e) { errors.incrementAndGet(); }
+                                catch (Exception e) { errors++; }
                             } else { cc[1]++; }
                         }
                         continue;
@@ -1246,24 +1154,35 @@ public class DocumentationHashService {
                                 catch (Exception ignored) {}
                             }
                             cc[1]++;
-                        } catch (Exception e) { errors.incrementAndGet(); }
+                        } catch (Exception e) { errors++; }
                     } else { cc[1]++; }
                 }
 
-                commit = true;
             } catch (Throwable t) {
-                errorMsg.set(t.getClass().getSimpleName() + ": " + t.getMessage());
-            } finally {
-                if (tx != null) tx.end(commit);
+                errorMsg = ServiceUtils.failureMessage(t);
             }
+            return new MergeOutcome(errors, errorMsg);
         };
 
+        MergeOutcome outcome;
         try {
-            threadingStrategy.runOnUi(mergeTask);
+            if (dryRun) {
+                outcome = mergeTask.call();
+            } else {
+                outcome = threadingStrategy.executeWrite(target, "Merge from " + source.getName(), () -> {
+                    MergeOutcome o = mergeTask.call();
+                    if (o.errorMsg() != null) {
+                        throw new Refusal(o.errorMsg());
+                    }
+                    return o;
+                });
+            }
+        } catch (Refusal r) {
+            return Response.err(r.getMessage());
         } catch (Throwable t) {
-            return Response.err("Merge invocation failed: " + t.getMessage());
+            return ServiceUtils.fail("Merge invocation", t);
         }
-        if (errorMsg.get() != null) return Response.err(errorMsg.get());
+        if (outcome.errorMsg() != null) return Response.err(outcome.errorMsg());
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("dry_run", dryRun);
@@ -1275,7 +1194,7 @@ public class DocumentationHashService {
             int[] cc = c.get(k);
             resp.put(k, JsonHelper.mapOf("planned", cc[0], "applied", cc[1]));
         }
-        resp.put("errors", errors.get());
+        resp.put("errors", outcome.errors());
         return Response.ok(resp);
     }
 
@@ -1372,9 +1291,8 @@ public class DocumentationHashService {
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestFunction(
             @Param(value = "function", paramType = Param.FUNCTION_REF,
-                description = "Function entry-point address (Ghidra hex form)") String functionAddress,
-            @Param(value = "program",
-                description = "Target program path/name", defaultValue = "") String programName,
+                description = "Function name or any address within the function (entry-point address, Ghidra hex form)") Function fn,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
@@ -1383,14 +1301,8 @@ public class DocumentationHashService {
         if (!dryRun && getArchiveUrl().isEmpty()) {
             return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
-        Address addr = ServiceUtils.resolveFunctionAddress(program, functionAddress);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-        Function fn = program.getFunctionManager().getFunctionAt(addr);
-        if (fn == null) return Response.err("No function at address: " + functionAddress);
+        if (fn == null) return Response.err("function is required");
 
         String version = (versionOverride != null && !versionOverride.isEmpty())
             ? versionOverride : extractVersion(program);
@@ -1413,7 +1325,7 @@ public class DocumentationHashService {
             result.put("address", payload.get("address"));
             return Response.ok(result);
         } catch (Exception e) {
-            return Response.err("archive POST failed: " + e.getMessage());
+            return ServiceUtils.fail("archive POST", e);
         }
     }
 
@@ -1423,8 +1335,7 @@ public class DocumentationHashService {
             + "per-binary counts (created / updated / conflicts_enqueued / errors).",
         category = "documentation", access = ToolAccess.WRITE)
     public Response archiveIngestProgram(
-            @Param(value = "program",
-                description = "Target program path/name", defaultValue = "") String programName,
+            @Param(value = "program", defaultValue = "") Program program,
             @Param(value = "version_override", source = ParamSource.QUERY,
                 description = "Override the auto-extracted version (e.g. '1.0')",
                 defaultValue = "") String versionOverride,
@@ -1438,29 +1349,25 @@ public class DocumentationHashService {
         if (!dryRun && getArchiveUrl().isEmpty()) {
             return Response.err("archive exchange is disabled; set GHIDRA_MCP_ARCHIVE_URL to opt in");
         }
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         String binaryName = program.getName();
         String version = (versionOverride != null && !versionOverride.isEmpty())
             ? versionOverride : extractVersion(program);
         String runId = "ghidra-mcp-ingest-" + binaryName + "-" + System.currentTimeMillis();
 
-        AtomicInteger total = new AtomicInteger();
-        AtomicInteger created = new AtomicInteger();
-        AtomicInteger updated = new AtomicInteger();
-        AtomicInteger conflicts = new AtomicInteger();
-        AtomicInteger skipped = new AtomicInteger();
-        AtomicInteger errors = new AtomicInteger();
+        int total = 0;
+        int created = 0;
+        int updated = 0;
+        int conflicts = 0;
+        int skipped = 0;
+        int errors = 0;
         List<String> errorList = new ArrayList<>();
 
         for (Function fn : program.getFunctionManager().getFunctions(true)) {
-            if (limit > 0 && total.get() >= limit) break;
-            total.incrementAndGet();
+            if (limit > 0 && total >= limit) break;
+            total++;
 
             if (skipDefault && isDefaultSymbolName(fn.getName())) {
-                skipped.incrementAndGet();
+                skipped++;
                 continue;
             }
 
@@ -1468,20 +1375,20 @@ public class DocumentationHashService {
                 Map<String, Object> payload = buildArchivePayload(program, fn,
                     binaryName, version, runId);
                 if (dryRun) {
-                    created.incrementAndGet();  // would-be
+                    created++;  // would-be
                     continue;
                 }
                 Map<String, Object> result = postToArchive("/v1/doc_archive/upsert", payload);
                 Object createdFlag = result.get("created");
                 if (Boolean.TRUE.equals(createdFlag)) {
-                    created.incrementAndGet();
+                    created++;
                 } else {
-                    updated.incrementAndGet();
+                    updated++;
                 }
                 Number conflictsThis = (Number) result.get("conflicts_enqueued");
-                if (conflictsThis != null) conflicts.addAndGet(conflictsThis.intValue());
+                if (conflictsThis != null) conflicts += conflictsThis.intValue();
             } catch (Exception e) {
-                errors.incrementAndGet();
+                errors++;
                 if (errorList.size() < 10) {
                     errorList.add(fn.getEntryPoint() + " (" + fn.getName() + "): " + e.getMessage());
                 }
@@ -1493,12 +1400,12 @@ public class DocumentationHashService {
             "version",             version,
             "source_run_id",       runId,
             "dry_run",             dryRun,
-            "total_functions",     total.get(),
-            "created",             created.get(),
-            "updated",             updated.get(),
-            "conflicts_enqueued",  conflicts.get(),
-            "skipped_default_named", skipped.get(),
-            "errors",              errors.get(),
+            "total_functions",     total,
+            "created",             created,
+            "updated",             updated,
+            "conflicts_enqueued",  conflicts,
+            "skipped_default_named", skipped,
+            "errors",              errors,
             "first_errors",        errorList,
             "archive_url",         getArchiveUrl()
         ));

@@ -13,7 +13,7 @@ on Windows with the dark theme; the dialogs are the same on Linux and macOS.
 
 One zip file, `GhidraMCP-<version>.zip`, built for the exact Ghidra version you
 run. Ghidra refuses an extension whose stamped version does not match its own,
-so a zip built for 12.1.3 does not load in 12.1.4. Get it from one of:
+so a zip built for 12.1.4 does not load in 12.2. Get it from one of:
 
 | Source | Path |
 | --- | --- |
@@ -33,7 +33,7 @@ A stock Ghidra installation looks like this. You do not put anything in here;
 the extension goes into your user profile, not the installation.
 
 ```text
-ghidra_12.1.4_PUBLIC/
+ghidra_12.2_PUBLIC/
 ├── Extensions/          # Ghidra's own optional extensions (Jython, BSim, ...)
 ├── Ghidra/              # the application
 ├── GPL/

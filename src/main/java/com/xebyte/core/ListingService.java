@@ -15,15 +15,19 @@ import java.util.regex.Pattern;
 
 /**
  * Service for listing and enumeration endpoints.
- * All methods are read-only and do not require transactions.
+ * Inventory reads and equate mutations shared by GUI and headless servers.
  */
 @McpToolGroup(value = "listing", description = "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items")
 public class ListingService {
 
-    private final ProgramProvider programProvider;
+    private final EquateService equates;
 
     public ListingService(ProgramProvider programProvider) {
-        this.programProvider = programProvider;
+        this(programProvider, new com.xebyte.headless.DirectThreadingStrategy());
+    }
+
+    public ListingService(ProgramProvider programProvider, ThreadingStrategy threading) {
+        this.equates = new EquateService(threading);
     }
 
     // ========================================================================
@@ -33,22 +37,24 @@ public class ListingService {
     /** Kinds accepted by {@link #listProgramItems}; unknown values are rejected. */
     private static final Set<String> PROGRAM_ITEM_KINDS = Set.of(
             "classes", "methods", "namespaces", "imports", "exports",
-            "segments", "data_items", "external_locations");
+            "segments", "data_items", "external_locations", "equates");
 
     @McpTool(path = "/list_program_items",
         description = "List one kind of program inventory with pagination. "
             + "Replaces list_classes, list_methods, list_namespaces, list_imports, "
-            + "list_exports, list_segments, list_data_items and list_external_locations — "
+            + "list_exports, list_segments, list_data_items, list_external_locations and list_equates — "
             + "one envelope ({kind, items, count, total, limit, offset}), item shape varies "
             + "by kind: classes|methods|namespaces → string names; imports|exports → "
             + "{address, name}; segments → {name, start, end, size, readable, writable, "
             + "executable, initialized}; data_items → {address, block, label, size, type}; "
-            + "external_locations → {name, library, address, original_imported_name?}. "
-            + "Unknown kind is an error listing the valid values.",
+            + "external_locations → {name, library, address, original_imported_name?}; "
+            + "equates -> {name, value, display_value, reference_count, enum_based, references?}, "
+            + "where references are {address, operand_index}. Equate filters: value, name_contains, "
+            + "address, include_references. Unknown kind is an error listing the valid values.",
         category = "listing", access = ToolAccess.READ_ONLY)
     public Response listProgramItems(
             @Param(value = "kind", description = "classes | methods | namespaces | imports | "
-                        + "exports | segments | data_items | external_locations") String kind,
+                        + "exports | segments | data_items | external_locations | equates") String kind,
             @Param(value = "offset", defaultValue = "0",
                    description = "Number of entries to skip before this page starts; 0 begins at the "
                                + "first entry. Page by adding `limit` each call until offset reaches the "
@@ -57,20 +63,31 @@ public class ListingService {
                    description = "Maximum entries returned in this page (default 100). Pass 0 or a "
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "value", defaultValue = "",
+                   description = "Equates only: decimal, 0x hex, or single character literal") String value,
+            @Param(value = "name_contains", defaultValue = "",
+                   description = "Equates only: case-insensitive name substring") String nameContains,
+            @Param(value = "address", paramType = Param.ADDRESS, defaultValue = "",
+                   description = "Equates only: include definitions referenced at this address") Address address,
+            @Param(value = "include_references", defaultValue = "false",
+                   description = "Equates only: include address/operand_index references") boolean includeReferences,
+            @Param(value = "program", defaultValue = "") Program program) {
         if (kind == null || kind.isBlank()) {
             return Response.err("kind parameter is required");
         }
-        String normalized = kind.trim().toLowerCase();
+        String normalized = kind.trim().toLowerCase(Locale.ROOT);
         if (!PROGRAM_ITEM_KINDS.contains(normalized)) {
             return Response.err("Unknown kind: " + kind + ". Valid kinds: "
                     + String.join(", ", PROGRAM_ITEM_KINDS));
         }
 
+        if ("equates".equals(normalized)) {
+            return equates.list(program, value, nameContains, address, includeReferences, offset, limit);
+        }
+        if ((value != null && !value.isBlank()) || (nameContains != null && !nameContains.isBlank())
+                || address != null || includeReferences) {
+            return Response.err("value, name_contains, address and include_references require kind=equates");
+        }
         List<?> all = switch (normalized) {
             case "classes" -> collectClassNames(program);
             case "methods" -> collectMethodNames(program);
@@ -83,6 +100,11 @@ public class ListingService {
             default -> List.of();
         };
         return ServiceUtils.pagedProgramItems(normalized, all, offset, limit);
+    }
+
+    /** Source compatibility for callers of the original unfiltered inventory API. */
+    public Response listProgramItems(String kind, int offset, int limit, Program program) {
+        return listProgramItems(kind, offset, limit, null, null, null, false, program);
     }
 
     private List<String> collectMethodNames(Program program) {
@@ -245,11 +267,7 @@ public class ListingService {
                    description = "When undefined items are included, only return addresses with at least this many xrefs. Default 1 suppresses padding/alignment noise; set to 0 for the firehose.") int minXrefs,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned. Pass true to include every memory section.") boolean includeAllSections,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         String fSym = (filter == null || filter.isEmpty()) ? "defined" : filter.toLowerCase();
         String fType = (typeFilter == null || typeFilter.isEmpty()) ? "all" : typeFilter.toLowerCase();
         int xrefMin = Math.max(0, minXrefs);
@@ -322,15 +340,6 @@ public class ListingService {
         return formatDataItems(dataItems, offset, limit);
     }
 
-    /** Backward-compat overload preserving the pre-5.7.x signature (no
-     *  filter axes, no min_xrefs). Defaults exactly match the legacy
-     *  behavior — defined data only, no axis filtering. */
-    public Response listDataItemsByXrefs(int offset, int limit, String format,
-                                         String programName) {
-        return listDataItemsByXrefs(offset, limit, format,
-                "defined", "all", 1, false, programName);
-    }
-
     @McpTool(path = "/find_functions",
         description = "Find functions: every filter is optional, so with none it lists the whole "
             + "program a page at a time. Filter by name (substring or regex=true), xref count, "
@@ -374,13 +383,7 @@ public class ListingService {
                    description = "Page size. 0 means no limit, which on a large binary is a "
                                + "megabytes-long response — the old list_functions had no "
                                + "pagination at all and returned 1.7MB on a stripped `ls`.") int limit,
-            @Param(value = "program", defaultValue = "",
-                   description = "Target program name (omit to use the active program — always "
-                               + "specify when multiple programs are open)") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         Pattern pattern = null;
         if (regex && namePattern != null && !namePattern.isEmpty()) {
             try {
@@ -390,12 +393,7 @@ public class ListingService {
             }
         }
 
-        Set<String> wantedTags = new java.util.LinkedHashSet<>();
-        if (tagFilter != null) {
-            for (String part : tagFilter.split(",")) {
-                if (!part.trim().isEmpty()) wantedTags.add(part.trim());
-            }
-        }
+        Set<String> wantedTags = new java.util.LinkedHashSet<>(ServiceUtils.csvTokens(tagFilter));
         var tagManager = program.getFunctionManager().getFunctionTagManager();
         for (String wanted : wantedTags) {
             if (tagManager.getFunctionTag(wanted) == null) {
@@ -480,11 +478,7 @@ public class ListingService {
 
     @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing", access = ToolAccess.READ_ONLY)
     public Response listCallingConventions(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         try {
             ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
             ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
@@ -495,7 +489,7 @@ public class ListingService {
             }
             return ServiceUtils.listed("calling_conventions", names);
         } catch (Exception e) {
-            return Response.err("Error listing calling conventions: " + e.getMessage());
+            return Response.err("Error listing calling conventions: " + ServiceUtils.failureMessage(e));
         }
     }
 
@@ -510,11 +504,7 @@ public class ListingService {
                                + "negative value for no limit; `total` in the response always reports the "
                                + "full unpaged count.") int limit,
             @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> strings = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
 
@@ -545,11 +535,7 @@ public class ListingService {
 
     @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getFunctionCount(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         int count = program.getFunctionManager().getFunctionCount();
         return Response.ok(JsonHelper.mapOf(
                 "function_count", count,
@@ -574,11 +560,7 @@ public class ListingService {
                    description = "Maximum matches returned in this page (default 100). `total` in the "
                                + "response reports how many matched before paging. Unlike the paged list "
                                + "endpoints, 0 here returns an EMPTY page rather than everything.") int limit,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         if (query == null || query.isEmpty()) return Response.err("search_term parameter is required");
 
         Pattern pat;
@@ -636,11 +618,7 @@ public class ListingService {
                    description = "By default only data sections (.data/.rdata/.bss and similar) are scanned. Pass true to include every memory section (rare — picks up .text gaps which are usually padding).") boolean includeAllSections,
             @Param(value = "name_substring", defaultValue = "",
                    description = "Optional substring match against the symbol's display line (case-insensitive). Empty = no substring filter.") String nameSubstring,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         // Normalize filter axes (case-insensitive, default `all`).
         String fSym = (filter == null || filter.isEmpty()) ? "all" : filter.toLowerCase();
         String fType = (typeFilter == null || typeFilter.isEmpty()) ? "all" : typeFilter.toLowerCase();
@@ -764,11 +742,7 @@ public class ListingService {
                                + "full unpaged count.") int limit,
             @Param(value = "include_all_sections", defaultValue = "false",
                    description = "By default only data sections are scanned, matching list_globals.") boolean includeAllSections,
-            @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         SymbolTable symbolTable = program.getSymbolTable();
         Listing listing = program.getListing();
         FunctionManager functionManager = program.getFunctionManager();
@@ -819,21 +793,6 @@ public class ListingService {
         return ServiceUtils.paged("shadowed", out, offset, limit);
     }
 
-    /** Backward-compat overload preserving the pre-5.7.x signature
-     *  (single substring filter only). The legacy `filter` param is now
-     *  the substring matcher; new callers should use the full overload
-     *  to access the defined/undefined axis filters. */
-    public Response listGlobals(int offset, int limit, String filter,
-                                String programName) {
-        return listGlobals(offset, limit,
-                /* filter (axis) */ "all",
-                /* type_filter */ "all",
-                /* min_xrefs */ 1,
-                /* include_all_sections */ false,
-                /* name_substring (legacy filter param) */ filter,
-                programName);
-    }
-
     /** Whether {@code block} is a data section (.data/.rdata/.bss/etc.) — an
      *  initialized non-executable block, or the conventional .bss name. */
     private static boolean isDataBlock(MemoryBlock block) {
@@ -853,11 +812,7 @@ public class ListingService {
 
     @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing", access = ToolAccess.READ_ONLY)
     public Response getEntryPoints(
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
+            @Param(value = "program", defaultValue = "") Program program) {
         List<Map<String, Object>> entryPoints = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
 
@@ -1071,28 +1026,20 @@ public class ListingService {
             @Param(value = "address", paramType = "address",
                    description = "Address of the external location, as 0x<hex> (default space) or "
                                + "<space>:<hex> (e.g. mem:1000). This is the selector: matching is done "
-                               + "on the address alone, so a dll_name with no address finds nothing.") String address,
+                               + "on the address alone, so a dll_name with no address finds nothing.") Address addr,
             @Param(value = "dll_name", defaultValue = "",
                    description = "External library name (as list_program_items(kind=imports) or "
                                + "kind=external_locations reports it) to scope the search to. Omit to scan every library. It narrows the "
                                + "search only — it cannot select an entry by itself.") String dllName,
-            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
+            @Param(value = "program", defaultValue = "") Program program) {
 
         ExternalManager extMgr = program.getExternalManager();
-        Address addr = null;
-        if (address != null && !address.isBlank()) {
-            addr = ServiceUtils.parseAddress(program, address);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-        }
 
         if (dllName != null && !dllName.isEmpty()) {
             ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
             while (iter.hasNext()) {
                 ExternalLocation extLoc = iter.next();
-                if (matchesExternalLocation(extLoc, addr, null)) {
+                if (matchesExternalLocation(extLoc, addr)) {
                     return Response.ok(externalLocationToMap(extLoc, dllName));
                 }
             }
@@ -1103,18 +1050,16 @@ public class ListingService {
                 ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
-                    if (matchesExternalLocation(extLoc, addr, address)) {
+                    if (matchesExternalLocation(extLoc, addr)) {
                         return Response.ok(externalLocationToMap(extLoc, libName));
                     }
                 }
             }
-            return Response.ok(JsonHelper.mapOf("address", address));
+            return Response.ok(JsonHelper.mapOf("address", addr != null ? addr.toString() : null));
         }
     }
 
-    public Response getExternalLocationDetails(String address, String dllName) {
-        return getExternalLocationDetails(address, dllName, null);
-    }
+
 
     private static Map<String, Object> externalLocationToMap(ExternalLocation extLoc, String libName) {
         Map<String, Object> entry = new LinkedHashMap<>();
@@ -1135,15 +1080,44 @@ public class ListingService {
         return entry;
     }
 
-    private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr, String rawAddress) {
+    private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr) {
         Address extAddr = extLoc.getAddress();
-        if (addr != null) {
-            return extAddr != null && extAddr.equals(addr);
-        }
-        if (rawAddress == null || rawAddress.isBlank()) {
-            return false;
-        }
-        return extAddr != null && extAddr.toString().equalsIgnoreCase(rawAddress.strip());
+        return extAddr != null && extAddr.equals(addr);
+    }
+
+    @McpTool(path = "/set_equate", method = "POST",
+        description = "Apply, remove or rename equates. Apply replaces other equate names for the same "
+            + "scalar at each selected operand, preserving different scalar values. Select one instruction "
+            + "with address or a function with function_address (name or containing address), never both. "
+            + "Remove with no scope selects references by name and/or value across the program. "
+            + "delete_definition requires name, refuses enum-owned definitions and refuses references "
+            + "outside the selection. Rename requires name and new_name, refuses duplicate names, and "
+            + "preserves every reference. max_hits caps all affected references before any mutation. "
+            + "dry_run previews via rollback.",
+        category = "listing", access = ToolAccess.DESTRUCTIVE)
+    public Response setEquate(
+            @Param(value = "action", source = ParamSource.BODY,
+                   description = "apply | remove | rename") String action,
+            @Param(value = "name", aliases = {"old_name"}, source = ParamSource.BODY, defaultValue = "",
+                   description = "Equate name; required for apply and rename; exact filter for remove") String name,
+            @Param(value = "value", source = ParamSource.BODY, defaultValue = "",
+                   description = "Scalar value: signed decimal, 0x hex, or single character literal") String value,
+            @Param(value = "address", paramType = Param.ADDRESS, source = ParamSource.BODY, defaultValue = "",
+                   description = "Instruction address, mutually exclusive with function_address") Address address,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "Operand index, or -1 for all operands in the selected scope") int operandIndex,
+            @Param(value = "function_address", aliases = {"function", "function_name"},
+                   source = ParamSource.BODY, defaultValue = "",
+                   description = "Function name or containing address; mutually exclusive with address") Function function,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Rename destination; an existing different definition is always refused") String newName,
+            @Param(value = "delete_definition", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Remove only: delete a non-enum named definition if no unselected references remain") boolean deleteDefinition,
+            @Param(value = "max_hits", source = ParamSource.BODY, defaultValue = "1000",
+                   description = "Positive maximum affected scalar operands/references, checked before mutation") int maxHits,
+            @Param(value = "program", defaultValue = "") Program program) {
+        return equates.set(program, action, name, value, address, operandIndex, function,
+            newName, deleteDefinition, maxHits);
     }
 
     // ======================================================================
@@ -1157,7 +1131,7 @@ public class ListingService {
         try {
             return Response.ok(ServiceUtils.convertNumberData(text, size));
         } catch (IllegalArgumentException e) {
-            return Response.err(e.getMessage());
+            return ServiceUtils.fail(e);
         }
     }
 }

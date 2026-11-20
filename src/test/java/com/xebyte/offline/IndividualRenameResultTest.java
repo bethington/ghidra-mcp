@@ -5,7 +5,6 @@ import com.xebyte.core.Response;
 import junit.framework.TestCase;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,8 +16,9 @@ import java.util.Map;
  * the bare string {@code "Variable renamed"}. That comparison was written when
  * the method returned raw text. It has never matched since the response
  * contract moved to structured envelopes: the method returns
- * {@code Response.success("Variable renamed")}, and its {@code toJson()} is
- * {@code {"status":"success","message":"Variable renamed"}}.
+ * {@code Response.successWithWarnings("Variable renamed", …)}, and its
+ * {@code toJson()} is {@code {"status":"success","message":"Variable renamed"}}
+ * (with {@code warnings} only when non-empty).
  *
  * <p>So every successful rename was counted as a failure, its success payload
  * was filed in {@code errors}, {@code variables_renamed} was always 0 -- and
@@ -49,11 +49,8 @@ public class IndividualRenameResultTest extends TestCase {
      * @return the success-with-warnings response
      */
     private static Response successWithWarning() {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("status", "success");
-        data.put("message", "Variable renamed");
-        data.put("warnings", List.of("expected prefix 'dw' for type uint"));
-        return Response.ok(data);
+        return Response.successWithWarnings(
+                "Variable renamed", List.of("expected prefix 'dw' for type uint"));
     }
 
     /**

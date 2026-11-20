@@ -107,7 +107,10 @@ Content that is genuinely text (decompiled C, disassembly listings) is a
 
   **Resolved (2026-07-26):** `get_comment` now emits all five comment kinds
   (`plate`, `pre`, `eol`, `post`, `repeatable`) explicitly on every response --
-  `null` for a kind that was never set, `""` for one explicitly cleared. This
+  `null` for a kind with no comment record: never set, or cleared through
+  `set_comment`, which removes the record instead of storing `""` (a legacy
+  record whose stored text is empty can still read back as `""`; see
+  `tests/conformance/snapshots/get_comment.snap`). This
   needed a kind-specific exception: the shared Gson instance (`JsonHelper`)
   deliberately drops null map values so every *other* endpoint gets
   absent-means-null, and changing that globally would have flipped the

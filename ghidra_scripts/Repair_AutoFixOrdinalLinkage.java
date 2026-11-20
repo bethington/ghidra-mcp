@@ -215,7 +215,7 @@ public class Repair_AutoFixOrdinalLinkage extends GhidraScript {
         Map<String, List<String>> fixesByDll = new LinkedHashMap<>();
 
         for (Map<String, Object> pointer : pointers) {
-            monitor.checkCanceled();
+            monitor.checkCancelled();
             String dll = (String) pointer.get("dll");
             String ordinalName = (String) pointer.get("ordinal_name");
 

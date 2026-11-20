@@ -73,7 +73,7 @@ public class RenameSymbolStrictModeGhidraTest {
 
     @Test
     public void enforceRefusesWithTheReasonAndTheOverride() {
-        Response r = symbols.renameSymbol("0x4010", "counter", "data", "", "", "enforce");
+        Response r = symbols.renameSymbol("0x4010", "counter", "data", "", program, "enforce");
         String json = r.toJson();
         assertTrue(json, json.contains("\"name_quality\""));
         assertTrue(json, json.contains("\"message\""));
@@ -83,7 +83,7 @@ public class RenameSymbolStrictModeGhidraTest {
 
     @Test
     public void warnAppliesTheNameAndReportsTheMiss() {
-        Response r = symbols.renameSymbol("0x4010", "counter", "data", "", "", "warn");
+        Response r = symbols.renameSymbol("0x4010", "counter", "data", "", program, "warn");
         assertTrue(r.toJson(), r instanceof Response.Ok);
         assertFalse(r.toJson(), r.toJson().contains("\"status\":\"rejected\""));
         assertEquals("counter", primaryName());
@@ -91,8 +91,8 @@ public class RenameSymbolStrictModeGhidraTest {
 
     @Test
     public void theOverrideDoesNotOutliveTheCall() {
-        symbols.renameSymbol("0x4010", "counter", "data", "", "", "warn");
-        Response r = symbols.renameSymbol("0x4010", "other", "data", "", "", "enforce");
+        symbols.renameSymbol("0x4010", "counter", "data", "", program, "warn");
+        Response r = symbols.renameSymbol("0x4010", "other", "data", "", program, "enforce");
         assertTrue(r.toJson(), r.toJson().contains("\"name_quality\""));
         assertEquals("counter", primaryName());
     }

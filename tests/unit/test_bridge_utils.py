@@ -45,6 +45,56 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
+class TestUrlPin(unittest.TestCase):
+    """GHIDRA_MCP_PIN_URL keeps the bridge on GHIDRA_MCP_URL when a local Ghidra starts.
+
+    Without it a local instance's socket outranks the configured URL, so opening Ghidra
+    to look at something would silently move every call off the shared headless server.
+    """
+
+    def _live_local_instance(self):
+        import tempfile
+        from pathlib import Path
+
+        folder = Path(tempfile.mkdtemp())
+        (folder / "ghidra-1.sock").touch()
+        return folder
+
+    def test_pinned_ignores_a_local_instance(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery, transport
+
+        folder = self._live_local_instance()
+        with (
+            patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": "1"}),
+            patch.object(transport, "get_socket_dir_candidates", return_value=[folder]) as candidates,
+        ):
+            self.assertEqual(discovery.discover_instances(), [])
+        candidates.assert_not_called()
+
+    def test_unpinned_still_scans_for_local_instances(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery, transport
+
+        with (
+            patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": ""}),
+            patch.object(transport, "get_socket_dir_candidates", return_value=[]) as candidates,
+        ):
+            discovery.discover_instances()
+        candidates.assert_called_once()
+
+    def test_only_a_truthy_value_pins(self):
+        from unittest.mock import patch
+
+        from bridge_mcp_ghidra import discovery
+
+        for value, pinned in (("1", True), ("true", True), ("YES", True), ("0", False), ("", False)):
+            with patch.dict(os.environ, {"GHIDRA_MCP_PIN_URL": value}):
+                self.assertEqual(discovery.url_is_pinned(), pinned, value)
+
+
 class TestTcpPortScan(unittest.TestCase):
     """Test _scan_tcp_for_project (issue #175 + Copilot review): when UDS
     discovery returns nothing (e.g., AF_UNIX unavailable on the host), the
@@ -80,7 +130,7 @@ class TestTcpPortScan(unittest.TestCase):
             def connect(self):
                 pass
 
-            def request(self, method, url):
+            def request(self, method, url, headers=None):
                 pass
 
             def getresponse(self):
@@ -220,7 +270,7 @@ class TestTcpPortScanConcurrency(unittest.TestCase):
                 if self.port not in responding_ports:
                     raise TimeoutError(f"dropped on {self.port}")
 
-            def request(self, method, url):
+            def request(self, method, url, headers=None):
                 pass
 
             def getresponse(self):
@@ -409,10 +459,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
@@ -437,16 +487,18 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
 
-            result = asyncio.run(bridge.connect_instance("wanted"))
+            # A refused selection is a tool error (isError), not a success
+            # carrying an error dict (#652).
+            with self.assertRaises(bridge.dispatch.GhidraToolError) as raised:
+                asyncio.run(bridge.connect_instance("wanted"))
 
-        data = json.loads(result)
-        self.assertIn("error", data)
-        self.assertIn("No instance matching 'wanted'", data["error"])
-        self.assertEqual(data["available"], ["other", "also_other"])
+        message = str(raised.exception)
+        self.assertIn("No instance matching 'wanted'", message)
+        self.assertIn("Available: other, also_other.", message)
         scan.assert_not_called()
 
     def test_uds_match_connects_via_uds_when_supported(self):
@@ -489,10 +541,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.transport, "uds_supported", return_value=False),
             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
@@ -525,10 +577,10 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.transport, "uds_supported", return_value=False),
             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8093") as scan,
-            patch.object(bridge.static_tools, "validate_server_url", return_value=True),
+            patch.object(bridge.connect, "validate_server_url", return_value=True),
             patch.object(bridge.registry, "_fetch_schema", return_value=[]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=0),
-            patch.object(bridge.static_tools, "os") as mock_os,
+            patch.object(bridge.connect, "os") as mock_os,
         ):
             mock_os.getenv.return_value = None
             bridge.state._full_schema = []
@@ -644,7 +696,7 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
         st._default_groups.clear()
         st._default_groups.update({"listing", "function", "program"})
         st._loaded_groups.clear()
-        st._loaded_groups.update({"listing", "function", "program", "decompile-checkout"})
+        st._loaded_groups.update({"listing", "function", "program", "decompile-tree"})
         try:
             with (
                 patch.object(bridge.discovery, "discover_instances", return_value=[inst]),
@@ -654,7 +706,7 @@ class TestTryReconnectTransportRouting(unittest.TestCase):
             ):
                 self.assertTrue(bridge.dispatch._try_reconnect())
             self.assertEqual(register.call_args.kwargs["groups"],
-                             {"listing", "function", "program", "decompile-checkout"})
+                             {"listing", "function", "program", "decompile-tree"})
         finally:
             st._lazy_mode = saved[0]
             st._default_groups.clear()

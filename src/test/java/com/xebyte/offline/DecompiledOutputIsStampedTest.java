@@ -74,16 +74,19 @@ public class DecompiledOutputIsStampedTest extends TestCase {
      * Every method that obtains decompiler C, as {@code File#method}. Keep
      * sorted; the assertion is on the whole map.
      */
+    // On dev the composites decompile in their build*Result helpers, which the
+    // annotated tools call with a resolved Function/Program, and the unreachable
+    // decompileFunctionByAddress / batchDecompileFunctions helpers are gone (206c5c22).
+    // No CALLER_KEYED_BULK producer is left; get_functions' own bulk mode is checked
+    // separately below.
     private static final Map<String, Role> PRODUCERS = new TreeMap<>(Map.of(
-        "AnalysisService#analyzeForDocumentation", Role.EMITS,
-        "AnalysisService#analyzeFunctionComplete", Role.EMITS,
-        "AnalysisService#analyzeFunctionCompleteness", Role.INTERNAL,
-        "DataTypeService#analyzeStructFieldUsage", Role.INTERNAL,
+        "AnalysisService#buildAnalyzeForDocumentationResult", Role.EMITS,
+        "AnalysisService#buildAnalyzeFunctionCompleteResult", Role.EMITS,
+        "AnalysisService#computeFunctionCompleteness", Role.INTERNAL,
+        "DataTypeService#analyzeStructFieldUsageAt", Role.INTERNAL,
         "FunctionFacts#build", Role.EMITS,
         "FunctionFacts#collectCallContext", Role.FEEDS_FACTS_BUILD,
-        "FunctionService#batchDecompileFunctions", Role.CALLER_KEYED_BULK,
-        "FunctionService#decompileFunctionByAddress", Role.EMITS,
-        "FunctionService#forceDecompileAt", Role.EMITS));
+        "FunctionService#forceDecompile", Role.EMITS));
 
     /** Where decompiler C comes from: the whole function, or its token markup. */
     private static final Pattern PRODUCES_C = Pattern.compile(

@@ -64,10 +64,41 @@ public sealed interface Response permits Response.Ok, Response.Err, Response.Tex
      * {@code docs/project-management/MCP_RESPONSE_CONTRACT.md}.
      */
     static Response success(String message) {
+        return success(message, null);
+    }
+
+    /**
+     * Success envelope with extra fields after {@code status} and {@code message}.
+     * {@code extras} may be null or empty. Do not put {@code status} or
+     * {@code message} in extras — those come from the parameters.
+     */
+    static Response success(String message, java.util.Map<String, Object> extras) {
         java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("status", "success");
         out.put("message", message);
+        if (extras != null) {
+            for (java.util.Map.Entry<String, Object> e : extras.entrySet()) {
+                String k = e.getKey();
+                if ("status".equals(k) || "message".equals(k)) {
+                    continue;
+                }
+                out.put(k, e.getValue());
+            }
+        }
         return new Ok(out);
+    }
+
+    /**
+     * Success envelope that includes {@code warnings} only when the list is
+     * non-empty — one shape either way, optional key.
+     */
+    static Response successWithWarnings(String message, java.util.List<String> warnings) {
+        if (warnings == null || warnings.isEmpty()) {
+            return success(message);
+        }
+        java.util.Map<String, Object> extras = new java.util.LinkedHashMap<>();
+        extras.put("warnings", warnings);
+        return success(message, extras);
     }
 
     /**

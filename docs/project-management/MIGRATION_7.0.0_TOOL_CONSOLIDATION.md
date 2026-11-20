@@ -143,6 +143,8 @@ keeps its own single-item call unchanged and gains the removed tool's job.
 | `debugger_step_into()` | `debugger_step` | `debugger_step(kind="into")` |
 | `debugger_step_over()` | `debugger_step` | `debugger_step(kind="over")` |
 | `debugger_step_out()` | `debugger_step` | `debugger_step(kind="out")` |
+| `decompile_tree_start(tree)` | `decompile_tree_run` | `decompile_tree_run(tree, action="start")` |
+| `decompile_tree_stop(tree)` | `decompile_tree_run` | `decompile_tree_run(tree, action="stop")` |
 | `get_function_tags(function)` | `get_functions` | `get_functions(function, fields="tags")`; `tags` is a list of names, and is part of the default bundle |
 | `search_functions_by_tag(tag)` | `find_functions` | `find_functions(tag=...)`, or several names for any-of; every result also carries its `tags` |
 | `create_function_tag(name, comment)` | `add_function_tag` | `add_function_tag(function, tags=name, tag_comments={name: comment})`, or `apply_documentation(tags=..., tag_comments=...)`; attaching creates the definition |

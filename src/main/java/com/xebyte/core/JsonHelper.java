@@ -42,7 +42,7 @@ public final class JsonHelper {
 
     /** Create a standard error JSON response: {"error": "message"} */
     public static String errorJson(String message) {
-        return GSON.toJson(Map.of("error", message != null ? message : "Unknown error"));
+        return toJson(mapOf("error", message != null ? message : "Unknown error"));
     }
 
     /**

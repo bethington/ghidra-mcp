@@ -22,7 +22,7 @@ public class Project_CreateFunctionsFromArray extends GhidraScript {
         Address base = currentAddress;
 
         for (int i = 0; i < 52; i++) {
-            monitor.checkCanceled();
+            monitor.checkCancelled();
             int number = currentProgram.getMemory().getInt(base.add((long)i * 4));
             Address addr = currentProgram.getAddressFactory().getDefaultAddressSpace()
                 .getAddress(Integer.toUnsignedLong(number));
