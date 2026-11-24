@@ -25,7 +25,7 @@ on:
 
 env:
   GHIDRA_VERSION: "12.2"
-  GHIDRA_DATE: 20260921
+  GHIDRA_DATE: 20261016
 
 # OSSF Scorecard Token-Permissions: default to read-only. The
 # create-release job elevates to contents:write for tag + asset
