@@ -34,7 +34,7 @@ public class HeadlessUsageSocketDirTest extends TestCase {
         String usage = usage();
         assertTrue(usage.contains("$TMPDIR/ghidra-mcp-<user>/"));
         assertTrue(usage.contains("java.io.tmpdir"));
-        assertTrue(usage.contains("/tmp"));
+        assertTrue(usage.contains("then /tmp"));
     }
 
     public void testUsageNamesSocketFile() {
