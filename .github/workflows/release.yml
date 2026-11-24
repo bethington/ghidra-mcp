@@ -231,7 +231,8 @@ jobs:
 
         1. **Install the Ghidra Plugin:**
            - In Ghidra: **File > Install Extensions > Add** and select \`GhidraMCP-${{ steps.version.outputs.VERSION }}.zip\`
-           - Restart Ghidra and enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP**
+           - Restart Ghidra and enable the plugin in the project window: **File > Configure > Utility > Configure > GhidraMCPPlugin**
+           - The server starts with the plugin. Check it: \`curl http://127.0.0.1:8089/check_connection\`
 
         2. **Install the Python bridge (ships its own dependencies):**
            \`\`\`bash
@@ -311,8 +312,8 @@ jobs:
 
         1. Download **GhidraMCP-${VERSION}.zip** below
         2. In Ghidra: **File > Install Extensions > Add** and select the ZIP
-        3. Restart Ghidra, enable plugin: **File > Configure > Configure All Plugins > GhidraMCP**
-        4. Start server: **Tools > GhidraMCP > Start MCP Server**
+        3. Restart Ghidra, enable plugin in the project window: **File > Configure > Utility > Configure > GhidraMCPPlugin**
+        4. The server starts with the plugin. Check it: \`curl http://127.0.0.1:8089/check_connection\` (if it is stopped: **Tools > GhidraMCP > Start Server**)
         5. Install Python bridge: \`uv tool install ./ghidra_mcp_bridge-${VERSION}-py3-none-any.whl\` (or \`pip install\` the same wheel)
         6. Run: \`bridge-mcp-ghidra\` (or \`python -m bridge_mcp_ghidra\`)
 

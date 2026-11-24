@@ -49,7 +49,7 @@ def require_server(server_available):
     """Skip all tests in module if server is not available."""
     if not server_available:
         pytest.skip(
-            "MCP server is not running (start with Tools → GhidraMCP → Start MCP Server)"
+            "MCP server is not running (start with Tools → GhidraMCP → Start Server)"
         )
 
 

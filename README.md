@@ -30,6 +30,11 @@ Every [release](https://github.com/bethington/ghidra-mcp/releases) ships the two
 pieces you need: the Ghidra extension (`GhidraMCP-<version>.zip`) and the MCP
 bridge (`ghidra_mcp_bridge-<version>-py3-none-any.whl`).
 
+> **You need both.** The extension serves HTTP from inside Ghidra; the bridge is
+> the MCP server your AI client talks to. The bridge is current and supported.
+> There is no native MCP server yet: one that needs no bridge is planned in
+> [#114](https://github.com/bethington/ghidra-mcp/issues/114) and has not shipped.
+
 1. **Install the prerequisites:** [Ghidra 12.2](https://github.com/NationalSecurityAgency/ghidra/releases),
    Java 25 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
    The extension only loads in the exact Ghidra version it was built for.
@@ -41,13 +46,13 @@ bridge (`ghidra_mcp_bridge-<version>-py3-none-any.whl`).
 
    ```bash
    curl http://127.0.0.1:8089/check_connection
-   # {"status": "ok", "server_kind": "gui", "version": "7.0.0"}
+   # {"status": "ok", "server_kind": "gui", "version": "7.1.0"}
    ```
 
 4. **Install the bridge** (copy the wheel's link from the same release page):
 
    ```bash
-   uv tool install https://github.com/bethington/ghidra-mcp/releases/download/v7.0.0/ghidra_mcp_bridge-7.0.0-py3-none-any.whl
+   uv tool install https://github.com/bethington/ghidra-mcp/releases/download/v7.1.0/ghidra_mcp_bridge-7.1.0-py3-none-any.whl
    ```
 
 5. **Point your MCP client at it**, using the absolute path (`which
@@ -163,7 +168,7 @@ for you.
 
 - **Java 25 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+** for the `python -m tools.setup` commands below (Maven is their default backend). Not needed if you build with the committed Gradle wrapper instead — see step 6
-- **Ghidra 12.2** (or compatible version)
+- **Ghidra 12.2**
 - **Python 3.10+** with [uv](https://docs.astral.sh/uv/) (recommended) or pip + venv
 
 > Shared Ghidra Server users: Ghidra 12.2 clients enforce TLS server
@@ -271,7 +276,7 @@ for you.
 2. **Install system prerequisites** (if not already installed):
 
    ```bash
-   sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip python3-venv curl jq unzip
+   sudo apt update && sudo apt install -y openjdk-25-jdk maven python3 python3-pip python3-venv curl jq unzip
    ```
 
    > **Debian/Kali/Ubuntu 23.04+ note (PEP 668):** these distros mark the system
@@ -712,7 +717,7 @@ Screenshots of every step: [docs/INSTALL_GUI.md](docs/INSTALL_GUI.md).
 ```bash
 # Quick health check
 curl http://127.0.0.1:8089/check_connection
-# Expected: {"status": "ok", "server_kind": "gui", "version": "7.0.0", "program": "<name>"}
+# Expected: {"status": "ok", "server_kind": "gui", "version": "7.1.0", "program": "<name>"}
 # ("program" appears only while a program is current)
 
 # Fuller health: build details, uptime, open program count, HTTP pool, memory
@@ -1305,9 +1310,6 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (220 catalog entries)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (216 endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 201 endpoints, no GUI required
-- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (220 catalog entries)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (216 endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 201 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -1523,7 +1525,7 @@ docker compose up -d --build
 
 # Test connection (/check_connection and /mcp/health need no token)
 curl http://localhost:8089/check_connection
-# {"status": "ok", "server_kind": "headless", "version": "7.0.0"}
+# {"status": "ok", "server_kind": "headless", "version": "7.1.0"}
 ```
 
 This starts the headless server on `:8089` and the MCP bridge on `:8081`
