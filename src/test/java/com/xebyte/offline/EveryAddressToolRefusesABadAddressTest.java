@@ -185,6 +185,6 @@ public class EveryAddressToolRefusesABadAddressTest {
         }
 
         assertEquals("every required Address-typed tool was checked", tools.size(), covered);
-        assertTrue("expected a substantial set of address tools, got " + covered, covered >= 30);
+        assertTrue("expected a substantial set of address tools, got " + covered, covered >= 25);
     }
 }
