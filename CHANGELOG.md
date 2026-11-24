@@ -4,6 +4,17 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+Changes on `dev` after 7.1.0.
+
+### Fixed — similar function names no longer block renames
+
+- `rename_function` treats token-subset similarity as an advisory warning even in
+  enforce mode. Descriptive names such as `GetNamedMatrixAlignmentTransformFlags`
+  are no longer rejected merely because `GetTransform` exists. Other naming-quality
+  and Function ID checks remain enforced, as does Ghidra's symbol validation.
+
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
 **220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by
