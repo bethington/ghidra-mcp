@@ -16,6 +16,16 @@ serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
 `/tmp`), as the resolver and the bridge's discovery always did. The help now
 lists both directories; where the socket goes is unchanged.
 
+### Fixed: auto-connect no longer counts an empty tool schema as connected (#640)
+
+A Ghidra that answered `/mcp/schema` with no tools counted as a
+successful auto-connect, which stopped the background retry and left
+the bridge serving only its static tools. An empty schema now counts
+as a failed connect on the UDS, discovered-TCP and configured-URL
+paths, so the retry keeps running until the server reports tools.
+Facade mode is unchanged: it caches a nonempty schema and registers
+nothing by design, and that still counts as connected.
+
 ### Fixed — OpenCode MCP connection stability
 
 - Bound serialized MCP responses to 8 MiB, including JSON escaping and UTF-8
