@@ -109,7 +109,7 @@ uv: available
 MCP client spawn commands:
   ...                        (advisory; how your MCP client would spawn the bridge)
 Java: available on PATH
-Project version: 7.0.0
+Project version: 7.1.0
 Ghidra version from pom.xml: 12.2
 No Ghidra path configured; skipped Ghidra-specific preflight checks.
 ```
@@ -156,7 +156,7 @@ TOOLS_SETUP_BACKEND=gradle python -m tools.setup preflight --ghidra-path <dir>
 
 ```text
 > Task :verifyVersion
-Project version         : 7.0.0
+Project version         : 7.1.0
 Ghidra version (pom.xml): 12.2
 Ghidra install dir      : ...
 Ghidra version (install): 12.2

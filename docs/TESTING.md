@@ -262,7 +262,7 @@ The normal CI suite runs on GitHub-hosted runners.
 
 The live release regression requires a self-hosted Windows runner with:
 
-- Ghidra 12.1 installed.
+- Ghidra 12.2 installed.
 - Java 25.
 - Python 3.13.
 - Maven.

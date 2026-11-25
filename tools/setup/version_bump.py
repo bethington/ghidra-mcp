@@ -93,6 +93,30 @@ def build_rules(
             rf"GhidraMCP Headless Server v{escaped_old}",
             f"GhidraMCP Headless Server v{new_version}",
         ),
+        # The install examples a reader copies. The 7.1.0 bump left all of these
+        # at 7.0.0: the Quickstart told people to install the previous wheel and
+        # showed the previous version as the expected /check_connection answer.
+        # test_readme_install_pins_match_pom holds them to pom.xml between bumps.
+        ReplacementRule(
+            repo_root / "README.md",
+            r'("server_kind": "(?:gui|headless)", "version": ")\d+\.\d+\.\d+(")',
+            rf"\g<1>{new_version}\g<2>",
+        ),
+        ReplacementRule(
+            repo_root / "README.md",
+            r"(releases/download/v)\d+\.\d+\.\d+(/ghidra_mcp_bridge-)\d+\.\d+\.\d+(-py3)",
+            rf"\g<1>{new_version}\g<2>{new_version}\g<3>",
+        ),
+        ReplacementRule(
+            repo_root / "CONTRIBUTING.md",
+            r"(Project version\s*:\s*)\d+\.\d+\.\d+",
+            rf"\g<1>{new_version}",
+        ),
+        ReplacementRule(
+            repo_root / "docs/INSTALL_GUI.md",
+            r"(unzip -p GhidraMCP-)\d+\.\d+\.\d+(\.zip)",
+            rf"\g<1>{new_version}\g<2>",
+        ),
         ReplacementRule(
             repo_root / "AGENTS.md",
             r"(\*\*Version\*\*:\s*)\d+\.\d+\.\d+",

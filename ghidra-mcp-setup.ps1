@@ -1,6 +1,6 @@
 # GhidraMCP Deployment Script
 # Automatically builds, installs, and configures the GhidraMCP plugin
-# Target: Ghidra 12.1
+# Target: Ghidra 12.2
 
 <#
 .SYNOPSIS
@@ -58,7 +58,7 @@ function Write-LogWarning { param($msg) Write-Host "[WARNING] $msg" -ForegroundC
 function Write-LogError { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
 # Configuration
-$DefaultGhidraVersion = "12.1"
+$DefaultGhidraVersion = "12.2"
 $PluginVersion = "5.2.0"
 
 function Show-Usage {
@@ -955,7 +955,7 @@ $ghidraVersionDir = $null
 $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
 if (Test-Path $ghidraUserBase) {
-    # Extract version from GhidraPath (e.g., "F:\ghidra_12.2_PUBLIC" -> "12.1")
+    # Extract version from GhidraPath (e.g., "F:\ghidra_12.2_PUBLIC" -> "12.2")
     $targetVersion = $null
     if ($GhidraPath -match "ghidra_([0-9.]+)") {
         $targetVersion = $Matches[1]
@@ -995,7 +995,7 @@ if (-not $ghidraVersionDir) {
     if ($GhidraPath -match "ghidra_([0-9.]+)") {
         $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
     } else {
-        $ghidraVersionDir = "ghidra_12.1_PUBLIC"
+        $ghidraVersionDir = "ghidra_12.2_PUBLIC"
     }
     Write-LogInfo "Using Ghidra version dir: $ghidraVersionDir"
 }
@@ -1196,15 +1196,15 @@ if ($NoAutoPrereqs) {
         Write-Host "   Optional debugger dependencies were auto-checked/installed."
     }
 }
-Write-Host "2. Start Ghidra (plugin is auto-activated in CodeBrowser)"
+Write-Host "2. Start Ghidra (the plugin is auto-activated and the server starts with it)"
 Write-Host "3. If plugin isn't loaded after a fresh Ghidra install:"
-Write-Host "      - In CodeBrowser: File > Configure > Configure All Plugins > GhidraMCP"
+Write-Host "      - In the project window: File > Configure > Utility > Configure > GhidraMCPPlugin"
 Write-Host "      - Check the checkbox to enable"
 Write-Host "4. To configure the server port:"
 Write-Host "      - In CodeBrowser: Edit > Tool Options > GhidraMCP HTTP Server"
 Write-Host ""
 Write-LogInfo "Usage:"
-Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
+Write-Host "   Ghidra: Tools > GhidraMCP > Server Status (Start Server if it is stopped)"
 Write-Host "   Python: uv run bridge-mcp-ghidra (from the project root), or 'python -m bridge_mcp_ghidra'"
 if ($InstallDebuggerDeps) {
     Write-Host "   Debugger: start your external debugger server, then set"

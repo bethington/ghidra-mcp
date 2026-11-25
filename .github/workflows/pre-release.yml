@@ -232,7 +232,7 @@ jobs:
 
         Same as stable releases:
         1. In Ghidra: **File > Install Extensions > Add** and select the ZIP
-        2. Restart Ghidra, enable plugin
+        2. Restart Ghidra, enable plugin in the project window: **File > Configure > Utility > Configure > GhidraMCPPlugin**
         3. \`uv tool install ./${WHEEL}\` (or \`pip install\` the wheel)
         4. \`bridge-mcp-ghidra\` (or \`python -m bridge_mcp_ghidra\`)
 

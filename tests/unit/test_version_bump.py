@@ -209,8 +209,77 @@ def test_build_rules_covers_all_expected_files(tmp_path: Path):
         "AGENTS.md",
         "docs/releases/README.md",
         "uv.lock",
+        "CONTRIBUTING.md",
+        "docs/INSTALL_GUI.md",
     }
     assert expected.issubset(paths), f"Missing files: {expected - paths}"
+
+
+def test_bump_rewrites_the_install_examples(tmp_path: Path):
+    """The examples a reader copies: the wheel URL, the expected /check_connection
+    answer, the sample preflight output and the extension zip name."""
+    from tools.setup.version_bump import apply_version_bump
+
+    (tmp_path / "README.md").write_text(
+        f'# {{"status": "ok", "server_kind": "gui", "version": "{OLD}"}}\n'
+        f'# {{"status": "ok", "server_kind": "headless", "version": "{OLD}"}}\n'
+        f"uv tool install https://github.com/o/r/releases/download/v{OLD}/"
+        f"ghidra_mcp_bridge-{OLD}-py3-none-any.whl\n"
+        f"The migration guide for {OLD} stays as written.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        f"Project version: {OLD}\nProject version         : {OLD}\n", encoding="utf-8"
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "INSTALL_GUI.md").write_text(
+        f"unzip -p GhidraMCP-{OLD}.zip GhidraMCP/extension.properties\n"
+        f"![chooser with GhidraMCP-{OLD}.zip selected](shot.png)\n",
+        encoding="utf-8",
+    )
+
+    apply_version_bump(tmp_path, NEW, old_version=OLD)
+
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert readme.count(f'"version": "{NEW}"') == 2
+    assert f"download/v{NEW}/ghidra_mcp_bridge-{NEW}-py3" in readme
+    # Prose that names a past release is history, not a pin.
+    assert f"The migration guide for {OLD} stays as written." in readme
+
+    contributing = (tmp_path / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert OLD not in contributing and contributing.count(NEW) == 2
+
+    install = (tmp_path / "docs" / "INSTALL_GUI.md").read_text(encoding="utf-8")
+    assert f"unzip -p GhidraMCP-{NEW}.zip" in install
+    # The alt text describes a screenshot, which a bump does not retake.
+    assert f"GhidraMCP-{OLD}.zip selected" in install
+
+
+def test_readme_install_pins_match_pom():
+    """Between bumps, nothing else notices these going stale: after the 7.1.0 bump
+    the Quickstart still installed the 7.0.0 wheel and showed 7.0.0 as the
+    expected answer, and every check stayed green."""
+    from tools.setup.versioning import read_pom_versions
+
+    repo_root = Path(__file__).resolve().parents[2]
+    version = read_pom_versions(repo_root).project_version
+
+    found: dict[str, set[str]] = {}
+    for rel, pattern in (
+        ("README.md", r'"server_kind": "(?:gui|headless)", "version": "(\d+\.\d+\.\d+)"'),
+        ("README.md", r"releases/download/v(\d+\.\d+\.\d+)/ghidra_mcp_bridge-"),
+        ("README.md", r"/ghidra_mcp_bridge-(\d+\.\d+\.\d+)-py3"),
+        ("CONTRIBUTING.md", r"Project version\s*:\s*(\d+\.\d+\.\d+)"),
+        ("docs/INSTALL_GUI.md", r"unzip -p GhidraMCP-(\d+\.\d+\.\d+)\.zip"),
+    ):
+        text = (repo_root / rel).read_text(encoding="utf-8")
+        hits = set(re.findall(pattern, text))
+        # A pattern that matches nothing would pass forever, pinning nothing.
+        assert hits, f"{rel}: no match for {pattern!r}; the example moved or was reworded"
+        found[f"{rel} :: {pattern}"] = hits
+
+    stale = {where: hits for where, hits in found.items() if hits != {version}}
+    assert not stale, f"install examples disagree with pom.xml {version}: {stale}"
 
 
 def test_apply_version_bump_preserves_crlf(tmp_path: Path):

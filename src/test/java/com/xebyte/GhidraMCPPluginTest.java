@@ -17,7 +17,7 @@ import java.time.Duration;
  * Prerequisites:
  * - Ghidra must be running with GhidraMCPPlugin enabled
  * - A program must be loaded in Ghidra
- * - MCP HTTP server must be started (Tools > GhidraMCP > Start MCP Server)
+ * - MCP HTTP server must be started (Tools > GhidraMCP > Start Server)
  */
 public class GhidraMCPPluginTest extends TestCase {
 
@@ -44,7 +44,7 @@ public class GhidraMCPPluginTest extends TestCase {
                 System.out.println("1. Start Ghidra");
                 System.out.println("2. Load a program");
                 System.out.println("3. Enable GhidraMCP plugin");
-                System.out.println("4. Start MCP server (Tools > GhidraMCP > Start MCP Server)");
+                System.out.println("4. Start MCP server (Tools > GhidraMCP > Start Server)");
                 System.out.println("5. Re-run tests");
                 System.out.println("===================================");
             }
