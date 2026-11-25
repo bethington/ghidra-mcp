@@ -4,6 +4,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+Changes on `dev` after 7.1.0.
+
+### Fixed: headless `--help` names the fallback socket directory (#653)
+
+The help said the server always serves on
+`$XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock`. With `XDG_RUNTIME_DIR` unset it
+serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
+`/tmp`), as the resolver and the bridge's discovery always did. The help now
+lists both directories; where the socket goes is unchanged.
+
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
 **220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by
@@ -23,14 +35,6 @@ version); see "Ghidra 12.2 and Java 25 are now the supported target" below.
 - The structure/enum wrong-kind refusals and several error texts are reworded.
 
 Each change is described in its entry below.
-
-### Fixed: headless `--help` names the fallback socket directory (#653)
-
-The help said the server always serves on
-`$XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock`. With `XDG_RUNTIME_DIR` unset it
-serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
-`/tmp`), as the resolver and the bridge's discovery always did. The help now
-lists both directories; where the socket goes is unchanged.
 
 ### Fixed: recovered variable type persistence (#642)
 
