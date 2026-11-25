@@ -10,7 +10,7 @@ slips, and this project has one maintainer. What it does carry is a status per
 theme, and a section for work that is explicitly **not planned**, which is the
 part that lets someone stop waiting.
 
-_Last updated: 2026-10-07, against `dev` while preparing 7.0.0-rc.2. For the tool inventory see
+_Last updated: 2026-11-24, against `dev` after 7.1.0. For the tool inventory see
 [`tests/endpoints.json`](tests/endpoints.json); for architecture see
 [`CLAUDE.md`](CLAUDE.md); for how to build and test see
 [`CONTRIBUTING.md`](CONTRIBUTING.md)._
@@ -59,8 +59,7 @@ reading the docs. The core groups loaded on connect are `listing`, `function`
 and `program` — 70 endpoints plus the 8 static bridge tools. `--no-lazy`
 restores eager registration for clients that ignore `tools/list_changed`.
 
-Issue #440 is still open: the fix shipped in the 7.0.0-rc.1 pre-release and
-has not reached a stable release yet.
+Issue #440 is closed: the fix shipped in 7.0.0.
 
 **Next.** The post-rc.1 pass was that audit. Further merges wait for the 8.0.0
 breaking window rather than landing piecemeal.
@@ -88,8 +87,7 @@ client's `PATH` does not include `~/.local/bin` and the failure surfaced only as
 `spawn ENOENT` (#441, PR #456). `preflight` now resolves and prints the absolute
 launcher path to put in a client config.
 
-Issues #399 and #441 are still open; both fixes shipped in 7.0.0-rc.1 and
-neither has reached a stable release.
+Issues #399 and #441 are closed; both fixes shipped in 7.0.0.
 
 Also done, after rc.1 (#553): a bare `OPTIONS /mcp` is answered rather than
 refused, session-less probes no longer leave sessions behind, failures carry
@@ -152,8 +150,7 @@ real socket with **no Ghidra installed**. The read-only integration file runs
 against it (55 pass, 16 skip, 12 of them documented gaps). Its limits are written down in
 `tests/offline/README.md` and matter: it proves the bridge speaks the protocol
 and that shapes match the recordings, and it proves nothing about what Ghidra
-does today. The issue is still open pending a stable release (it shipped in
-7.0.0-rc.1).
+does today. The issue is closed; it shipped in 7.0.0.
 
 That tier immediately earned itself. An AST check of every integration HTTP
 call against the catalog and schema found **ten** wrong parameter names in the
@@ -245,9 +242,8 @@ happens in one deliberate push or not at all.
   entire language runtime, and the `spawn ENOENT` class of problem from the
   install path. It is an architectural change, not a quick fix, and it is not
   started.
-- **Offline test fixtures for CI (#112).** Landed in 7.0.0 — see theme 4. Kept
-  here until the issue is closed, so this list and the issue tracker do not
-  disagree.
+- **Offline test fixtures for CI (#112).** Landed in 7.0.0 and the issue is
+  closed — see theme 4.
 
 ## Not planned
 

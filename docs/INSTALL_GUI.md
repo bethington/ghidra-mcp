@@ -26,7 +26,7 @@ The Gradle build stamps the Ghidra version from the installation you pass in
 check the stamp before installing if you have more than one Ghidra around:
 
 ```bash
-unzip -p GhidraMCP-7.0.0.zip GhidraMCP/extension.properties | grep ^version
+unzip -p GhidraMCP-7.1.0.zip GhidraMCP/extension.properties | grep ^version
 ```
 
 A stock Ghidra installation looks like this. You do not put anything in here;

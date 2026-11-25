@@ -43,7 +43,7 @@ def require_server_and_checkout(server_available, server_url):
     """Skip the module when Ghidra is down or tree tools are undeployed."""
     if not server_available:
         pytest.skip(
-            "MCP server is not running (start with Tools → GhidraMCP → Start MCP Server)"
+            "MCP server is not running (start with Tools → GhidraMCP → Start Server)"
         )
     try:
         resp = requests.get(f"{server_url}/mcp/schema", timeout=10)
