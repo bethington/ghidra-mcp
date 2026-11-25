@@ -16,6 +16,16 @@ serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
 `/tmp`), as the resolver and the bridge's discovery always did. The help now
 lists both directories; where the socket goes is unchanged.
 
+### Fixed — OpenCode MCP connection stability
+
+- Bound serialized MCP responses to 8 MiB, including JSON escaping and UTF-8
+  encoding, so large tool results cannot exceed OpenCode's 10 MiB stdio buffer
+  and disconnect the bridge. Oversized results return an explicit error without
+  truncation or retrying the operation; HTTP response buffering is also bounded.
+- Cancel bridge server requests without the SDK 1.28.1's late cancellation
+  response, avoiding OpenCode's "unknown message ID" warnings while preserving
+  cancellation and request cleanup. SDK client behavior is unchanged.
+
 ## v7.1.0 - 2026-11-18 — minor: Ghidra 12.2 and Java 25, decompiler symbols and equates, function resources, the decompilation tree, and fixes
 
 **220 tools** — 216 served by the GUI plugin, 201 by the headless server, 197 by
