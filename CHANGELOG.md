@@ -4,7 +4,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v7.2.0 (unreleased)
 
 Changes on `dev` after 7.1.0.
 
