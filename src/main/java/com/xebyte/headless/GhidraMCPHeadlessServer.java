@@ -183,7 +183,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
     }
 
-    private void printUsage() {
+    public static void printUsage() {
         System.out.println("GhidraMCP Headless Server v" + VersionInfo.getVersion());
         System.out.println();
         System.out.println("Usage: java -cp <ghidra-mcp jar><sep><Ghidra jars> com.xebyte.headless.GhidraMCPHeadlessServer [options]");
@@ -212,8 +212,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         System.out.println("  # Start server with a binary file");
         System.out.println("  ... GhidraMCPHeadlessServer --file /path/to/binary.exe");
         System.out.println();
-        System.out.println("Always serves on $XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock, where the");
-        System.out.println("bridge discovers it; TCP additionally at http://<address>:<port>/ when asked.");
+        System.out.println("Always serves a Unix socket, ghidra-<pid>.sock, where the bridge discovers it:");
+        System.out.println("  $XDG_RUNTIME_DIR/ghidra-mcp/   when XDG_RUNTIME_DIR is set, otherwise");
+        System.out.println("  $TMPDIR/ghidra-mcp-<user>/     with java.io.tmpdir, then /tmp, in place of");
+        System.out.println("                                 $TMPDIR when TMPDIR is unset too");
+        System.out.println("TCP additionally at http://<address>:<port>/ when asked.");
     }
 
     private void initializeGhidra(GhidraApplicationLayout layout) throws Exception {

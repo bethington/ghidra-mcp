@@ -24,6 +24,14 @@ version); see "Ghidra 12.2 and Java 25 are now the supported target" below.
 
 Each change is described in its entry below.
 
+### Fixed: headless `--help` names the fallback socket directory (#653)
+
+The help said the server always serves on
+`$XDG_RUNTIME_DIR/ghidra-mcp/ghidra-<pid>.sock`. With `XDG_RUNTIME_DIR` unset it
+serves from `$TMPDIR/ghidra-mcp-<user>/` instead (then `java.io.tmpdir`, then
+`/tmp`), as the resolver and the bridge's discovery always did. The help now
+lists both directories; where the socket goes is unchanged.
+
 ### Fixed: recovered variable type persistence (#642)
 
 - Type and rename decompiler-only locals through their recovered symbols in one
