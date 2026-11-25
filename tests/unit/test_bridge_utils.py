@@ -352,8 +352,56 @@ class TestAutoConnectRetry(unittest.TestCase):
 
         with (
             patch.object(static_tools.discovery, "discover_instances", return_value=[]),
-            patch.object(static_tools.registry, "_fetch_schema", return_value={}),
+            patch.object(static_tools.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(static_tools.registry, "register_tools_from_schema", return_value=7),
+            patch.object(static_tools.state, "set_connection_snapshot"),
+        ):
+            self.assertIs(static_tools._auto_connect(), True)
+    def test_auto_connect_empty_schema_reports_false(self):
+        """An empty schema is a server that is not ready, not a connection.
+
+        Reporting True here stops the background retry and leaves the
+        bridge serving only its static tools (#640).
+        """
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools.discovery, "discover_instances", return_value=[]),
+            patch.object(static_tools.registry, "_fetch_schema", return_value=[]),
+            patch.object(static_tools.registry, "register_tools_from_schema") as register,
+        ):
+            self.assertIs(static_tools._auto_connect(), False)
+            register.assert_not_called()
+
+    def test_auto_connect_empty_schema_from_uds_instance_reports_false(self):
+        """The empty-schema rule applies to the UDS path too: the single
+        discovered instance answering with no tools must not count as a
+        connection, and neither may the TCP fallback behind it."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        one = [{"project": "other", "socket": "/other.sock"}]
+        with (
+            patch.object(static_tools.discovery, "discover_instances", return_value=one),
+            patch.object(static_tools.transport, "uds_supported", return_value=True),
+            patch.object(static_tools.registry, "_fetch_schema", return_value=[]),
+            patch.object(static_tools.registry, "register_tools_from_schema") as register,
+        ):
+            self.assertIs(static_tools._auto_connect(), False)
+            register.assert_not_called()
+
+    def test_auto_connect_zero_registered_on_nonempty_schema_reports_true(self):
+        """Facade mode caches a nonempty schema and registers nothing by
+        design. A zero registration count is not the empty-schema case and
+        must still count as connected."""
+        from unittest.mock import patch
+        from bridge_mcp_ghidra import static_tools
+
+        with (
+            patch.object(static_tools.discovery, "discover_instances", return_value=[]),
+            patch.object(static_tools.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
+            patch.object(static_tools.registry, "register_tools_from_schema", return_value=0),
             patch.object(static_tools.state, "set_connection_snapshot"),
         ):
             self.assertIs(static_tools._auto_connect(), True)
@@ -622,7 +670,7 @@ class TestAutoConnectWindowsTcp(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=one),
             patch.object(bridge.transport, "uds_supported", return_value=False),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=7),
         ):
             bridge.state._active_socket = None
