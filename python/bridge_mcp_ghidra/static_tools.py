@@ -492,6 +492,21 @@ async def import_file(
     return result
 
 
+def _fetch_schema_or_raise(connection: state.ConnectionSnapshot) -> list[dict]:
+    """Fetch the tool schema, treating an empty one as a failed connect.
+
+    A server that answers /mcp/schema with no tools is not ready. Reporting
+    success would stop the background retry with no analysis tools
+    registered, which is the false success in #640. Facade mode is
+    unaffected: it caches a nonempty schema and registers nothing by
+    design, and that still counts as connected.
+    """
+    schema = registry._fetch_schema(connection=connection)
+    if not schema:
+        raise RuntimeError("Server returned an empty tool schema")
+    return schema
+
+
 def _auto_connect(project: str | None = None) -> bool:
     """Return True after connecting and registering tools for a unique instance."""
     # Try UDS first
@@ -510,7 +525,7 @@ def _auto_connect(project: str | None = None) -> bool:
             )
             logger.info(f"Auto-connecting via UDS to {inst.get('project') or 'unknown'}")
             try:
-                schema = registry._fetch_schema(connection=candidate)
+                schema = _fetch_schema_or_raise(candidate)
                 with state._tool_registry_lock:
                     count = registry.register_tools_from_schema(
                         schema,
@@ -539,7 +554,7 @@ def _auto_connect(project: str | None = None) -> bool:
                 f"{inst.get('project') or 'unknown'} (UDS unavailable on this Python)"
             )
             try:
-                schema = registry._fetch_schema(connection=candidate)
+                schema = _fetch_schema_or_raise(candidate)
                 with state._tool_registry_lock:
                     count = registry.register_tools_from_schema(
                         schema,
@@ -576,7 +591,7 @@ def _auto_connect(project: str | None = None) -> bool:
         return False
     try:
         candidate = state.build_connection_snapshot(mode="tcp", active_tcp=tcp_url)
-        schema = registry._fetch_schema(connection=candidate)
+        schema = _fetch_schema_or_raise(candidate)
         with state._tool_registry_lock:
             count = registry.register_tools_from_schema(
                 schema,

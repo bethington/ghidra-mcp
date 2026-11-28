@@ -891,7 +891,7 @@ class TestAutoConnect(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=instances),
             patch.object(bridge.transport, "uds_supported", return_value=True),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]) as fetch,
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]) as fetch,
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             self.assertTrue(bridge._auto_connect(project="Chosen"))
@@ -936,7 +936,7 @@ class TestAutoConnect(unittest.TestCase):
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
             patch.dict(os.environ, {"GHIDRA_MCP_URL": "http://127.0.0.1:9999"}),
             patch.object(bridge.transport, "tcp_request", return_value=('{"data":{"project":"Chosen"}}', 200)) as info,
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             self.assertTrue(bridge._auto_connect(project="Chosen"))
@@ -974,7 +974,7 @@ class TestAutoConnect(unittest.TestCase):
                     ("http://127.0.0.1:8090", {"project": "Chosen"}),
                 ],
             ),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             os.environ.pop("GHIDRA_MCP_URL", None)
@@ -1011,7 +1011,7 @@ class TestAutoConnect(unittest.TestCase):
                 return_value=[("http://127.0.0.1:8090", {"project": "Chosen", "pid": 1, "project_path": "/a/Chosen"})],
             ),
             patch.object(bridge.transport, "uds_supported", return_value=True),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=1),
         ):
             self.assertTrue(bridge._auto_connect(project="Chosen"))
@@ -1055,7 +1055,7 @@ class TestAutoConnect(unittest.TestCase):
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=one),
             patch.object(bridge.transport, "uds_supported", return_value=True),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=271) as fetch,
         ):
             bridge._auto_connect()
@@ -1124,7 +1124,7 @@ class TestAutoConnect(unittest.TestCase):
 
         with (
             patch.object(bridge.discovery, "discover_instances", return_value=[]),
-            patch.object(bridge.registry, "_fetch_schema", return_value=[]),
+            patch.object(bridge.registry, "_fetch_schema", return_value=[{"name": "demo_tool"}]),
             patch.object(bridge.registry, "register_tools_from_schema", return_value=12),
             patch.dict(os.environ, env, clear=True),
         ):
